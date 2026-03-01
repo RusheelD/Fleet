@@ -6,11 +6,11 @@ Fleet orchestrates AI agents to plan, build, and complete software tasks in GitH
 
 Three-project .NET Aspire solution (`Fleet.slnx`) targeting **net10.0**:
 
-| Project         | Role                                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `Fleet.AppHost` | Aspire orchestrator — wires Redis, the API server, and the Vite frontend. **Entry point for running the app.**             |
+| Project         | Role                                                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `Fleet.AppHost` | Aspire orchestrator — wires Redis, the API server, and the Vite frontend. **Entry point for running the app.**                |
 | `Fleet.Server`  | ASP.NET Core API (MVC controllers). Serves `/api/*` endpoints and static files (`wwwroot`). Uses Redis-backed output caching. |
-| `frontend`      | React 19 + TypeScript SPA built with Vite. Uses **Fluent UI v9** (`@fluentui/react-components`) for all UI.                |
+| `frontend`      | React 19 + TypeScript SPA built with Vite. Uses **Fluent UI v9** (`@fluentui/react-components`) for all UI.                   |
 
 **Data flow:** Browser → Vite dev server (proxies `/api/*` via `SERVER_HTTPS`/`SERVER_HTTP` env vars) → `Fleet.Server` → Redis (output cache).
 
@@ -39,7 +39,8 @@ The Aspire dashboard opens automatically. Do **not** run `Fleet.Server` or the V
 ## Frontend Conventions (frontend/)
 
 - **React 19** with **TypeScript strict mode** (`noUnusedLocals`, `noUnusedParameters`, `erasableSyntaxOnly`)
-- **Fluent UI v9** only — do not use Material UI, Chakra, or other component libraries
+- **ALL UI must use Fluent UI v9 components and icons wherever possible.** Use components from `@fluentui/react-components` and icons from `@fluentui/react-icons`. Do not use Material UI, Chakra, or other component libraries.
+- **Minimize raw HTML in `.tsx` files.** Instead of `<div>`, `<span>`, `<button>`, etc., use their Fluent UI equivalents (`<Card>`, `<Text>`, `<Button>`, `<Divider>`, etc.). Raw HTML elements are only acceptable when no Fluent UI equivalent exists or for structural layout wrappers.
 - Styling: use `makeStyles` from `@fluentui/react-components` and Fluent `tokens` for colors/spacing — no CSS modules, Tailwind, or inline style objects (except trivial one-offs)
 - `FluentProvider` wraps the app in `main.tsx` with automatic dark/light theme
 - API calls go to `/api/*` (proxied by Vite in dev)
@@ -54,8 +55,42 @@ The Aspire dashboard opens automatically. Do **not** run `Fleet.Server` or the V
 ## Adding New Frontend Pages/Components
 
 1. Create components in `frontend/src/`
-2. Use Fluent UI components and `makeStyles` for styling
-3. Fetch data from `/api/*` endpoints
+2. Use Fluent UI components and icons — minimize raw HTML elements
+3. Style with `makeStyles` and Fluent `tokens`
+4. Fetch data from `/api/*` endpoints
+
+## Code Quality — Zero Tolerance for Errors & Warnings
+
+**ALL errors and warnings MUST be fixed** — including compiler errors, linting warnings, TypeScript strict-mode violations, and ESLint issues. No suppression comments (`// eslint-disable`, `// @ts-ignore`, `#pragma warning disable`) unless there is a documented, unavoidable reason.
+
+- **Backend:** Build must produce zero warnings. Run `dotnet build` and fix everything.
+- **Frontend:** `npm run lint` and `npx tsc --noEmit` must both pass with zero warnings. Fix all ESLint and TypeScript errors before committing.
+
+## Coding Standards
+
+### General
+
+- Write clean, readable code — prefer clarity over cleverness
+- Use meaningful, descriptive names for variables, functions, classes, and files
+- Keep functions small and focused on a single responsibility
+- Don't leave dead code, commented-out code, or TODO comments without a linked work item
+- Every public API (controller action, service method, component prop) should have clear intent from its name; add doc comments when the name alone isn't sufficient
+
+### Backend (C#)
+
+- Use `async`/`await` for all I/O-bound operations — never block with `.Result` or `.Wait()`
+- Use records for DTOs and immutable data; classes for stateful services
+- Validate inputs at the controller boundary; trust data in inner service layers
+- Use dependency injection — no `new` for services; register in `Program.cs`
+- Follow C# naming conventions: `PascalCase` for public members, `_camelCase` for private fields
+
+### Frontend (TypeScript/React)
+
+- Use functional components with hooks — no class components
+- Prefer named exports over default exports (except for page-level components)
+- Type everything explicitly — avoid `any`; use `unknown` if the type is truly unknown
+- Co-locate related files (component + styles + tests) in the same folder
+- Destructure props in function signatures for readability
 
 ## Key Files
 
