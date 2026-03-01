@@ -7,7 +7,29 @@
 1. **MVP / Testing phase** — Choose the simplest approach to get agents running (likely server-side orchestration calling LLM APIs directly from the Fleet backend).
 2. **Future** — Migrate to a more scalable/isolated model (e.g., sandboxed containers, GitHub-hosted execution) as requirements solidify.
 
+### Recommended: Containerized Repo Clone
+
+The most scalable approach is to **clone the repo into an isolated container** per agent task:
+
+- Each agent task gets a fresh container with the repo cloned
+- Agents read/write files locally within the container
+- On completion, changes are committed and pushed to GitHub via the GitHub API or Git CLI
+- Containers are ephemeral — destroyed after the task completes
+- This provides isolation (agents can't interfere with each other), security (sandboxed), and scalability (spin up as many as needed)
+
 > The spec documents should be updated once the execution environment is chosen.
+
+## Failure Handling
+
+When an agent fails mid-task (LLM error, GitHub rate limit, code that doesn't compile):
+
+- The **manager agent decides** the recovery strategy:
+  - **Retry** the failed step (e.g., transient LLM error)
+  - **Reassign** the sub-task to a different approach or agent
+  - **Skip** the sub-task if non-critical and continue
+  - **Escalate** to the user if the failure is unrecoverable (via notification)
+- The manager has full context on the task state and can make informed decisions
+- All failures are logged for user visibility in the log stream
 
 ## LLM Providers
 

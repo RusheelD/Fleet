@@ -38,6 +38,7 @@ If no spec documents exist, the user **chats back and forth** with the AI to des
 - **Persistent** — Chat history persists across sessions
 - **Multi-session** — Users can start new chats and navigate back to previous ones
 - **Contextual** — The AI retains understanding of the project, repo structure, and prior decisions
+- **No streaming in MVP** — AI responses are returned as complete messages (not streamed token-by-token). Streaming will be added in a later iteration.
 
 ## Work Items
 
@@ -54,6 +55,24 @@ Work items function essentially like **Azure DevOps (ADO) work items**, with roo
 - Tags / labels
 - Parent / child relationships (hierarchy)
 - Linked GitHub issue (optional — can be synced)
+
+### Work Item States
+
+States are **user-settable** (like ADO — users can manually change any state at any time):
+
+| State | Description |
+| --- | --- |
+| New | Just created, not started |
+| Active | Acknowledged, ready to be worked on |
+| In Progress | Being worked on (by human or agent) |
+| Resolved | Work complete, pending verification |
+| Closed | Verified and done |
+
+When agents are working on a task, the state is automatically updated with an **AI indicator**:
+
+- States show an "(AI)" suffix or an agent tag (e.g., "In Progress (AI)") to distinguish agent-driven work from human work
+- AI-specific sub-states: Planning (AI), In Progress (AI), Resolved (AI)
+- Users can always override the state manually
 
 ### Editability
 

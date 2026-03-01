@@ -41,12 +41,16 @@ Both are **user-configurable** per project:
 
 The MVP includes the **full path** up to and including multi-agent task execution:
 
-1. Auth (OAuth with GitHub, Google, Microsoft)
+1. Auth (OAuth with GitHub, Google, Microsoft via Azure AD B2C)
 2. Project creation & GitHub repo linking
-3. AI chat for spec/work-item generation
+3. AI chat for spec/work-item generation (no streaming — complete responses only)
 4. Work item management
 5. Agent orchestration with multi-agent capabilities (manager + workers)
 6. PR output to GitHub
+
+**Everything is free in the MVP** — no Stripe integration, no billing, no plan enforcement. All users get full capabilities during the MVP phase. Billing is added post-MVP.
+
+Work items board view details (Kanban vs. list vs. hybrid) will be decided during implementation.
 
 ### Deferred (post-MVP)
 
