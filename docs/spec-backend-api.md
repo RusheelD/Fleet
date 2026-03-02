@@ -1,25 +1,91 @@
 # Fleet — Backend API & Data Model
 
+## Architecture: Controllers → Services → Repositories
+
+The backend follows a strict **three-tier layered architecture**:
+
+| Layer | Responsibility | Location |
+| --- | --- | --- |
+| **Controllers** | HTTP endpoints — accept requests, call services, return responses | `Fleet.Server/Controllers/` |
+| **Services** | Business logic — orchestrate repositories and other services | Domain folders (e.g., `Fleet.Server/Copilot/`) |
+| **Repositories** | Data access — communicate with database(s) directly | Domain folders (same as their service) |
+
+**Dependency rules:**
+
+- Controllers → Services only (never call Repositories directly)
+- Services → Repositories + other Services (never access HTTP context)
+- Repositories → Database only (no business logic, no service calls)
+
+**Interface requirement:** Every service and repository **must** have an interface (`I<Name>Service`, `I<Name>Repository`). Inject the interface everywhere; register implementations in `Program.cs` via DI.
+
 ## API Style
 
-**MVC Controllers** with `[ApiController]` — structured, convention-based endpoints organized by domain area. Each domain gets its own controller class under a `Controllers/` folder.
+**MVC Controllers** with `[ApiController]` — structured, convention-based endpoints organized by domain area. Each domain gets its own controller class under `Controllers/`. Controllers are thin — validate inputs, call a service method, return the result.
 
 ### Endpoint Organization Pattern
 
 ```text
 Fleet.Server/
-  Program.cs              → App setup, middleware, AddControllers()
+  Program.cs                          → App setup, DI registration, middleware
+  Extensions.cs                       → Aspire service defaults
   Controllers/
-    AuthController.cs      → [Route("api/auth")]
-    ProjectsController.cs  → [Route("api/projects")]
-    WorkItemsController.cs → [Route("api/projects/{projectId}/work-items")]
-    ChatsController.cs     → [Route("api/projects/{projectId}/chat")]
-    AgentsController.cs    → [Route("api/projects/{projectId}/agents")]
-    GitHubController.cs    → [Route("api/github")]
-    BillingController.cs   → [Route("api/billing")]
+    AuthController.cs                 → [Route("api/auth")]
+    ProjectsController.cs             → [Route("api/projects")]
+    WorkItemsController.cs            → [Route("api/projects/{projectId}/work-items")]
+    ChatsController.cs                → [Route("api/projects/{projectId}/chat")]
+    AgentsController.cs               → [Route("api/projects/{projectId}/agents")]
+    GitHubController.cs               → [Route("api/github")]
+    BillingController.cs              → [Route("api/billing")]
+  Projects/
+    IProjectService.cs                → Interface for project business logic
+    ProjectService.cs                 → Implementation
+    IProjectRepository.cs             → Interface for project data access
+    ProjectRepository.cs              → Implementation
+  Copilot/
+    ICopilotChatService.cs            → Interface for AI chat orchestration
+    CopilotChatService.cs             → Implementation
+    IChatSessionRepository.cs         → Interface for chat session data access
+    ChatSessionRepository.cs          → Implementation
+  WorkItems/
+    IWorkItemService.cs               → Interface for work item logic
+    WorkItemService.cs                → Implementation
+    IWorkItemRepository.cs            → Interface for work item data access
+    WorkItemRepository.cs             → Implementation
+  Agents/
+    IAgentService.cs                  → Interface for agent orchestration
+    AgentService.cs                   → Implementation
+    IAgentTaskRepository.cs           → Interface for agent task data access
+    AgentTaskRepository.cs            → Implementation
+  Auth/
+    IAuthService.cs                   → Interface for authentication logic
+    AuthService.cs                    → Implementation
+    IUserRepository.cs                → Interface for user data access
+    UserRepository.cs                 → Implementation
+  Billing/
+    IBillingService.cs                → Interface for subscription/billing logic
+    BillingService.cs                 → Implementation
+    ISubscriptionRepository.cs        → Interface for subscription data access
+    SubscriptionRepository.cs         → Implementation
+  GitHub/
+    IGitHubService.cs                 → Interface for GitHub integration logic
+    GitHubService.cs                  → Implementation
 ```
 
-Each controller inherits `ControllerBase`, uses `[ApiController]` for automatic model validation and problem-details responses, and groups related actions (CRUD + custom operations) in one class.
+### DI Registration (Program.cs)
+
+```csharp
+// Services
+builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<ICopilotChatService, CopilotChatService>();
+builder.Services.AddScoped<IWorkItemService, WorkItemService>();
+builder.Services.AddScoped<IAgentService, AgentService>();
+
+// Repositories
+builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
+builder.Services.AddScoped<IWorkItemRepository, WorkItemRepository>();
+builder.Services.AddScoped<IAgentTaskRepository, AgentTaskRepository>();
+```
 
 ## API Domain Areas (Priority Order)
 

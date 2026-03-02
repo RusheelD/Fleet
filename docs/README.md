@@ -18,7 +18,7 @@ Place spec documents in this directory using the following naming convention:
 4. [Agent Execution & Architecture](spec-agent-execution.md) — Execution infrastructure, LLM providers, monitoring & control
 5. [Agent Roles & Execution Flow](spec-agent-roles-flow.md) — Role definitions, phase sequencing, agent communication
 6. [UI Structure & Frontend Architecture](spec-ui-frontend.md) — Navigation, routing, state management, real-time transport
-7. [Backend API & Data Model](spec-backend-api.md) — MVC controllers, domain areas, EF Core + Postgres, entity sketch
+7. [Backend API & Data Model](spec-backend-api.md) — Controllers → Services → Repositories architecture, domain folders, EF Core + Postgres, entity sketch
 8. [GitHub Integration & Safety](spec-github-integration.md) — OAuth/GitHub App, branch conventions, safety guardrails, MVP scope
 9. [Infrastructure, Testing & Open Items](spec-infrastructure.md) — Azure hosting, MSTest + Vitest, telemetry, future considerations
 10. [Authentication & Security](spec-auth-security.md) — Azure AD B2C, MSAL, GitHub token flow, Stripe payments

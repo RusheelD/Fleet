@@ -19,7 +19,8 @@ Likely services (TBD exact configuration):
 
 - **Framework:** MSTest (`Microsoft.VisualStudio.TestTools.UnitTesting`)
 - **Test project:** `Fleet.Server.Tests` (to be created)
-- Conventions: one test class per controller/service, `[TestMethod]` attributes, arrange-act-assert pattern
+- Conventions: one test class per controller/service/repository, `[TestMethod]` attributes, arrange-act-assert pattern
+- Mock repository interfaces when testing services; mock service interfaces when testing controllers
 
 ### Frontend (frontend/)
 

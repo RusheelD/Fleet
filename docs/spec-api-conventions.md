@@ -2,7 +2,7 @@
 
 ## General Conventions
 
-These conventions apply to all API controllers in `Fleet.Server/Controllers/`.
+These conventions apply to all API controllers in `Fleet.Server/Controllers/`. Controllers are thin — they validate inputs, call a **Service**, and return the result. See `spec-backend-api.md` for the full **Controllers → Services → Repositories** architecture.
 
 ### URL Structure
 
@@ -26,6 +26,16 @@ These conventions apply to all API controllers in `Fleet.Server/Controllers/`.
 - All request and response bodies are **JSON** (`application/json`)
 - Use C# record types for DTOs (request and response models) in a `Models/` folder
 - Property naming: **camelCase** in JSON (ASP.NET default with `System.Text.Json`)
+
+### Service & Repository Conventions
+
+Controllers never access the database directly. They call **Services**, which contain business logic and orchestrate **Repositories** for data access.
+
+- Every service and repository has an **interface** (`I<Name>Service`, `I<Name>Repository`)
+- Services and repositories live in **domain folders** (e.g., `Fleet.Server/Projects/`, `Fleet.Server/Copilot/`)
+- Register all implementations in `Program.cs` via `builder.Services.AddScoped<IInterface, Implementation>()`
+- Services may call multiple repositories and other services
+- Repositories handle only database communication — no business logic
 
 ### Pagination
 
