@@ -9,6 +9,7 @@ import {
     NavigationRegular,
     SearchRegular,
     GridRegular,
+    ChatRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from './'
@@ -63,9 +64,11 @@ interface TopBarProps {
     breadcrumbs: BreadcrumbEntry[]
     sidebarExpanded: boolean
     onExpandSidebar: () => void
+    chatOpen?: boolean
+    onToggleChat?: () => void
 }
 
-export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar }: TopBarProps) {
+export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar, chatOpen, onToggleChat }: TopBarProps) {
     const styles = useStyles()
     const navigate = useNavigate()
 
@@ -115,6 +118,14 @@ export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar }: TopBar
                         icon={<GridRegular />}
                         size="small"
                         onClick={() => navigate('/projects')}
+                    />
+                </Tooltip>
+                <Tooltip content={chatOpen ? 'Close AI Chat' : 'Open AI Chat'} relationship="label">
+                    <Button
+                        appearance={chatOpen ? 'primary' : 'subtle'}
+                        icon={<ChatRegular />}
+                        size="small"
+                        onClick={onToggleChat}
                     />
                 </Tooltip>
                 <UserMenu />

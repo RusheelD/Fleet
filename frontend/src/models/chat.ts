@@ -18,3 +18,23 @@ export interface ChatData {
   messages: ChatMessageData[]
   suggestions: string[]
 }
+
+export interface ToolEvent {
+  toolName: string
+  argumentsJson: string
+  result: string
+}
+
+export interface SendMessageResponse {
+  sessionId: string
+  assistantMessage: ChatMessageData
+  toolEvents: ToolEvent[]
+  error: string | null
+}
+
+export interface ChatAttachment {
+  id: string
+  fileName: string
+  contentLength: number
+  uploadedAt: string
+}

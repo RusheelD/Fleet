@@ -81,3 +81,19 @@ export async function del<T>(url: string): Promise<T> {
   })
   return handleResponse<T>(response)
 }
+
+/** HTTP POST with FormData (multipart/form-data for file uploads) */
+export async function postForm<T>(url: string, formData: FormData): Promise<T> {
+  // Don't set Content-Type — browser generates the boundary automatically
+  const headers: HeadersInit = {}
+  const token = tokenGetter ? await tokenGetter() : undefined
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+  return handleResponse<T>(response)
+}

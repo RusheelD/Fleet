@@ -34,7 +34,43 @@ public class ChatsController(IChatService chatService) : ControllerBase
     [HttpPost("sessions/{sessionId}/messages")]
     public async Task<IActionResult> SendMessage(string projectId, string sessionId, [FromBody] SendMessageRequest request)
     {
-        var message = await chatService.SendMessageAsync(projectId, sessionId, request.Content);
-        return Created($"/api/projects/{projectId}/chat/sessions/{sessionId}/messages/{message.Id}", message);
+        var response = await chatService.SendMessageAsync(projectId, sessionId, request.Content);
+        return Ok(response);
+    }
+
+    // ── Attachments ──────────────────────────────────────────
+
+    [HttpGet("sessions/{sessionId}/attachments")]
+    public async Task<IActionResult> GetAttachments(string projectId, string sessionId)
+    {
+        var attachments = await chatService.GetAttachmentsAsync(sessionId);
+        return Ok(attachments);
+    }
+
+    [HttpPost("sessions/{sessionId}/attachments")]
+    [RequestSizeLimit(1_048_576)] // 1 MB per upload
+    public async Task<IActionResult> UploadAttachment(string projectId, string sessionId, IFormFile file)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("No file provided.");
+
+        if (!file.FileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Only .md (Markdown) files are supported.");
+
+        if (file.Length > 512_000) // 500 KB limit for a single markdown file
+            return BadRequest("File exceeds the 500 KB limit.");
+
+        using var reader = new StreamReader(file.OpenReadStream());
+        var content = await reader.ReadToEndAsync();
+
+        var attachment = await chatService.UploadAttachmentAsync(projectId, sessionId, file.FileName, content);
+        return Created($"/api/projects/{projectId}/chat/sessions/{sessionId}/attachments/{attachment.Id}", attachment);
+    }
+
+    [HttpDelete("sessions/{sessionId}/attachments/{attachmentId}")]
+    public async Task<IActionResult> DeleteAttachment(string projectId, string sessionId, string attachmentId)
+    {
+        var deleted = await chatService.DeleteAttachmentAsync(attachmentId);
+        return deleted ? NoContent() : NotFound();
     }
 }

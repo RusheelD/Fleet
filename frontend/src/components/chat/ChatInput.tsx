@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import {
     makeStyles,
     tokens,
@@ -8,8 +9,6 @@ import {
 import {
     SendRegular,
     AttachRegular,
-    DocumentRegular,
-    ArrowUploadRegular,
 } from '@fluentui/react-icons'
 
 const useStyles = makeStyles({
@@ -43,16 +42,34 @@ const useStyles = makeStyles({
     inputHint: {
         color: tokens.colorNeutralForeground4,
     },
+    hiddenInput: {
+        display: 'none',
+    },
 })
 
 interface ChatInputProps {
     value: string
     onChange: (value: string) => void
     onSend?: () => void
+    onFileSelect?: (file: File) => void
+    disabled?: boolean
+    uploading?: boolean
 }
 
-export function ChatInput({ value, onChange, onSend }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSend, onFileSelect, disabled, uploading }: ChatInputProps) {
     const styles = useStyles()
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (file && onFileSelect) {
+            onFileSelect(file)
+        }
+        // Reset so the same file can be re-selected
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+        }
+    }
 
     return (
         <div className={styles.inputArea}>
@@ -64,11 +81,12 @@ export function ChatInput({ value, onChange, onSend }: ChatInputProps) {
                     resize="vertical"
                     rows={2}
                     className={styles.inputTextarea}
+                    disabled={disabled}
                 />
                 <Button
                     appearance="primary"
                     icon={<SendRegular />}
-                    disabled={!value.trim()}
+                    disabled={!value.trim() || disabled}
                     className={styles.sendButton}
                     onClick={onSend}
                 >
@@ -77,18 +95,25 @@ export function ChatInput({ value, onChange, onSend }: ChatInputProps) {
             </div>
             <div className={styles.inputActions}>
                 <div className={styles.inputButtons}>
-                    <Button appearance="subtle" size="small" icon={<AttachRegular />}>
-                        Attach
-                    </Button>
-                    <Button appearance="subtle" size="small" icon={<DocumentRegular />}>
-                        Repo
-                    </Button>
-                    <Button appearance="subtle" size="small" icon={<ArrowUploadRegular />}>
-                        Upload
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".md"
+                        className={styles.hiddenInput}
+                        onChange={handleFileChange}
+                    />
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<AttachRegular />}
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={disabled || uploading}
+                    >
+                        {uploading ? 'Uploading...' : 'Attach .md'}
                     </Button>
                 </div>
                 <Caption1 className={styles.inputHint}>
-                    Not streamed in this version
+                    Attach .md files for AI context
                 </Caption1>
             </div>
         </div>

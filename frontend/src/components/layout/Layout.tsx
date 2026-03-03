@@ -22,6 +22,7 @@ import {
 
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
+import { ChatDrawer } from '../chat'
 import { useSeedDatabase, useResetDatabase } from '../../proxies'
 import { useCurrentProject, usePreferences } from '../../hooks'
 
@@ -110,6 +111,18 @@ const useStyles = makeStyles({
         flex: 1,
         overflow: 'auto',
     },
+    contentWithChat: {
+        display: 'flex',
+        flexDirection: 'row',
+        flex: 1,
+        overflow: 'hidden',
+    },
+    chatPane: {
+        width: '380px',
+        flexShrink: 0,
+        borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+        height: '100%',
+    },
 })
 
 export function Layout() {
@@ -118,9 +131,10 @@ export function Layout() {
     const { slug } = useParams()
     const { preferences } = usePreferences()
     const [sidebarExpanded, setSidebarExpanded] = useState(!preferences?.sidebarCollapsed)
+    const [chatOpen, setChatOpen] = useState(false)
     const seedMutation = useSeedDatabase()
     const resetMutation = useResetDatabase()
-    const { projectTitle } = useCurrentProject()
+    const { projectId, projectTitle } = useCurrentProject()
 
     const isActive = useCallback(
         (path: string, exact?: boolean) => {
@@ -285,10 +299,22 @@ export function Layout() {
                         breadcrumbs={breadcrumbs}
                         sidebarExpanded={sidebarExpanded}
                         onExpandSidebar={() => setSidebarExpanded(true)}
+                        chatOpen={chatOpen}
+                        onToggleChat={() => setChatOpen((prev) => !prev)}
                     />
 
-                    <div className={styles.mainContent}>
-                        <Outlet />
+                    <div className={chatOpen && projectId ? styles.contentWithChat : styles.mainContent}>
+                        <div className={styles.mainContent}>
+                            <Outlet />
+                        </div>
+                        {chatOpen && projectId && (
+                            <div className={styles.chatPane}>
+                                <ChatDrawer
+                                    projectId={projectId}
+                                    onClose={() => setChatOpen(false)}
+                                />
+                            </div>
+                        )}
                     </div>
                 </div>
             }

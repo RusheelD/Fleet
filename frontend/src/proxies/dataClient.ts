@@ -6,6 +6,7 @@ import {
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs,
   getChatData, getMessages, createChatSession, sendChatMessage,
+  getAttachments, uploadAttachment, deleteAttachment,
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos,
@@ -307,6 +308,32 @@ export function useSendMessage(projectId: string | undefined, sessionId: string 
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
+// ── Attachment Hooks ──────────────────────────────────────
+
+export function useAttachments(projectId: string | undefined, sessionId: string | undefined) {
+  return useDataQuery('chat-attachments', () => getAttachments(projectId!, sessionId!), [projectId, sessionId])
+}
+
+export function useUploadAttachment(projectId: string | undefined, sessionId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => uploadAttachment(projectId!, sessionId!, file),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
+    },
+  })
+}
+
+export function useDeleteAttachment(projectId: string | undefined, sessionId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (attachmentId: string) => deleteAttachment(projectId!, sessionId!, attachmentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
     },
   })
 }

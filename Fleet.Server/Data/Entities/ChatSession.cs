@@ -14,4 +14,5 @@ public class ChatSession
 
     // Navigation
     public List<ChatMessage> Messages { get; set; } = [];
+    public List<ChatAttachment> Attachments { get; set; } = [];
 }

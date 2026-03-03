@@ -1,4 +1,4 @@
-export { ApiError, setTokenGetter, get, post, put, del } from './proxy'
+export { ApiError, setTokenGetter, get, post, put, del, postForm } from './proxy'
 export { getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug } from './projectsProxy'
 export type { CreateProjectRequest, UpdateProjectRequest } from './projectsProxy'
 export { getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem } from './workItemsProxy'
@@ -6,7 +6,7 @@ export type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsPr
 export { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
 export type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
 export { getExecutions, getLogs } from './agentsProxy'
-export { getChatData, getMessages, createChatSession, sendChatMessage } from './chatProxy'
+export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
 export { getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos } from './userProxy'
@@ -41,6 +41,9 @@ export {
   useDeleteWorkItemLevel,
   useCreateChatSession,
   useSendMessage,
+  useAttachments,
+  useUploadAttachment,
+  useDeleteAttachment,
   useSeedDatabase,
   useResetDatabase,
 } from './dataClient'

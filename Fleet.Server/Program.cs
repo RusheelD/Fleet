@@ -2,9 +2,11 @@ using Fleet.Server.Agents;
 using Fleet.Server.Auth;
 using Fleet.Server.Connections;
 using Fleet.Server.Copilot;
+using Fleet.Server.Copilot.Tools;
 using Fleet.Server.Data;
 using Fleet.Server.Exceptions;
 using Fleet.Server.GitHub;
+using Fleet.Server.LLM;
 using Fleet.Server.Projects;
 using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
@@ -56,6 +58,18 @@ builder.Services.AddHttpClient("GitHub", client =>
         new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Fleet/1.0");
 });
+
+// LLM configuration + provider
+builder.Services.Configure<LLMOptions>(builder.Configuration.GetSection(LLMOptions.SectionName));
+builder.Services.AddSingleton<ILLMClient, GeminiClient>();
+
+// Chat tools (registered individually, collected by ChatToolRegistry)
+builder.Services.AddScoped<IChatTool, GetProjectInfoTool>();
+builder.Services.AddScoped<IChatTool, ListWorkItemsTool>();
+builder.Services.AddScoped<IChatTool, CreateWorkItemTool>();
+builder.Services.AddScoped<IChatTool, GetRepoTreeTool>();
+builder.Services.AddScoped<IChatTool, ReadRepoFileTool>();
+builder.Services.AddScoped<ChatToolRegistry>();
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();

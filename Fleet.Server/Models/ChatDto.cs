@@ -24,3 +24,26 @@ public record ChatDataDto(
     ChatMessageDto[] Messages,
     string[] Suggestions
 );
+
+/// <summary>Rich response returned when the user sends a message.</summary>
+public record SendMessageResponseDto(
+    string SessionId,
+    ChatMessageDto AssistantMessage,
+    ToolEventDto[] ToolEvents,
+    string? Error
+);
+
+/// <summary>Describes a single tool invocation during the AI response.</summary>
+public record ToolEventDto(
+    string ToolName,
+    string ArgumentsJson,
+    string Result
+);
+
+/// <summary>Metadata for an uploaded document attached to a chat session.</summary>
+public record ChatAttachmentDto(
+    string Id,
+    string FileName,
+    int ContentLength,
+    string UploadedAt
+);

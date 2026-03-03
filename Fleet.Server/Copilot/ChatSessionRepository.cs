@@ -91,4 +91,52 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
 
         return new ChatMessageDto(entity.Id, entity.Role, entity.Content, entity.Timestamp);
     }
+
+    // ── Attachments ──────────────────────────────────────────
+
+    public async Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content)
+    {
+        var entity = new ChatAttachment
+        {
+            Id = Guid.NewGuid().ToString(),
+            FileName = fileName,
+            Content = content,
+            UploadedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ChatSessionId = sessionId
+        };
+
+        context.ChatAttachments.Add(entity);
+        await context.SaveChangesAsync();
+
+        return new ChatAttachmentDto(entity.Id, entity.FileName, entity.Content.Length, entity.UploadedAt);
+    }
+
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId)
+    {
+        var entities = await context.ChatAttachments
+            .AsNoTracking()
+            .Where(a => a.ChatSessionId == sessionId)
+            .ToListAsync();
+
+        return entities.Select(a => new ChatAttachmentDto(a.Id, a.FileName, a.Content.Length, a.UploadedAt)).ToList();
+    }
+
+    public async Task<string?> GetAttachmentContentAsync(string attachmentId)
+    {
+        var entity = await context.ChatAttachments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == attachmentId);
+
+        return entity?.Content;
+    }
+
+    public async Task<bool> DeleteAttachmentAsync(string attachmentId)
+    {
+        var entity = await context.ChatAttachments.FindAsync(attachmentId);
+        if (entity is null) return false;
+
+        context.ChatAttachments.Remove(entity);
+        await context.SaveChangesAsync();
+        return true;
+    }
 }
