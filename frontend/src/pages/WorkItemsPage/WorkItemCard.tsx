@@ -11,8 +11,9 @@ import {
     PersonRegular,
     TagRegular,
 } from '@fluentui/react-icons'
-import type { WorkItem } from '../../models'
-import { PriorityDot } from './PriorityDot'
+import type { WorkItem, WorkItemLevel } from '../../models'
+import { PriorityDot } from './'
+import { LevelBadge } from '../../components/shared'
 
 const useStyles = makeStyles({
     workItemCard: {
@@ -63,15 +64,21 @@ const useStyles = makeStyles({
 
 interface WorkItemCardProps {
     item: WorkItem
+    levelMap?: Map<number, WorkItemLevel>
+    onItemClick?: (item: WorkItem) => void
 }
 
-export function WorkItemCard({ item }: WorkItemCardProps) {
+export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps) {
     const styles = useStyles()
+    const level = item.levelId != null ? levelMap?.get(item.levelId) : undefined
 
     return (
-        <Card className={styles.workItemCard} size="small">
+        <Card className={styles.workItemCard} size="small" onClick={() => onItemClick?.(item)}>
             <div className={styles.cardTop}>
-                <Text className={styles.cardId}>#{item.id}</Text>
+                <div className={styles.tagsRow}>
+                    <Text className={styles.cardId}>#{item.id}</Text>
+                    <LevelBadge level={level} />
+                </div>
                 <PriorityDot priority={item.priority} />
             </div>
             <Text className={styles.cardTitle}>{item.title}</Text>

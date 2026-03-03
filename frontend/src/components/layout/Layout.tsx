@@ -5,7 +5,8 @@ import {
     mergeClasses,
     tokens,
     Text,
-    Divider,
+    Button,
+    Tooltip,
 } from '@fluentui/react-components'
 import {
     FolderRegular,
@@ -15,12 +16,14 @@ import {
     BoardRegular,
     BotRegular,
     HomeFilled,
+    DatabaseRegular,
+    DeleteRegular,
 } from '@fluentui/react-icons'
 
-import { SidebarHeader } from './SidebarHeader'
-import { ProjectSelector } from './ProjectSelector'
-import { SidebarNavItem } from './SidebarNavItem'
-import { TopBar } from './TopBar'
+import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
+import { SplitView } from '../shared'
+import { useSeedDatabase, useResetDatabase } from '../../proxies'
+import { useCurrentProject, usePreferences } from '../../hooks'
 
 import type { NavItemConfig } from '../../models'
 
@@ -29,19 +32,24 @@ const SIDEBAR_WIDTH_COLLAPSED = '48px'
 
 const useStyles = makeStyles({
     root: {
-        display: 'flex',
-        minHeight: '100vh',
         backgroundColor: tokens.colorNeutralBackground2,
+    },
+
+    /* ───── Sidebar pane (SplitView first) ───── */
+    sidebarPane: {
+        flexShrink: 0,
     },
 
     /* ───── Sidebar shell ───── */
     sidebar: {
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
         backgroundColor: tokens.colorNeutralBackground1,
         borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
         transition: 'width 0.2s ease',
-        overflow: 'hidden',
+        overflowX: 'hidden',
+        overflowY: 'auto',
         flexShrink: 0,
     },
     sidebarExpanded: {
@@ -76,13 +84,27 @@ const useStyles = makeStyles({
         padding: '0.375rem',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     },
+    mockButtonRow: {
+        display: 'flex',
+        gap: '4px',
+        padding: '0.25rem 0.375rem',
+    },
+    seedButton: {
+        flex: 1,
+        fontSize: '11px',
+    },
+    resetButton: {
+        flex: 1,
+        fontSize: '11px',
+        color: tokens.colorPaletteRedForeground1,
+    },
 
     /* ───── Main content area ───── */
     content: {
-        flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'auto',
+        height: '100%',
+        overflow: 'hidden',
     },
     mainContent: {
         flex: 1,
@@ -93,8 +115,12 @@ const useStyles = makeStyles({
 export function Layout() {
     const styles = useStyles()
     const location = useLocation()
-    const { projectId } = useParams()
-    const [sidebarExpanded, setSidebarExpanded] = useState(true)
+    const { slug } = useParams()
+    const { preferences } = usePreferences()
+    const [sidebarExpanded, setSidebarExpanded] = useState(!preferences?.sidebarCollapsed)
+    const seedMutation = useSeedDatabase()
+    const resetMutation = useResetDatabase()
+    const { projectTitle } = useCurrentProject()
 
     const isActive = useCallback(
         (path: string, exact?: boolean) => {
@@ -112,11 +138,11 @@ export function Layout() {
         { icon: <SearchRegular />, label: 'Search', path: '/search' },
     ]
 
-    const projectNav: NavItemConfig[] = projectId
+    const projectNav: NavItemConfig[] = slug
         ? [
-            { icon: <HomeFilled />, label: 'Overview', path: `/projects/${projectId}`, exact: true },
-            { icon: <BoardRegular />, label: 'Work Items', path: `/projects/${projectId}/work-items` },
-            { icon: <BotRegular />, label: 'Agents', path: `/projects/${projectId}/agents` },
+            { icon: <HomeFilled />, label: 'Overview', path: `/projects/${slug}`, exact: true },
+            { icon: <BoardRegular />, label: 'Work Items', path: `/projects/${slug}/work-items` },
+            { icon: <BotRegular />, label: 'Agents', path: `/projects/${slug}/agents` },
         ]
         : []
 
@@ -128,10 +154,11 @@ export function Layout() {
     /* ── Breadcrumbs ── */
     const getBreadcrumbs = () => {
         const parts: Array<{ label: string; path?: string }> = []
-        parts.push({ label: 'Fleet', path: '/projects' })
 
-        if (projectId) {
-            parts.push({ label: `Project ${projectId}`, path: `/projects/${projectId}` })
+        if (slug) {
+            parts.push({ label: 'Projects', path: '/projects' })
+            const displayName = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+            parts.push({ label: displayName, path: `/projects/${slug}` })
 
             if (location.pathname.includes('/work-items')) {
                 parts.push({ label: 'Work Items' })
@@ -156,41 +183,41 @@ export function Layout() {
     const breadcrumbs = getBreadcrumbs()
 
     return (
-        <div className={styles.root}>
-            {/* ═══════ Sidebar ═══════ */}
-            <nav
-                className={mergeClasses(
-                    styles.sidebar,
-                    sidebarExpanded ? styles.sidebarExpanded : styles.sidebarCollapsed,
-                )}
-            >
-                <SidebarHeader
-                    expanded={sidebarExpanded}
-                    onToggle={() => setSidebarExpanded((prev) => !prev)}
-                />
+        <SplitView
+            containerClassName={styles.root}
+            firstPaneClassName={styles.sidebarPane}
+            first={
+                <nav
+                    className={mergeClasses(
+                        styles.sidebar,
+                        sidebarExpanded ? styles.sidebarExpanded : styles.sidebarCollapsed,
+                    )}
+                >
+                    <SidebarHeader
+                        expanded={sidebarExpanded}
+                        onToggle={() => setSidebarExpanded((prev) => !prev)}
+                    />
 
-                {/* Project selector (when viewing a project) */}
-                {projectId && (
-                    <ProjectSelector projectName="Fleet Platform" expanded={sidebarExpanded} />
-                )}
+                    {/* Project selector (when viewing a project) */}
+                    {slug && (
+                        <ProjectSelector projectName={projectTitle ?? slug} expanded={sidebarExpanded} />
+                    )}
 
-                {/* Global nav */}
-                <div className={styles.navSection}>
-                    {sidebarExpanded && <Text className={styles.navSectionLabel}>Navigate</Text>}
-                    {globalNav.map((item) => (
-                        <SidebarNavItem
-                            key={item.path}
-                            item={item}
-                            active={isActive(item.path, item.exact)}
-                            expanded={sidebarExpanded}
-                        />
-                    ))}
-                </div>
+                    {/* Global nav */}
+                    <div className={styles.navSection}>
+                        {sidebarExpanded && <Text className={styles.navSectionLabel}>Navigate</Text>}
+                        {globalNav.map((item) => (
+                            <SidebarNavItem
+                                key={item.path}
+                                item={item}
+                                active={isActive(item.path, item.exact)}
+                                expanded={sidebarExpanded}
+                            />
+                        ))}
+                    </div>
 
-                {/* Project-scoped nav */}
-                {projectId && (
-                    <>
-                        <Divider />
+                    {/* Project-scoped nav */}
+                    {slug && (
                         <div className={styles.navSection}>
                             {sidebarExpanded && <Text className={styles.navSectionLabel}>Project</Text>}
                             {projectNav.map((item) => (
@@ -202,34 +229,69 @@ export function Layout() {
                                 />
                             ))}
                         </div>
-                    </>
-                )}
+                    )}
 
-                {/* Footer / utility nav */}
-                <div className={styles.sidebarFooter}>
-                    {bottomNav.map((item) => (
-                        <SidebarNavItem
-                            key={item.path}
-                            item={item}
-                            active={isActive(item.path, item.exact)}
-                            expanded={sidebarExpanded}
-                        />
-                    ))}
+                    {/* Footer / utility nav */}
+                    <div className={styles.sidebarFooter}>
+                        {bottomNav.map((item) => (
+                            <SidebarNavItem
+                                key={item.path}
+                                item={item}
+                                active={isActive(item.path, item.exact)}
+                                expanded={sidebarExpanded}
+                            />
+                        ))}
+                        {sidebarExpanded ? (
+                            <div className={styles.mockButtonRow}>
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<DatabaseRegular />}
+                                    className={styles.seedButton}
+                                    onClick={() => seedMutation.mutate()}
+                                    disabled={seedMutation.isPending}
+                                >
+                                    {seedMutation.isPending ? 'Seeding...' : 'Seed Data'}
+                                </Button>
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<DeleteRegular />}
+                                    className={styles.resetButton}
+                                    onClick={() => resetMutation.mutate()}
+                                    disabled={resetMutation.isPending}
+                                >
+                                    {resetMutation.isPending ? 'Resetting...' : 'Reset'}
+                                </Button>
+                            </div>
+                        ) : (
+                            <Tooltip content="Seed mock data" relationship="label">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<DatabaseRegular />}
+                                    onClick={() => seedMutation.mutate()}
+                                    disabled={seedMutation.isPending}
+                                    style={{ width: '100%' }}
+                                />
+                            </Tooltip>
+                        )}
+                    </div>
+                </nav>
+            }
+            second={
+                <div className={styles.content}>
+                    <TopBar
+                        breadcrumbs={breadcrumbs}
+                        sidebarExpanded={sidebarExpanded}
+                        onExpandSidebar={() => setSidebarExpanded(true)}
+                    />
+
+                    <div className={styles.mainContent}>
+                        <Outlet />
+                    </div>
                 </div>
-            </nav>
-
-            {/* ═══════ Main content area ═══════ */}
-            <div className={styles.content}>
-                <TopBar
-                    breadcrumbs={breadcrumbs}
-                    sidebarExpanded={sidebarExpanded}
-                    onExpandSidebar={() => setSidebarExpanded(true)}
-                />
-
-                <div className={styles.mainContent}>
-                    <Outlet />
-                </div>
-            </div>
-        </div>
+            }
+        />
     )
 }

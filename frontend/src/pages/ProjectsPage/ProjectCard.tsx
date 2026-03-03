@@ -11,7 +11,6 @@ import {
 } from '@fluentui/react-components'
 import {
     FolderRegular,
-    CheckmarkCircleRegular,
     ClockRegular,
     BotRegular,
 } from '@fluentui/react-icons'
@@ -55,9 +54,6 @@ const useStyles = makeStyles({
     statLabel: {
         fontSize: '12px',
         color: tokens.colorNeutralForeground4,
-    },
-    resolvedIcon: {
-        color: tokens.colorPaletteGreenForeground1,
     },
     activityRow: {
         display: 'flex',
@@ -105,7 +101,6 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
                         <Text className={styles.statLabel}>active</Text>
                     </div>
                     <div className={styles.stat}>
-                        <CheckmarkCircleRegular className={styles.resolvedIcon} />
                         <Text className={styles.statValue}>{project.workItems.resolved}</Text>
                         <Text className={styles.statLabel}>resolved</Text>
                     </div>

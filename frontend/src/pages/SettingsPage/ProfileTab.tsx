@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
     makeStyles,
     Title3,
@@ -7,8 +8,16 @@ import {
     Divider,
     Avatar,
     Field,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
 } from '@fluentui/react-components'
-import { SaveRegular } from '@fluentui/react-icons'
+import { SaveRegular, CheckmarkRegular } from '@fluentui/react-icons'
+import { useUpdateProfile } from '../../proxies'
+import { useAuth } from '../../hooks'
+import type { UserProfile } from '../../models'
 
 const useStyles = makeStyles({
     section: {
@@ -46,35 +55,79 @@ const useStyles = makeStyles({
     },
 })
 
-export function ProfileTab() {
+interface ProfileTabProps {
+    profile: UserProfile
+}
+
+export function ProfileTab({ profile }: ProfileTabProps) {
     const styles = useStyles()
+    const { updateUser } = useAuth()
+    const updateMutation = useUpdateProfile()
+    const toasterId = useId('profile-toaster')
+    const { dispatchToast } = useToastController(toasterId)
+    const [displayName, setDisplayName] = useState(profile.displayName)
+    const [email, setEmail] = useState(profile.email)
+    const [bio, setBio] = useState(profile.bio)
+    const [location, setLocation] = useState(profile.location)
+
+    const hasChanges =
+        displayName !== profile.displayName ||
+        email !== profile.email ||
+        bio !== profile.bio ||
+        location !== profile.location
+
+    const handleSave = () => {
+        updateMutation.mutate({ displayName, email, bio, location }, {
+            onSuccess: (savedProfile) => {
+                // Update the auth context so the user's name/email updates globally
+                updateUser(savedProfile)
+                dispatchToast(
+                    <Toast><ToastTitle>Profile saved successfully</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to save profile</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
 
     return (
         <Card className={styles.section}>
+            <Toaster toasterId={toasterId} />
             <div className={styles.sectionHeader}>
                 <Title3>Profile Information</Title3>
-                <Button appearance="primary" icon={<SaveRegular />}>Save Changes</Button>
+                <Button
+                    appearance="primary"
+                    icon={hasChanges ? <SaveRegular /> : <CheckmarkRegular />}
+                    onClick={handleSave}
+                    disabled={updateMutation.isPending || !hasChanges}
+                >
+                    {updateMutation.isPending ? 'Saving...' : hasChanges ? 'Save Changes' : 'Saved'}
+                </Button>
             </div>
             <Divider />
             <div className={styles.profileRow}>
                 <div className={styles.avatarColumn}>
-                    <Avatar name="Fleet User" size={72} />
-                    <Button appearance="outline" size="small">Change</Button>
+                    <Avatar name={displayName} size={72} />
                 </div>
                 <div className={styles.profileForm}>
                     <div className={styles.formRow}>
                         <Field label="Display Name">
-                            <Input defaultValue="Fleet User" />
+                            <Input value={displayName} onChange={(_e, data) => setDisplayName(data.value)} />
                         </Field>
                         <Field label="Email">
-                            <Input defaultValue="user@fleet.dev" type="email" />
+                            <Input value={email} onChange={(_e, data) => setEmail(data.value)} type="email" />
                         </Field>
                     </div>
                     <Field label="Bio">
-                        <Input defaultValue="Building the future with AI agents" />
+                        <Input value={bio} onChange={(_e, data) => setBio(data.value)} />
                     </Field>
                     <Field label="Location">
-                        <Input defaultValue="San Francisco, CA" />
+                        <Input value={location} onChange={(_e, data) => setLocation(data.value)} />
                     </Field>
                 </div>
             </div>

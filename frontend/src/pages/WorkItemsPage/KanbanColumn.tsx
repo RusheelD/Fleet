@@ -6,8 +6,8 @@ import {
     Button,
 } from '@fluentui/react-components'
 import { MoreHorizontalRegular } from '@fluentui/react-icons'
-import { WorkItemCard } from './WorkItemCard'
-import type { WorkItem } from '../../models'
+import { WorkItemCard } from './'
+import type { WorkItem, WorkItemLevel } from '../../models'
 
 const useStyles = makeStyles({
     boardColumn: {
@@ -53,9 +53,11 @@ const useStyles = makeStyles({
 interface KanbanColumnProps {
     state: string
     items: WorkItem[]
+    levelMap?: Map<number, WorkItemLevel>
+    onItemClick?: (item: WorkItem) => void
 }
 
-export function KanbanColumn({ state, items }: KanbanColumnProps) {
+export function KanbanColumn({ state, items, levelMap, onItemClick }: KanbanColumnProps) {
     const styles = useStyles()
 
     return (
@@ -74,7 +76,7 @@ export function KanbanColumn({ state, items }: KanbanColumnProps) {
             </div>
             <div className={styles.cardList}>
                 {items.map((item) => (
-                    <WorkItemCard key={item.id} item={item} />
+                    <WorkItemCard key={item.id} item={item} levelMap={levelMap} onItemClick={onItemClick} />
                 ))}
             </div>
         </div>

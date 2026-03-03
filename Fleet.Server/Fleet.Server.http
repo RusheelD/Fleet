@@ -4,3 +4,49 @@ GET {{Server_HostAddress}}/api/weatherforecast/
 Accept: application/json
 
 ###
+
+# ── Admin ────────────────────────────────────────────────
+
+GET {{Server_HostAddress}}/api/admin/reset
+Accept: application/json
+
+###
+
+GET {{Server_HostAddress}}/api/admin/migrate
+Accept: application/json
+
+###
+
+GET {{Server_HostAddress}}/api/admin/seed
+Accept: application/json
+
+###
+
+# ── Work Item Levels ─────────────────────────────────────
+
+GET {{Server_HostAddress}}/api/projects/1/levels
+Accept: application/json
+
+###
+
+POST {{Server_HostAddress}}/api/projects/1/levels
+Content-Type: application/json
+
+{
+  "name": "Spike",
+  "iconName": "lightning",
+  "color": "#FF8C00",
+  "ordinal": 6
+}
+
+###
+
+PUT {{Server_HostAddress}}/api/projects/1/levels/1
+Content-Type: application/json
+
+{
+  "name": "Goal (Renamed)",
+  "color": "#9B59B6"
+}
+
+###

@@ -6,8 +6,14 @@ import {
     Card,
     Button,
     Badge,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
 } from '@fluentui/react-components'
 import { RocketRegular, ArrowUpRegular } from '@fluentui/react-icons'
+import type { CurrentPlan } from '../../models'
 
 const useStyles = makeStyles({
     currentPlan: {
@@ -35,20 +41,27 @@ const useStyles = makeStyles({
     },
 })
 
-export function CurrentPlanBanner() {
+interface CurrentPlanBannerProps {
+    currentPlan: CurrentPlan
+}
+
+export function CurrentPlanBanner({ currentPlan }: CurrentPlanBannerProps) {
     const styles = useStyles()
+    const toasterId = useId('banner-toaster')
+    const { dispatchToast } = useToastController(toasterId)
 
     return (
         <Card className={styles.currentPlan}>
+            <Toaster toasterId={toasterId} />
             <div className={styles.planInfo}>
                 <div className={styles.planBadge}>
                     <RocketRegular className={styles.planBadgeIcon} />
-                    <Title3>Free Plan</Title3>
+                    <Title3>{currentPlan.name}</Title3>
                     <Badge appearance="filled" color="brand">Current</Badge>
                 </div>
-                <Body1>You&apos;re on the Free plan. Upgrade to unlock more agents and capabilities.</Body1>
+                <Body1>{currentPlan.description}</Body1>
             </div>
-            <Button appearance="primary" icon={<ArrowUpRegular />}>
+            <Button appearance="primary" icon={<ArrowUpRegular />} onClick={() => dispatchToast(<Toast><ToastTitle>Plan upgrades are not available in this version</ToastTitle></Toast>, { intent: 'info' })}>
                 Upgrade Plan
             </Button>
         </Card>

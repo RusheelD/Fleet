@@ -1,8 +1,6 @@
-import type { ReactNode } from 'react'
-
 export interface PlanData {
   name: string
-  icon: ReactNode
+  icon: string
   price: string
   period: string
   description: string

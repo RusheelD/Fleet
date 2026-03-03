@@ -5,10 +5,10 @@ import {
     Caption1,
     Text,
     Card,
-    Button,
     Divider,
+    Badge,
 } from '@fluentui/react-components'
-import { DeleteRegular } from '@fluentui/react-icons'
+import { ShieldKeyholeRegular, LockClosedRegular, PersonRegular } from '@fluentui/react-icons'
 
 const useStyles = makeStyles({
     section: {
@@ -28,24 +28,18 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '0.125rem',
     },
-    dangerZone: {
-        border: `1px solid ${tokens.colorPaletteRedBorder2}`,
+    infoCard: {
+        padding: '1rem',
+        backgroundColor: tokens.colorNeutralBackground3,
         borderRadius: tokens.borderRadiusMedium,
-        padding: '1.25rem',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-    },
-    dangerTitle: {
-        color: tokens.colorPaletteRedForeground1,
-    },
-    dangerItem: {
-        display: 'flex',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.75rem',
     },
-    deleteButton: {
-        backgroundColor: tokens.colorPaletteRedBackground3,
+    infoIcon: {
+        fontSize: '24px',
+        color: tokens.colorBrandForeground1,
+        flexShrink: 0,
     },
 })
 
@@ -53,37 +47,51 @@ export function SecurityTab() {
     const styles = useStyles()
 
     return (
-        <>
-            <Card className={styles.section}>
-                <Title3>Security</Title3>
-                <Divider />
-                <div className={styles.settingRow}>
-                    <div className={styles.settingInfo}>
-                        <Text weight="semibold">Two-Factor Authentication</Text>
-                        <Caption1>Add an extra layer of security to your account</Caption1>
-                    </div>
-                    <Button appearance="outline" size="small">Enable</Button>
-                </div>
-                <div className={styles.settingRow}>
-                    <div className={styles.settingInfo}>
-                        <Text weight="semibold">Active Sessions</Text>
-                        <Caption1>Manage your active login sessions</Caption1>
-                    </div>
-                    <Button appearance="outline" size="small">View Sessions</Button>
-                </div>
-            </Card>
-            <div className={styles.dangerZone}>
-                <Title3 className={styles.dangerTitle}>Danger Zone</Title3>
-                <div className={styles.dangerItem}>
-                    <div className={styles.settingInfo}>
-                        <Text weight="semibold">Delete Account</Text>
-                        <Caption1>Permanently delete your Fleet account and all data</Caption1>
-                    </div>
-                    <Button appearance="primary" icon={<DeleteRegular />} className={styles.deleteButton}>
-                        Delete Account
-                    </Button>
+        <Card className={styles.section}>
+            <Title3>Security</Title3>
+            <Divider />
+
+            <div className={styles.infoCard}>
+                <ShieldKeyholeRegular className={styles.infoIcon} />
+                <div>
+                    <Text weight="semibold" block>Secured by Microsoft Entra ID</Text>
+                    <Caption1>Your account is protected by your organization&apos;s identity provider. Multi-factor authentication and session management are handled by Entra ID.</Caption1>
                 </div>
             </div>
-        </>
+
+            <div className={styles.settingRow}>
+                <div className={styles.settingInfo}>
+                    <Text weight="semibold">Two-Factor Authentication</Text>
+                    <Caption1>Managed by your Entra ID administrator</Caption1>
+                </div>
+                <Badge appearance="tint" color="informative">Managed by Entra ID</Badge>
+            </div>
+
+            <div className={styles.settingRow}>
+                <div className={styles.settingInfo}>
+                    <Text weight="semibold">Active Sessions</Text>
+                    <Caption1>View and manage sessions via your Microsoft account</Caption1>
+                </div>
+                <Badge appearance="tint" color="informative">Managed by Entra ID</Badge>
+            </div>
+
+            <Divider />
+
+            <div className={styles.infoCard}>
+                <LockClosedRegular className={styles.infoIcon} />
+                <div>
+                    <Text weight="semibold" block>Data &amp; Privacy</Text>
+                    <Caption1>Contact your workspace administrator for account deletion or data export requests.</Caption1>
+                </div>
+            </div>
+
+            <div className={styles.infoCard}>
+                <PersonRegular className={styles.infoIcon} />
+                <div>
+                    <Text weight="semibold" block>Social Sign-In</Text>
+                    <Caption1>You can also sign in using Google or GitHub through Entra ID. These are configured by your administrator.</Caption1>
+                </div>
+            </div>
+        </Card>
     )
 }

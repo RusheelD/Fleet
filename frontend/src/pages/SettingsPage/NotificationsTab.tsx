@@ -5,6 +5,8 @@ import {
     Divider,
 } from '@fluentui/react-components'
 import { SettingRow } from '../../components/shared'
+import { usePreferences } from '../../hooks'
+import type { UserPreferences } from '../../models'
 
 const useStyles = makeStyles({
     section: {
@@ -17,6 +19,13 @@ const useStyles = makeStyles({
 
 export function NotificationsTab() {
     const styles = useStyles()
+    const { preferences, updatePreference } = usePreferences()
+
+    if (!preferences) return null
+
+    const toggle = (key: keyof UserPreferences) => (checked: boolean) => {
+        updatePreference(key, checked)
+    }
 
     return (
         <Card className={styles.section}>
@@ -25,21 +34,26 @@ export function NotificationsTab() {
             <SettingRow
                 label="Agent Completed"
                 description="Notify when an agent finishes a task"
-                switchChecked
+                switchChecked={preferences.agentCompletedNotification}
+                onSwitchChange={toggle('agentCompletedNotification')}
             />
             <SettingRow
                 label="PR Opened"
                 description="Notify when agents open a pull request"
-                switchChecked
+                switchChecked={preferences.prOpenedNotification}
+                onSwitchChange={toggle('prOpenedNotification')}
             />
             <SettingRow
                 label="Agent Errors"
                 description="Notify when an agent encounters an error"
-                switchChecked
+                switchChecked={preferences.agentErrorsNotification}
+                onSwitchChange={toggle('agentErrorsNotification')}
             />
             <SettingRow
                 label="Work Item Updates"
                 description="Notify when work item status changes"
+                switchChecked={preferences.workItemUpdatesNotification}
+                onSwitchChange={toggle('workItemUpdatesNotification')}
             />
         </Card>
     )

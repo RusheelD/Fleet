@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
     makeStyles,
     tokens,
@@ -9,35 +9,23 @@ import {
     Toolbar,
     ToolbarButton,
     ToolbarDivider,
+    Spinner,
 } from '@fluentui/react-components'
 import {
     SearchRegular,
     FilterRegular,
     BoardRegular,
-    TextAlignJustifyRegular,
+    TextBulletListLtrRegular,
+    TextBulletListTreeRegular,
     ChatRegular,
+    AddRegular,
 } from '@fluentui/react-icons'
 import { ChatDrawer } from '../../components/chat'
 import { PageHeader } from '../../components/shared'
-import { KanbanColumn } from './KanbanColumn'
-import { BacklogList } from './BacklogList'
-import { CreateWorkItemDialog } from './CreateWorkItemDialog'
-import type { WorkItem } from '../../models'
-
-const MOCK_WORK_ITEMS: WorkItem[] = [
-    { id: 101, title: 'Set up authentication with OAuth', state: 'In Progress (AI)', priority: 1, assignedTo: 'Agent', tags: ['auth', 'backend'], isAI: true, description: 'Implement GitHub and Google OAuth sign-in flow.' },
-    { id: 102, title: 'Design landing page', state: 'New', priority: 2, assignedTo: 'Unassigned', tags: ['frontend', 'design'], isAI: false, description: 'Create the initial landing page design with hero section.' },
-    { id: 103, title: 'Create project model & API', state: 'Active', priority: 1, assignedTo: 'Agent', tags: ['backend', 'api'], isAI: true, description: 'Define the Project data model and CRUD endpoints.' },
-    { id: 104, title: 'Implement work item board view', state: 'In Progress (AI)', priority: 2, assignedTo: 'Agent', tags: ['frontend', 'ui'], isAI: true, description: 'Build the Kanban-style board view for work items.' },
-    { id: 105, title: 'Set up CI/CD pipeline', state: 'Resolved (AI)', priority: 1, assignedTo: 'Agent', tags: ['devops'], isAI: true, description: 'Configure GitHub Actions for build, test, and deploy.' },
-    { id: 106, title: 'Add Redis caching layer', state: 'Active', priority: 3, assignedTo: 'Unassigned', tags: ['backend', 'performance'], isAI: false, description: 'Integrate Redis output caching for API endpoints.' },
-    { id: 107, title: 'User profile page', state: 'New', priority: 3, assignedTo: 'Unassigned', tags: ['frontend'], isAI: false, description: 'Build the user profile and account settings page.' },
-    { id: 108, title: 'Agent execution logs', state: 'In Progress', priority: 2, assignedTo: 'Agent', tags: ['backend', 'agents'], isAI: true, description: 'Implement log capture and storage for agent executions.' },
-    { id: 109, title: 'GitHub repo integration', state: 'Resolved', priority: 1, assignedTo: 'You', tags: ['integration'], isAI: false, description: 'Enable linking GitHub repos to Fleet projects.' },
-    { id: 110, title: 'Dark mode support', state: 'Closed', priority: 4, assignedTo: 'You', tags: ['frontend', 'theme'], isAI: false, description: 'Add dark/light theme toggle support.' },
-    { id: 111, title: 'Search functionality', state: 'New', priority: 2, assignedTo: 'Unassigned', tags: ['frontend', 'backend'], isAI: false, description: 'Global search across projects, work items, and chats.' },
-    { id: 112, title: 'Notification system', state: 'New', priority: 3, assignedTo: 'Unassigned', tags: ['backend', 'frontend'], isAI: false, description: 'Push notifications for PR ready, agent errors, task completion.' },
-]
+import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
+import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
+import { useCurrentProject } from '../../hooks'
+import type { WorkItem, WorkItemLevel } from '../../models'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'Resolved', 'Closed']
 
@@ -68,21 +56,21 @@ const useStyles = makeStyles({
     },
     headerActions: {
         display: 'flex',
-        gap: '0.5rem',
+        gap: tokens.spacingHorizontalS,
         alignItems: 'center',
     },
     toolbarRow: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '1rem',
-        gap: '0.75rem',
+        marginBottom: tokens.spacingVerticalM,
+        gap: tokens.spacingHorizontalM,
         flexWrap: 'wrap',
     },
     toolbarLeft: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: tokens.spacingHorizontalS,
         flex: 1,
         minWidth: '200px',
     },
@@ -90,25 +78,67 @@ const useStyles = makeStyles({
         maxWidth: '280px',
         flex: 1,
     },
-    toolbarButtonActive: {
-        color: tokens.colorBrandForeground1,
-    },
     boardContainer: {
         flex: 1,
         display: 'flex',
-        gap: '0.75rem',
+        gap: tokens.spacingHorizontalM,
         overflow: 'auto',
-        paddingBottom: '1rem',
+        paddingBottom: tokens.spacingVerticalM,
     },
 })
 
 export function WorkItemsPage() {
     const styles = useStyles()
-    const [viewMode, setViewMode] = useState<'board' | 'list'>('board')
+    const { projectId } = useCurrentProject()
+    const { data: workItems, isLoading } = useWorkItems(projectId)
+    const { data: levels } = useWorkItemLevels(projectId)
+    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [chatOpen, setChatOpen] = useState(false)
+    const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
+    const [searchQuery, setSearchQuery] = useState('')
+    const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null)
 
-    const boardColumns = getBoardColumns(MOCK_WORK_ITEMS)
+    const updateMutation = useUpdateWorkItem(projectId)
+
+    const handleReparent = useCallback((itemId: number, newParentId: number | null) => {
+        updateMutation.mutate({ id: itemId, data: { parentId: newParentId } })
+    }, [updateMutation])
+
+    const handleTitleChange = useCallback((itemId: number, newTitle: string) => {
+        updateMutation.mutate({ id: itemId, data: { title: newTitle } })
+    }, [updateMutation])
+
+    const levelMap = useMemo(() => {
+        const map = new Map<number, WorkItemLevel>()
+        for (const level of levels ?? []) {
+            map.set(level.id, level)
+        }
+        return map
+    }, [levels])
+
+    const items = useMemo(() => {
+        const all = workItems ?? []
+        if (!searchQuery) return all
+        const q = searchQuery.toLowerCase()
+        return all.filter(
+            (wi) =>
+                wi.title.toLowerCase().includes(q) ||
+                wi.description.toLowerCase().includes(q) ||
+                wi.assignedTo.toLowerCase().includes(q) ||
+                wi.tags.some((t) => t.toLowerCase().includes(q)),
+        )
+    }, [workItems, searchQuery])
+
+    const boardColumns = getBoardColumns(items)
+
+    if (isLoading) {
+        return (
+            <div className={styles.page}>
+                <Spinner label="Loading work items..." />
+            </div>
+        )
+    }
 
     return (
         <div className={styles.root}>
@@ -119,60 +149,85 @@ export function WorkItemsPage() {
                     actions={
                         <div className={styles.headerActions}>
                             <Button
+                                appearance="primary"
+                                icon={<AddRegular />}
+                                onClick={() => setCreateDialogOpen(true)}
+                            >
+                                New Work Item
+                            </Button>
+                            <Button
                                 appearance={chatOpen ? 'primary' : 'outline'}
                                 icon={<ChatRegular />}
                                 onClick={() => setChatOpen(!chatOpen)}
                             >
                                 AI Chat
                             </Button>
-                            <CreateWorkItemDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
                         </div>
                     }
                 />
 
                 <div className={styles.toolbarRow}>
                     <div className={styles.toolbarLeft}>
-                        <Input
-                            className={styles.searchInput}
-                            contentBefore={<SearchRegular />}
-                            placeholder="Search work items..."
-                            size="medium"
-                        />
+                        <TabList
+                            selectedValue={viewMode}
+                            onTabSelect={(_e, data) => setViewMode(data.value as 'backlog' | 'list' | 'board')}
+                            size="small"
+                        >
+                            <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>
+                            <Tab value="list" icon={<TextBulletListLtrRegular />}>List</Tab>
+                            <Tab value="board" icon={<BoardRegular />}>Board</Tab>
+                        </TabList>
                         <Toolbar>
+                            <ToolbarDivider />
+                            <ToolbarButton icon={<SearchRegular />}>
+                                <Input
+                                    className={styles.searchInput}
+                                    placeholder="Search work items..."
+                                    size="small"
+                                    appearance="underline"
+                                    value={searchQuery}
+                                    onChange={(_e, data) => setSearchQuery(data.value)}
+                                />
+                            </ToolbarButton>
                             <ToolbarButton icon={<FilterRegular />}>Filter</ToolbarButton>
                             <ToolbarDivider />
-                            <ToolbarButton
-                                icon={<BoardRegular />}
-                                aria-label="Board view"
-                                onClick={() => setViewMode('board')}
-                                className={viewMode === 'board' ? styles.toolbarButtonActive : undefined}
-                            />
-                            <ToolbarButton
-                                icon={<TextAlignJustifyRegular />}
-                                aria-label="List view"
-                                onClick={() => setViewMode('list')}
-                                className={viewMode === 'list' ? styles.toolbarButtonActive : undefined}
-                            />
+                            <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
                         </Toolbar>
                     </div>
-                    <TabList selectedValue={viewMode} onTabSelect={(_e, data) => setViewMode(data.value as 'board' | 'list')}>
-                        <Tab value="board" icon={<BoardRegular />}>Board</Tab>
-                        <Tab value="list" icon={<TextAlignJustifyRegular />}>Backlog</Tab>
-                    </TabList>
                 </div>
 
-                {viewMode === 'board' ? (
+                {viewMode === 'backlog' && (
+                    <BacklogTreeTable
+                        items={items}
+                        levelMap={levelMap}
+                        selectedItemId={selectedItem?.id}
+                        onItemClick={setSelectedItem}
+                        onReparent={handleReparent}
+                        onTitleChange={handleTitleChange}
+                    />
+                )}
+                {viewMode === 'list' && (
+                    <BacklogList
+                        items={items}
+                        levelMap={levelMap}
+                        selectedItemId={selectedItem?.id}
+                        onItemClick={setSelectedItem}
+                        onTitleChange={handleTitleChange}
+                    />
+                )}
+                {viewMode === 'board' && (
                     <div className={styles.boardContainer}>
                         {boardColumns.map((col) => (
-                            <KanbanColumn key={col.state} state={col.state} items={col.items} />
+                            <KanbanColumn key={col.state} state={col.state} items={col.items} levelMap={levelMap} onItemClick={setSelectedItem} />
                         ))}
                     </div>
-                ) : (
-                    <BacklogList items={MOCK_WORK_ITEMS} />
                 )}
             </div>
 
-            {chatOpen && <ChatDrawer onClose={() => setChatOpen(false)} />}
+            {chatOpen && <ChatDrawer projectId={projectId ?? ''} onClose={() => setChatOpen(false)} />}
+            <CreateWorkItemDialog projectId={projectId ?? ''} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+            <WorkItemDetailDialog projectId={projectId ?? ''} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
+            <ManageLevelsDialog projectId={projectId ?? ''} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />
         </div>
     )
 }

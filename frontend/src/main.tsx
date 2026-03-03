@@ -1,15 +1,37 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MsalProvider } from '@azure/msal-react'
 import './index.css'
-import App from './App.tsx'
+import { AuthProvider, PreferencesProvider } from './hooks'
+import { msalInstance } from './auth'
+import { ThemedApp } from './ThemedApp'
 
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+})
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <FluentProvider theme={prefersDark ? webDarkTheme : webLightTheme}>
-      <App />
-    </FluentProvider>
-  </StrictMode>,
-)
+// Initialize MSAL before rendering
+msalInstance.initialize().then(() => {
+  // Handle redirect promise from login redirect
+  msalInstance.handleRedirectPromise().then(() => {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <MsalProvider instance={msalInstance}>
+            <AuthProvider>
+              <PreferencesProvider>
+                <ThemedApp />
+              </PreferencesProvider>
+            </AuthProvider>
+          </MsalProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+  })
+})

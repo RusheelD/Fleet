@@ -18,14 +18,22 @@ Fleet's navigation follows an **Azure DevOps-like** layout with a project-centri
 | Page | Description |
 | --- | --- |
 | **Dashboard** | Project overview — recent activity, agent status, key metrics |
-| **Chat** | AI conversation interface for spec creation and iteration |
 | **Work Items** | Board/list view of all work items (ADO-style boards, backlog, sprint views) |
 | **Agent Monitor** | Status dashboard + log stream access for running agents |
+
+### Chat Pane
+
+The AI chat is **not a separate page** — it is a **slide-out drawer/pane** accessible from any project-scoped view. Users can open the chat from the sidebar or a button on any project page (Dashboard, Work Items, Agent Monitor). This keeps the chat contextually available without navigating away from the current view.
+
+- The chat pane overlays the current page content (typically on the right side)
+- It persists session state while the user switches between project pages
+- Chat sessions are scoped to the current project
 
 ### Navigation Model
 
 - **Global nav** (sidebar or top bar): All Projects, Search, Settings, Subscription
-- **Project nav** (contextual, appears after selecting a project): Dashboard, Chat, Work Items, Agent Monitor
+- **Project nav** (contextual, appears after selecting a project): Dashboard, Work Items, Agent Monitor
+- **Chat** is accessible via a toggle button in the project nav — opens a slide-out pane, not a page
 - Similar to how ADO scopes navigation to the selected project/org
 
 > **Note:** Exact layout, menu placement, and information architecture will evolve. This captures the intent, not pixel-perfect design.
@@ -34,19 +42,24 @@ Fleet's navigation follows an **Azure DevOps-like** layout with a project-centri
 
 **React Router** — standard choice for React SPAs, well-supported by the ecosystem.
 
-### Likely route structure
+### Route Design Principles
+
+- **No IDs in page routes** — Page URLs must be human-readable. For projects, use the project **slug** (derived from the title) instead of an opaque ID. Other entity references (work items, agents, chat sessions) are managed via client-side state (React Context, component state), not URL parameters.
+- Backend API routes (e.g., `/api/projects/{projectId}/work-items`) still use IDs — those are API calls, not page routes.
+
+### Route structure
 
 ```text
-/                         → Redirect to /projects
-/projects                 → All Projects list
-/projects/:id             → Project Dashboard
-/projects/:id/chat        → AI Chat (with chat history sidebar)
-/projects/:id/chat/:chatId → Specific chat session
-/projects/:id/work-items  → Work Items board/list
-/projects/:id/agents      → Agent Monitor
-/settings                 → Account settings
-/subscription             → Plan & billing
+/                                 → Redirect to /projects
+/projects                         → All Projects list
+/projects/:slug                   → Project Dashboard
+/projects/:slug/work-items        → Work Items board/list
+/projects/:slug/agents            → Agent Monitor
+/settings                         → Account settings
+/subscription                     → Plan & billing
 ```
+
+> **Note:** There is no `/projects/:slug/chat` route. Chat is a pane/drawer accessible from any project-scoped page.
 
 ## State Management
 

@@ -9,6 +9,11 @@ import {
     Badge,
     Divider,
     ProgressBar,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
 } from '@fluentui/react-components'
 import {
     BotRegular,
@@ -96,9 +101,19 @@ interface ExecutionCardProps {
 
 export function ExecutionCard({ execution }: ExecutionCardProps) {
     const styles = useStyles()
+    const toasterId = useId('exec-toaster')
+    const { dispatchToast } = useToastController(toasterId)
+
+    const notify = (msg: string) => {
+        dispatchToast(
+            <Toast><ToastTitle>{msg}</ToastTitle></Toast>,
+            { intent: 'info' },
+        )
+    }
 
     return (
         <Card className={styles.executionCard}>
+            <Toaster toasterId={toasterId} />
             <div className={styles.executionHeader}>
                 <div className={styles.executionTitle}>
                     <div className={styles.flexRowGap}>
@@ -116,12 +131,12 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
                 <div className={styles.executionActions}>
                     {execution.status === 'running' && (
                         <>
-                            <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" />
-                            <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" />
+                            <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={() => notify('Pausing agent execution...')} />
+                            <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={() => notify('Stopping agent execution...')} />
                         </>
                     )}
                     {execution.status === 'failed' && (
-                        <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Retry" />
+                        <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Retry" onClick={() => notify('Retrying agent execution...')} />
                     )}
                 </div>
             </div>
@@ -158,9 +173,9 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
 
             {execution.status === 'completed' && (
                 <div className={styles.completedActions}>
-                    <Button appearance="outline" size="small" icon={<BranchRegular />}>View PR</Button>
-                    <Button appearance="outline" size="small" icon={<CodeRegular />}>View Changes</Button>
-                    <Button appearance="outline" size="small" icon={<DocumentRegular />}>Docs</Button>
+                    <Button appearance="outline" size="small" icon={<BranchRegular />} onClick={() => notify('PR view is not available in this version')}>View PR</Button>
+                    <Button appearance="outline" size="small" icon={<CodeRegular />} onClick={() => notify('Code diff view coming soon')}>View Changes</Button>
+                    <Button appearance="outline" size="small" icon={<DocumentRegular />} onClick={() => notify('Documentation view coming soon')}>Docs</Button>
                 </div>
             )}
         </Card>

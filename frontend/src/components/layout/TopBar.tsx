@@ -11,7 +11,7 @@ import {
     GridRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
-import { UserMenu } from './UserMenu'
+import { UserMenu } from './'
 
 const useStyles = makeStyles({
     topBar: {

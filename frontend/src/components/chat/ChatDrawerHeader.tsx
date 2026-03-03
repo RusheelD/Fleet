@@ -4,11 +4,9 @@ import {
     Caption1,
     Text,
     Button,
-    Badge,
 } from '@fluentui/react-components'
 import {
     BotRegular,
-    CheckmarkCircleRegular,
     DismissRegular,
 } from '@fluentui/react-icons'
 
@@ -41,9 +39,6 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         alignItems: 'center',
     },
-    badgeIcon: {
-        marginRight: '0.25rem',
-    },
 })
 
 interface ChatDrawerHeaderProps {
@@ -63,10 +58,6 @@ export function ChatDrawerHeader({ onClose }: ChatDrawerHeaderProps) {
                 </div>
             </div>
             <div className={styles.drawerHeaderRight}>
-                <Badge appearance="filled" color="success" size="small">
-                    <CheckmarkCircleRegular className={styles.badgeIcon} />
-                    12 items generated
-                </Badge>
                 <Button appearance="subtle" size="small" icon={<DismissRegular />} onClick={onClose} aria-label="Close chat" />
             </div>
         </div>

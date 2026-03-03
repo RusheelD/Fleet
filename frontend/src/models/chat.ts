@@ -12,3 +12,9 @@ export interface ChatSessionData {
   timestamp: string
   isActive: boolean
 }
+
+export interface ChatData {
+  sessions: ChatSessionData[]
+  messages: ChatMessageData[]
+  suggestions: string[]
+}

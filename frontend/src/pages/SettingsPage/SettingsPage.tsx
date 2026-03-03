@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
     makeStyles,
     Tab,
     TabList,
+    Spinner,
 } from '@fluentui/react-components'
 import {
     PersonRegular,
@@ -12,11 +14,8 @@ import {
     AlertRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
-import { ProfileTab } from './ProfileTab'
-import { ConnectionsTab } from './ConnectionsTab'
-import { AppearanceTab } from './AppearanceTab'
-import { NotificationsTab } from './NotificationsTab'
-import { SecurityTab } from './SecurityTab'
+import { ProfileTab, ConnectionsTab, AppearanceTab, NotificationsTab, SecurityTab } from './'
+import { useUserSettings } from '../../proxies'
 
 const useStyles = makeStyles({
     page: {
@@ -32,7 +31,18 @@ const useStyles = makeStyles({
 
 export function SettingsPage() {
     const styles = useStyles()
-    const [tab, setTab] = useState<string>('profile')
+    const [searchParams] = useSearchParams()
+    const initialTab = searchParams.get('tab') ?? 'profile'
+    const [tab, setTab] = useState<string>(initialTab)
+    const { data: settings, isLoading } = useUserSettings()
+
+    if (isLoading || !settings) {
+        return (
+            <div className={styles.page}>
+                <Spinner label="Loading settings..." />
+            </div>
+        )
+    }
 
     return (
         <div className={styles.page}>
@@ -49,8 +59,8 @@ export function SettingsPage() {
                 <Tab value="security" icon={<ShieldKeyholeRegular />}>Security</Tab>
             </TabList>
 
-            {tab === 'profile' && <ProfileTab />}
-            {tab === 'connections' && <ConnectionsTab />}
+            {tab === 'profile' && <ProfileTab profile={settings.profile} />}
+            {tab === 'connections' && <ConnectionsTab connections={settings.connections} />}
             {tab === 'appearance' && <AppearanceTab />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'security' && <SecurityTab />}

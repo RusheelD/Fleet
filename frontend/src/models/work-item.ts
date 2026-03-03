@@ -9,4 +9,16 @@ export interface WorkItem {
   tags: string[]
   isAI: boolean
   description: string
+  parentId: number | null
+  childIds: number[]
+  levelId: number | null
+}
+
+export interface WorkItemLevel {
+  id: number
+  name: string
+  iconName: string
+  color: string
+  ordinal: number
+  isDefault: boolean
 }

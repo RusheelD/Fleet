@@ -34,6 +34,7 @@ If no spec documents exist, the user **chats back and forth** with the AI to des
 
 ### Chat Behavior
 
+- **Pane, not a page** — The chat is a slide-out drawer/pane accessible from any project-scoped view (Dashboard, Work Items, Agent Monitor), not a separate routable page. This keeps the user in context while chatting.
 - **Iterative** — The spec and work items can be continuously refined through conversation (like editing code with Copilot)
 - **Persistent** — Chat history persists across sessions
 - **Multi-session** — Users can start new chats and navigate back to previous ones

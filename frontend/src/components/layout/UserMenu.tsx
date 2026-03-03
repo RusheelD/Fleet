@@ -16,6 +16,7 @@ import {
     SignOutRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../hooks'
 
 const useStyles = makeStyles({
     userMenuHeader: {
@@ -29,20 +30,27 @@ const useStyles = makeStyles({
 export function UserMenu() {
     const styles = useStyles()
     const navigate = useNavigate()
+    const { logout, user } = useAuth()
+    const displayName = user?.displayName || 'User'
+    const email = user?.email || ''
+
+    const handleSignOut = () => {
+        logout() // MSAL handles the redirect
+    }
 
     return (
         <Popover>
             <PopoverTrigger disableButtonEnhancement>
                 <Button appearance="subtle" size="small">
-                    <Avatar name="Fleet User" size={24} />
+                    <Avatar name={displayName} size={24} />
                 </Button>
             </PopoverTrigger>
             <PopoverSurface>
                 <div className={styles.userMenuHeader}>
-                    <Avatar name="Fleet User" size={40} />
+                    <Avatar name={displayName} size={40} />
                     <div>
-                        <Text weight="semibold" block>Fleet User</Text>
-                        <Text size={200}>user@fleet.dev</Text>
+                        <Text weight="semibold" block>{displayName}</Text>
+                        {email && <Text size={200}>{email}</Text>}
                     </div>
                 </div>
                 <Divider />
@@ -53,7 +61,7 @@ export function UserMenu() {
                     <MenuItem icon={<CreditCardPersonRegular />} onClick={() => navigate('/subscription')}>
                         Subscription
                     </MenuItem>
-                    <MenuItem icon={<SignOutRegular />}>
+                    <MenuItem icon={<SignOutRegular />} onClick={handleSignOut}>
                         Sign Out
                     </MenuItem>
                 </MenuList>

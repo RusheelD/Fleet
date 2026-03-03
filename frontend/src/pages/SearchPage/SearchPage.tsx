@@ -3,6 +3,7 @@ import {
     makeStyles,
     mergeClasses,
     Input,
+    Spinner,
     Tab,
     TabList,
 } from '@fluentui/react-components'
@@ -14,21 +15,18 @@ import {
     BotRegular,
 } from '@fluentui/react-icons'
 import { PageHeader, EmptyState } from '../../components/shared'
-import { SearchResultCard } from './SearchResultCard'
-import type { SearchResult } from '../../models'
+import { SearchResultCard } from './'
+import { useSearch } from '../../proxies'
 
 type SearchCategory = 'all' | 'projects' | 'workitems' | 'chats' | 'agents'
 
-const MOCK_RESULTS: SearchResult[] = [
-    { type: 'project', title: 'Fleet Platform', description: 'AI-powered project management', meta: 'Last active 2 hours ago' },
-    { type: 'workitem', title: '#101 — Set up authentication with OAuth', description: 'In Progress (AI) · Priority 1', meta: 'Fleet Platform' },
-    { type: 'workitem', title: '#104 — Implement work item board view', description: 'In Progress (AI) · Priority 2', meta: 'Fleet Platform' },
-    { type: 'chat', title: 'Product Spec Discussion', description: '12 items generated from conversation', meta: 'Fleet Platform · 2 hours ago' },
-    { type: 'agent', title: 'Backend Agent — OAuth Implementation', description: 'Running · 45% complete', meta: 'Fleet Platform · Work Item #101' },
-    { type: 'workitem', title: '#105 — Set up CI/CD pipeline', description: 'Resolved (AI) · Priority 1', meta: 'Fleet Platform' },
-    { type: 'project', title: 'E-Commerce API', description: 'RESTful API for online marketplace', meta: 'Last active 5 hours ago' },
-    { type: 'chat', title: 'Auth Implementation Plan', description: 'OAuth flow discussion and planning', meta: 'Fleet Platform · 1 day ago' },
-]
+const categoryToType: Record<SearchCategory, string | undefined> = {
+    all: undefined,
+    projects: 'project',
+    workitems: 'workitem',
+    chats: 'chat',
+    agents: 'agent',
+}
 
 const useStyles = makeStyles({
     page: {
@@ -55,17 +53,9 @@ export function SearchPage() {
     const styles = useStyles()
     const [query, setQuery] = useState('')
     const [category, setCategory] = useState<SearchCategory>('all')
+    const { data: results, isLoading } = useSearch(query, categoryToType[category])
 
-    const filtered = MOCK_RESULTS.filter((r) => {
-        if (category !== 'all') {
-            const typeMap: Record<string, string> = { projects: 'project', workitems: 'workitem', chats: 'chat', agents: 'agent' }
-            if (r.type !== typeMap[category]) return false
-        }
-        if (query && !r.title.toLowerCase().includes(query.toLowerCase()) && !r.description.toLowerCase().includes(query.toLowerCase())) {
-            return false
-        }
-        return true
-    })
+    const filtered = results ?? []
 
     return (
         <div className={styles.page}>
@@ -84,14 +74,16 @@ export function SearchPage() {
             />
 
             <TabList selectedValue={category} onTabSelect={(_e, data) => setCategory(data.value as SearchCategory)}>
-                <Tab value="all">All ({MOCK_RESULTS.length})</Tab>
+                <Tab value="all">All ({filtered.length})</Tab>
                 <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
                 <Tab value="workitems" icon={<BoardRegular />}>Work Items</Tab>
                 <Tab value="chats" icon={<ChatRegular />}>Chats</Tab>
                 <Tab value="agents" icon={<BotRegular />}>Agents</Tab>
             </TabList>
 
-            {filtered.length > 0 ? (
+            {isLoading ? (
+                <Spinner label="Searching..." />
+            ) : filtered.length > 0 ? (
                 <div className={styles.resultsList}>
                     {filtered.map((result, i) => (
                         <SearchResultCard key={i} result={result} />

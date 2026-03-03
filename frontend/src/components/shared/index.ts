@@ -1,3 +1,6 @@
 export { PageHeader } from './PageHeader'
 export { EmptyState } from './EmptyState'
 export { SettingRow } from './SettingRow'
+export { SplitView } from './SplitView'
+export { LevelBadge } from './LevelBadge'
+export { ProtectedRoute } from './ProtectedRoute'

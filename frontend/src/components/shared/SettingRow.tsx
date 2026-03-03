@@ -35,7 +35,7 @@ export function SettingRow({ label, description, action, switchChecked, onSwitch
             </div>
             {action ?? (
                 <Switch
-                    defaultChecked={switchChecked}
+                    checked={switchChecked}
                     onChange={(_e, data) => onSwitchChange?.(data.checked)}
                 />
             )}

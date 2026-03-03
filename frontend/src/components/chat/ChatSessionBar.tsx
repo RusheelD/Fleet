@@ -31,14 +31,15 @@ interface ChatSessionBarProps {
     sessions: ChatSessionData[]
     activeSessionId: string
     onSelectSession: (id: string) => void
+    onNewSession?: () => void
 }
 
-export function ChatSessionBar({ sessions, activeSessionId, onSelectSession }: ChatSessionBarProps) {
+export function ChatSessionBar({ sessions, activeSessionId, onSelectSession, onNewSession }: ChatSessionBarProps) {
     const styles = useStyles()
 
     return (
         <div className={styles.sessionBar}>
-            <Button appearance="subtle" size="small" icon={<AddRegular />} aria-label="New chat" />
+            <Button appearance="subtle" size="small" icon={<AddRegular />} aria-label="New chat" onClick={onNewSession} />
             <Divider vertical />
             {sessions.map((session) => (
                 <Button

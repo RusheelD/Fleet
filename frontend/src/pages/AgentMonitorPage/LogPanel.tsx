@@ -77,16 +77,17 @@ const useStyles = makeStyles({
 
 interface LogPanelProps {
     logs: LogEntry[]
+    onRefresh?: () => void
 }
 
-export function LogPanel({ logs }: LogPanelProps) {
+export function LogPanel({ logs, onRefresh }: LogPanelProps) {
     const styles = useStyles()
 
     return (
         <div className={styles.logPanel}>
             <div className={styles.logHeader}>
                 <Title3 className={styles.logTitle}>Live Logs</Title3>
-                <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" />
+                <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" onClick={onRefresh} />
             </div>
             <div className={styles.logList}>
                 {logs.map((log, i) => (

@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
     tokens,
@@ -6,40 +6,25 @@ import {
     Card,
     Button,
     Divider,
+    Spinner,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
 } from '@fluentui/react-components'
 import {
     ChatRegular,
     BoardRegular,
     BotRegular,
-    CheckmarkCircleRegular,
-    PersonRegular,
     RocketRegular,
-    CodeRegular,
-    BranchRegular,
     LinkRegular,
     OpenRegular,
-    ArrowTrendingRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
-import { MetricCard } from './MetricCard'
-import { ActivityItem } from './ActivityItem'
-import { AgentStatusRow } from './AgentStatusRow'
-import { QuickActionCard } from './QuickActionCard'
-
-const MOCK_ACTIVITIES = [
-    { icon: <BranchRegular />, text: 'Agent opened PR #42: "Add user authentication"', time: '15 min ago' },
-    { icon: <CheckmarkCircleRegular />, text: 'Work item "Setup CI/CD pipeline" resolved', time: '1 hour ago' },
-    { icon: <BotRegular />, text: '3 agents started working on "Implement Search API"', time: '2 hours ago' },
-    { icon: <CodeRegular />, text: 'Agent pushed 12 commits to feature/auth', time: '3 hours ago' },
-    { icon: <PersonRegular />, text: 'You created work item "Add dark mode support"', time: '5 hours ago' },
-]
-
-const MOCK_AGENTS = [
-    { name: 'Manager Agent', status: 'running', task: 'Coordinating auth implementation', progress: 0.6 },
-    { name: 'Backend Agent', status: 'running', task: 'Implementing OAuth endpoints', progress: 0.4 },
-    { name: 'Frontend Agent', status: 'running', task: 'Building login components', progress: 0.35 },
-    { name: 'Testing Agent', status: 'idle', task: 'Waiting for code completion', progress: 0 },
-]
+import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
+import { useProjectDashboardBySlug, resolveIcon } from '../../proxies'
+import { useCurrentProject } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -112,29 +97,48 @@ const useStyles = makeStyles({
 
 export function ProjectDashboardPage() {
     const styles = useStyles()
-    const { projectId } = useParams()
+    const { slug } = useCurrentProject()
     const navigate = useNavigate()
+    const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
+    const toasterId = useId('dashboard-toaster')
+    const { dispatchToast } = useToastController(toasterId)
+
+    const notify = (msg: string) => {
+        dispatchToast(
+            <Toast><ToastTitle>{msg}</ToastTitle></Toast>,
+            { intent: 'info' },
+        )
+    }
+
+    if (isLoading || !dashboard) {
+        return (
+            <div className={styles.page}>
+                <Spinner label="Loading dashboard..." />
+            </div>
+        )
+    }
 
     return (
         <div className={styles.page}>
+            <Toaster toasterId={toasterId} />
             <PageHeader
-                title="Fleet Platform"
+                title={dashboard.title}
                 subtitle={undefined}
                 actions={
                     <div className={styles.headerActions}>
-                        <Button appearance="primary" icon={<ChatRegular />} onClick={() => navigate(`/projects/${projectId}/work-items`)}>
+                        <Button appearance="primary" icon={<ChatRegular />} onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}>
                             Open Chat
                         </Button>
-                        <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${projectId}/work-items`)}>
+                        <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${slug}/work-items`)}>
                             Work Items
                         </Button>
                     </div>
                 }
             />
 
-            <span className={styles.repoLink}>
+            <span className={styles.repoLink} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
                 <LinkRegular />
-                RusheelD/Fleet
+                {dashboard.repo}
                 <OpenRegular className={styles.openLinkIcon} />
             </span>
 
@@ -144,33 +148,40 @@ export function ProjectDashboardPage() {
                     icon={<ChatRegular />}
                     title="AI Chat"
                     description="Define specs & generate items"
-                    onClick={() => navigate(`/projects/${projectId}/work-items`)}
+                    onClick={() => navigate(`/projects/${slug}/work-items`)}
                 />
                 <QuickActionCard
                     icon={<BoardRegular />}
                     title="Work Items"
                     description="View board & backlog"
-                    onClick={() => navigate(`/projects/${projectId}/work-items`)}
+                    onClick={() => navigate(`/projects/${slug}/work-items`)}
                 />
                 <QuickActionCard
                     icon={<BotRegular />}
                     title="Agent Monitor"
                     description="Track agent activity"
-                    onClick={() => navigate(`/projects/${projectId}/agents`)}
+                    onClick={() => navigate(`/projects/${slug}/agents`)}
                 />
                 <QuickActionCard
                     icon={<RocketRegular />}
                     title="Run Agents"
                     description="Start new agent execution"
+                    onClick={() => notify('Agent execution is not available in this version')}
                 />
             </div>
 
             {/* Metrics */}
             <div className={styles.metricsGrid}>
-                <MetricCard icon={<BoardRegular />} label="Total Work Items" value={24} subtext="8 active · 12 resolved · 4 closed" />
-                <MetricCard icon={<BotRegular />} label="Active Agents" value={3} subtext="of 5 allocated" />
-                <MetricCard icon={<BranchRegular />} label="Pull Requests" value={7} subtext="3 open · 4 merged" />
-                <MetricCard icon={<ArrowTrendingRegular />} label="Completion" value="67%" subtext="" progress={0.67} />
+                {dashboard.metrics.map((metric) => (
+                    <MetricCard
+                        key={metric.label}
+                        icon={resolveIcon(metric.icon)}
+                        label={metric.label}
+                        value={metric.value}
+                        subtext={metric.subtext}
+                        progress={metric.progress ?? undefined}
+                    />
+                ))}
             </div>
 
             {/* Two column layout */}
@@ -179,12 +190,12 @@ export function ProjectDashboardPage() {
                 <Card className={styles.sectionCard}>
                     <div className={styles.sectionHeader}>
                         <Title3>Recent Activity</Title3>
-                        <Button appearance="transparent" size="small">View all</Button>
+                        <Button appearance="transparent" size="small" onClick={() => navigate(`/projects/${slug}/agents`)}>View all</Button>
                     </div>
                     <Divider />
                     <div className={styles.activityList}>
-                        {MOCK_ACTIVITIES.map((activity, i) => (
-                            <ActivityItem key={i} icon={activity.icon} text={activity.text} time={activity.time} />
+                        {dashboard.activities.map((activity, i) => (
+                            <ActivityItem key={i} icon={resolveIcon(activity.icon)} text={activity.text} time={activity.time} />
                         ))}
                     </div>
                 </Card>
@@ -196,14 +207,14 @@ export function ProjectDashboardPage() {
                         <Button
                             appearance="transparent"
                             size="small"
-                            onClick={() => navigate(`/projects/${projectId}/agents`)}
+                            onClick={() => navigate(`/projects/${slug}/agents`)}
                         >
                             Monitor all
                         </Button>
                     </div>
                     <Divider />
                     <div className={styles.agentList}>
-                        {MOCK_AGENTS.map((agent, i) => (
+                        {dashboard.agents.map((agent, i) => (
                             <AgentStatusRow
                                 key={i}
                                 name={agent.name}

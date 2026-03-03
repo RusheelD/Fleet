@@ -9,9 +9,15 @@ import {
     Button,
     Badge,
     Divider,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
 } from '@fluentui/react-components'
 import { CheckmarkCircleRegular } from '@fluentui/react-icons'
 import type { PlanData } from '../../models'
+import { resolveIcon } from '../../proxies'
 
 const useStyles = makeStyles({
     planCard: {
@@ -74,11 +80,21 @@ interface PlanCardProps {
 
 export function PlanCard({ plan }: PlanCardProps) {
     const styles = useStyles()
+    const toasterId = useId('plan-toaster')
+    const { dispatchToast } = useToastController(toasterId)
+
+    const handlePlanAction = () => {
+        dispatchToast(
+            <Toast><ToastTitle>Plan changes are not available in this version</ToastTitle></Toast>,
+            { intent: 'info' },
+        )
+    }
 
     return (
         <Card
             className={mergeClasses(styles.planCard, plan.isCurrent ? styles.planCardCurrent : undefined)}
         >
+            <Toaster toasterId={toasterId} />
             {plan.isCurrent && (
                 <Badge
                     appearance="filled"
@@ -89,7 +105,7 @@ export function PlanCard({ plan }: PlanCardProps) {
                 </Badge>
             )}
             <div className={styles.planName}>
-                {plan.icon}
+                {resolveIcon(plan.icon)}
                 <Title3>{plan.name}</Title3>
             </div>
             <div className={styles.planPrice}>
@@ -110,6 +126,7 @@ export function PlanCard({ plan }: PlanCardProps) {
                 appearance={plan.buttonAppearance}
                 disabled={plan.isCurrent}
                 className={styles.fullWidthButton}
+                onClick={handlePlanAction}
             >
                 {plan.buttonLabel}
             </Button>

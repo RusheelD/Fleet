@@ -40,9 +40,11 @@ interface AccountRowProps {
     connectedAs?: string
     /** Override the default action area */
     actions?: ReactNode
+    /** Called when View or Connect is clicked */
+    onAction?: (action: 'view' | 'connect', name: string) => void
 }
 
-export function AccountRow({ name, connectedAs, actions }: AccountRowProps) {
+export function AccountRow({ name, connectedAs, actions, onAction }: AccountRowProps) {
     const styles = useStyles()
     const isConnected = !!connectedAs
 
@@ -61,10 +63,10 @@ export function AccountRow({ name, connectedAs, actions }: AccountRowProps) {
                 isConnected ? (
                     <div className={styles.connectionActions}>
                         <Badge appearance="filled" color="success" size="small">Connected</Badge>
-                        <Button appearance="subtle" size="small" icon={<OpenRegular />}>View</Button>
+                        <Button appearance="subtle" size="small" icon={<OpenRegular />} onClick={() => onAction?.('view', name)}>View</Button>
                     </div>
                 ) : (
-                    <Button appearance="outline" size="small">Connect</Button>
+                    <Button appearance="outline" size="small" onClick={() => onAction?.('connect', name)}>Connect</Button>
                 )
             )}
         </div>

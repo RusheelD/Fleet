@@ -13,6 +13,7 @@ import {
     BotRegular,
     ClockRegular,
 } from '@fluentui/react-icons'
+import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import type { SearchResult } from '../../models'
 
@@ -83,9 +84,28 @@ interface SearchResultCardProps {
 
 export function SearchResultCard({ result }: SearchResultCardProps) {
     const styles = useStyles()
+    const navigate = useNavigate()
+
+    const handleClick = () => {
+        // Navigate based on result type. The meta field typically contains project/item IDs.
+        switch (result.type) {
+            case 'project':
+                navigate(`/projects/${encodeURIComponent(result.title.toLowerCase().replace(/\s+/g, '-'))}`)
+                break
+            case 'workitem':
+                navigate('/projects')
+                break
+            case 'agent':
+                navigate('/projects')
+                break
+            case 'chat':
+                navigate('/projects')
+                break
+        }
+    }
 
     return (
-        <Card className={styles.resultCard}>
+        <Card className={styles.resultCard} onClick={handleClick}>
             <span className={styles.resultIcon}>{ICON_MAP[result.type]}</span>
             <div className={styles.resultContent}>
                 <Text className={styles.resultTitle}>{result.title}</Text>

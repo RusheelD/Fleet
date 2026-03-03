@@ -22,7 +22,7 @@ const useStyles = makeStyles({
         position: 'relative',
     },
     brandIcon: {
-        color: tokens.colorBrandForeground1,
+        color: tokens.colorPaletteDarkOrangeForeground1,
         fontSize: '20px',
         flexShrink: 0,
     },

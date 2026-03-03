@@ -5,6 +5,8 @@ import {
     Divider,
 } from '@fluentui/react-components'
 import { SettingRow } from '../../components/shared'
+import { usePreferences } from '../../hooks'
+import type { UserPreferences } from '../../models'
 
 const useStyles = makeStyles({
     section: {
@@ -17,6 +19,13 @@ const useStyles = makeStyles({
 
 export function AppearanceTab() {
     const styles = useStyles()
+    const { preferences, updatePreference } = usePreferences()
+
+    if (!preferences) return null
+
+    const toggle = (key: keyof UserPreferences) => (checked: boolean) => {
+        updatePreference(key, checked)
+    }
 
     return (
         <Card className={styles.section}>
@@ -25,15 +34,20 @@ export function AppearanceTab() {
             <SettingRow
                 label="Dark Mode"
                 description="Use dark theme (follows system preference by default)"
-                switchChecked
+                switchChecked={preferences.darkMode}
+                onSwitchChange={toggle('darkMode')}
             />
             <SettingRow
                 label="Compact Mode"
                 description="Reduce spacing in lists and boards"
+                switchChecked={preferences.compactMode}
+                onSwitchChange={toggle('compactMode')}
             />
             <SettingRow
                 label="Sidebar Collapsed by Default"
                 description="Start with collapsed sidebar on page load"
+                switchChecked={preferences.sidebarCollapsed}
+                onSwitchChange={toggle('sidebarCollapsed')}
             />
         </Card>
     )
