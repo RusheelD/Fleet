@@ -18,5 +18,5 @@ public class LLMOptions
     public int GenerateTimeoutSeconds { get; set; } = 1800;
     /// <summary>Max tool loops for work-item generation (higher to allow many creates).</summary>
     public int GenerateMaxToolLoops { get; set; } = 200;
-    public int MaxToolOutputLength { get; set; } = 8000;
+    public int MaxToolOutputLength { get; set; } = 24000;
 }
