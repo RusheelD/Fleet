@@ -21,7 +21,17 @@ public class AuthRepository(FleetDbContext context) : IAuthRepository
     public async Task<UserProfile> CreateUserAsync(UserProfile user)
     {
         context.UserProfiles.Add(user);
-        await context.SaveChangesAsync();
-        return user;
+        try
+        {
+            await context.SaveChangesAsync();
+            return user;
+        }
+        catch (DbUpdateException)
+        {
+            // Detach the failed entity so it doesn't pollute subsequent
+            // SaveChangesAsync calls within the same scoped DbContext.
+            context.Entry(user).State = EntityState.Detached;
+            throw;
+        }
     }
 }

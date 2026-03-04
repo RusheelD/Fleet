@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Auth;
 
@@ -69,11 +70,28 @@ public class AuthService(
             Preferences = new UserPreferences()
         };
 
-        await authRepository.CreateUserAsync(user);
-        logger.AuthAutoProvisionedUser(user.Id, oid.SanitizeForLogging(), email.SanitizeForLogging());
+        try
+        {
+            await authRepository.CreateUserAsync(user);
+            logger.AuthAutoProvisionedUser(user.Id, oid.SanitizeForLogging(), email.SanitizeForLogging());
+            _resolvedUserId = user.Id;
+            return user;
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent request already created this user (race condition on first login).
+            // Re-fetch the now-existing row instead of failing.
+            var concurrentlyCreated = await authRepository.GetByEntraObjectIdAsync(oid);
+            if (concurrentlyCreated is not null)
+            {
+                logger.AuthResolvedUser(oid.SanitizeForLogging(), concurrentlyCreated.Id);
+                _resolvedUserId = concurrentlyCreated.Id;
+                return concurrentlyCreated;
+            }
 
-        _resolvedUserId = user.Id;
-        return user;
+            // If still not found, the constraint violation was for a different reason — rethrow.
+            throw;
+        }
     }
 
     private static string DeriveUsername(string email, string displayName)
