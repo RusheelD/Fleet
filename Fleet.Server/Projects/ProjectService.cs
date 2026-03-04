@@ -1,6 +1,7 @@
 using Fleet.Server.Agents;
 using Fleet.Server.Auth;
 using Fleet.Server.GitHub;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Fleet.Server.WorkItems;
 
@@ -19,51 +20,71 @@ public class ProjectService(
 
     public async Task<IReadOnlyList<ProjectDto>> GetAllProjectsAsync()
     {
-        logger.LogInformation("Retrieving all projects");
+        logger.ProjectsRetrievingAll();
         return await projectRepository.GetAllAsync();
     }
 
     public async Task<SlugCheckResult> CheckSlugAsync(string name)
     {
-        logger.LogInformation("Checking slug availability for name: {Name}", name);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectName"] = name
+        });
+
+        logger.ProjectsCheckingSlug(name.SanitizeForLogging());
         var slug = SlugHelper.GenerateSlug(name);
         if (string.IsNullOrEmpty(slug))
         {
-            logger.LogWarning("Generated slug was empty for name: {Name}", name);
+            logger.ProjectsSlugEmpty(name.SanitizeForLogging());
             return new SlugCheckResult(slug, false);
         }
 
         var available = await projectRepository.IsSlugAvailableAsync(slug);
-        logger.LogInformation("Slug {Slug} availability: {Available}", slug, available);
+        logger.ProjectsSlugAvailability(slug.SanitizeForLogging(), available);
         return new SlugCheckResult(slug, available);
     }
 
     public async Task<ProjectDto> CreateProjectAsync(string title, string description, string repo)
     {
-        logger.LogInformation("Creating project with title: {Title}", title);
+        logger.ProjectsCreating(title.SanitizeForLogging());
         var ownerId = await GetCurrentOwnerIdAsync();
         return await projectRepository.CreateAsync(ownerId, title, description, repo);
     }
 
     public async Task<ProjectDto?> UpdateProjectAsync(string id, string? title, string? description, string? repo)
     {
-        logger.LogInformation("Updating project {ProjectId}", id);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = id
+        });
+
+        logger.ProjectsUpdating(id.SanitizeForLogging());
         return await projectRepository.UpdateAsync(id, title, description, repo);
     }
 
     public async Task<bool> DeleteProjectAsync(string id)
     {
-        logger.LogInformation("Deleting project {ProjectId}", id);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = id
+        });
+
+        logger.ProjectsDeleting(id.SanitizeForLogging());
         return await projectRepository.DeleteAsync(id);
     }
 
     public async Task<ProjectDashboardDto?> GetDashboardBySlugAsync(string slug)
     {
-        logger.LogInformation("Retrieving dashboard for slug: {Slug}", slug);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectSlug"] = slug
+        });
+
+        logger.ProjectsDashboardBySlug(slug.SanitizeForLogging());
         var project = await projectRepository.GetBySlugAsync(slug);
         if (project is null)
         {
-            logger.LogWarning("Project not found for slug: {Slug}", slug);
+            logger.ProjectsNotFoundBySlug(slug.SanitizeForLogging());
             return null;
         }
 
@@ -72,11 +93,16 @@ public class ProjectService(
 
     public async Task<ProjectDashboardDto?> GetDashboardAsync(string projectId)
     {
-        logger.LogInformation("Retrieving dashboard for project {ProjectId}", projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId
+        });
+
+        logger.ProjectsDashboardById(projectId.SanitizeForLogging());
         var project = await projectRepository.GetByIdAsync(projectId);
         if (project is null)
         {
-            logger.LogWarning("Project not found: {ProjectId}", projectId);
+            logger.ProjectsNotFoundById(projectId.SanitizeForLogging());
             return null;
         }
 
@@ -111,7 +137,7 @@ public class ProjectService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to fetch GitHub stats for repo {Repo}", project.Repo);
+            logger.ProjectsGitHubStatsFailed(ex, (project.Repo ?? string.Empty).SanitizeForLogging());
             gitHubStats = new GitHubRepoStats(0, 0, 0, []);
         }
 
@@ -146,7 +172,7 @@ public class ProjectService(
             project.Id,
             project.Slug,
             project.Title,
-            project.Repo,
+            project.Repo ?? string.Empty,
             metrics,
             activities,
             [.. agents]

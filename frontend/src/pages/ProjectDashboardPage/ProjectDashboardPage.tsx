@@ -148,7 +148,7 @@ export function ProjectDashboardPage() {
                     icon={<ChatRegular />}
                     title="AI Chat"
                     description="Define specs & generate items"
-                    onClick={() => navigate(`/projects/${slug}/work-items`)}
+                    onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}
                 />
                 <QuickActionCard
                     icon={<BoardRegular />}

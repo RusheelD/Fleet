@@ -1,4 +1,5 @@
 using Fleet.Server.Models;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.Subscriptions;
 
@@ -8,7 +9,7 @@ public class SubscriptionService(
 {
     public async Task<SubscriptionDataDto> GetSubscriptionDataAsync()
     {
-        logger.LogInformation("Retrieving subscription data");
+        logger.SubscriptionsRetrieving();
         return await subscriptionRepository.GetSubscriptionDataAsync();
     }
 }

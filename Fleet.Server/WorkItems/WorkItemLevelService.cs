@@ -1,4 +1,5 @@
 using Fleet.Server.Models;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.WorkItems;
 
@@ -8,37 +9,37 @@ public class WorkItemLevelService(
 {
     public async Task<IReadOnlyList<WorkItemLevelDto>> GetByProjectIdAsync(string projectId)
     {
-        logger.LogInformation("Retrieving work item levels for project {ProjectId}", projectId);
+        logger.WorkItemLevelsRetrieving(projectId.SanitizeForLogging());
         return await workItemLevelRepository.GetByProjectIdAsync(projectId);
     }
 
     public async Task<WorkItemLevelDto?> GetByIdAsync(string projectId, int id)
     {
-        logger.LogInformation("Retrieving work item level {LevelId} for project {ProjectId}", id, projectId);
+        logger.WorkItemLevelsRetrievingById(projectId.SanitizeForLogging(), id);
         return await workItemLevelRepository.GetByIdAsync(projectId, id);
     }
 
     public async Task<WorkItemLevelDto> CreateAsync(string projectId, CreateWorkItemLevelRequest request)
     {
-        logger.LogInformation("Creating work item level in project {ProjectId} with name: {Name}", projectId, request.Name);
+        logger.WorkItemLevelsCreating(projectId.SanitizeForLogging(), request.Name.SanitizeForLogging());
         return await workItemLevelRepository.CreateAsync(projectId, request);
     }
 
     public async Task<WorkItemLevelDto?> UpdateAsync(string projectId, int id, UpdateWorkItemLevelRequest request)
     {
-        logger.LogInformation("Updating work item level {LevelId} in project {ProjectId}", id, projectId);
+        logger.WorkItemLevelsUpdating(projectId.SanitizeForLogging(), id);
         return await workItemLevelRepository.UpdateAsync(projectId, id, request);
     }
 
     public async Task<bool> DeleteAsync(string projectId, int id)
     {
-        logger.LogInformation("Deleting work item level {LevelId} from project {ProjectId}", id, projectId);
+        logger.WorkItemLevelsDeleting(projectId.SanitizeForLogging(), id);
         return await workItemLevelRepository.DeleteAsync(projectId, id);
     }
 
     public async Task EnsureDefaultLevelsAsync(string projectId)
     {
-        logger.LogInformation("Ensuring default levels exist for project {ProjectId}", projectId);
+        logger.WorkItemLevelsEnsuringDefaults(projectId.SanitizeForLogging());
         await workItemLevelRepository.EnsureDefaultLevelsAsync(projectId);
     }
 }

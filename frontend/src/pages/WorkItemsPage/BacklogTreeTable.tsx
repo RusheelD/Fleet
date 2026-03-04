@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import {
     makeStyles,
     tokens,
@@ -35,7 +35,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '100px 3fr 130px 60px 150px 140px',
+        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -47,37 +47,39 @@ const useStyles = makeStyles({
         position: 'sticky',
         top: 0,
         zIndex: 1,
+        borderLeft: '3px solid transparent',
     },
     headerText: {
-        fontSize: '12px',
+        fontSize: '11px',
         fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground3,
         textTransform: 'uppercase',
-        letterSpacing: '0.03em',
+        letterSpacing: '0.05em',
     },
 
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '100px 3fr 130px 60px 150px 140px',
+        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
         alignItems: 'center',
-        paddingTop: '5px',
-        paddingBottom: '5px',
+        paddingTop: '3px',
+        paddingBottom: '3px',
         paddingLeft: tokens.spacingHorizontalM,
         paddingRight: tokens.spacingHorizontalM,
         gap: tokens.spacingHorizontalS,
         borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+        borderLeft: '3px solid transparent',
         cursor: 'pointer',
-        minHeight: '36px',
+        minHeight: '34px',
         position: 'relative',
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
     },
     rowSelected: {
-        backgroundColor: tokens.colorNeutralBackground1Selected,
+        backgroundColor: tokens.colorBrandBackground2,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Selected,
+            backgroundColor: tokens.colorBrandBackground2,
         },
     },
     rowDragging: {
@@ -121,13 +123,17 @@ const useStyles = makeStyles({
     /* ── Drag handle ───────────────────────────────────────── */
     dragHandle: {
         cursor: 'grab',
-        color: tokens.colorNeutralForeground3,
+        color: tokens.colorNeutralForeground4,
         display: 'flex',
         alignItems: 'center',
         flexShrink: 0,
-        fontSize: '14px',
+        fontSize: '12px',
+        opacity: 0.3,
+        transitionProperty: 'opacity',
+        transitionDuration: '0.15s',
         ':hover': {
             color: tokens.colorNeutralForeground1,
+            opacity: 1,
         },
     },
 
@@ -146,10 +152,16 @@ const useStyles = makeStyles({
     },
     typeName: {
         fontSize: '12px',
-        fontWeight: tokens.fontWeightSemibold,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        color: tokens.colorNeutralForeground2,
+    },
+    titleIcon: {
+        fontSize: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        flexShrink: 0,
     },
 
     /* ── Title column ──────────────────────────────────────── */
@@ -281,6 +293,21 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
         return initial
     })
 
+    // Auto-expand parents when new children arrive (e.g., LLM creates nested items)
+    useEffect(() => {
+        setExpanded((prev) => {
+            const next = new Set(prev)
+            let changed = false
+            for (const parentId of childrenMap.keys()) {
+                if (!next.has(parentId)) {
+                    next.add(parentId)
+                    changed = true
+                }
+            }
+            return changed ? next : prev
+        })
+    }, [childrenMap])
+
     const toggleExpanded = useCallback((id: number) => {
         setExpanded((prev) => {
             const next = new Set(prev)
@@ -320,6 +347,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
     /* ── Drag & Drop state ─────────────────────────────────── */
     const [draggedId, setDraggedId] = useState<number | null>(null)
     const [dropTarget, setDropTarget] = useState<{ id: number; zone: DropZone } | null>(null)
+    const [draggableRowId, setDraggableRowId] = useState<number | null>(null)
 
     /** Check if targetId is a descendant of ancestorId */
     const isDescendant = useCallback((targetId: number, ancestorId: number): boolean => {
@@ -473,35 +501,33 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                             isDragging && styles.rowDragging,
                             dropClass || undefined,
                         )}
+                        style={{ borderLeftColor: level?.color ?? 'transparent' }}
                         onClick={() => {
                             if (!isEditing) onItemClick?.(item)
                         }}
-                        draggable
+                        draggable={draggableRowId === item.id}
                         onDragStart={(e) => handleDragStart(e, item.id)}
                         onDragOver={(e) => handleDragOver(e, item.id)}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
-                        onDragEnd={handleDragEnd}
+                        onDragEnd={() => { handleDragEnd(); setDraggableRowId(null) }}
                     >
                         {/* Work Item Type */}
                         <div className={styles.typeCell}>
-                            <span className={styles.dragHandle} onMouseDown={(e) => e.stopPropagation()}>
+                            <span
+                                className={styles.dragHandle}
+                                onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.id) }}
+                                onMouseUp={() => setDraggableRowId(null)}
+                            >
                                 <ReOrderRegular />
                             </span>
-                            {level && (
-                                <>
-                                    <span className={styles.typeIcon} style={{ color: level.color }}>
-                                        {resolveLevelIcon(level.iconName)}
-                                    </span>
-                                    <Text className={styles.typeName} style={{ color: level.color }}>
-                                        {level.name}
-                                    </Text>
-                                </>
-                            )}
+                            <Text className={styles.typeName}>
+                                {level?.name ?? '—'}
+                            </Text>
                         </div>
 
                         {/* Title */}
-                        <div className={styles.titleCell} style={{ paddingLeft: `${depth * 20}px` }}>
+                        <div className={styles.titleCell} style={{ paddingLeft: `${depth * 24}px` }}>
                             {hasChildren ? (
                                 <Button
                                     className={styles.expandButton}
@@ -513,6 +539,12 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                                 />
                             ) : (
                                 <span className={styles.leafSpacer} />
+                            )}
+
+                            {level && (
+                                <span className={styles.titleIcon} style={{ color: level.color }}>
+                                    {resolveLevelIcon(level.iconName)}
+                                </span>
                             )}
 
                             {isEditing ? (
@@ -570,7 +602,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         {/* Tags */}
                         <div className={styles.tagsCell}>
                             {item.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} appearance="outline" size="tiny">
+                                <Badge key={tag} appearance="tint" size="tiny" color="informative">
                                     {tag}
                                 </Badge>
                             ))}

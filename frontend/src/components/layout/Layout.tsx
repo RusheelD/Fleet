@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useLocation, Outlet, useParams } from 'react-router-dom'
 import {
     makeStyles,
@@ -118,10 +118,23 @@ const useStyles = makeStyles({
         overflow: 'hidden',
     },
     chatPane: {
-        width: '380px',
         flexShrink: 0,
-        borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
         height: '100%',
+        display: 'flex',
+        flexDirection: 'row',
+    },
+    resizeHandle: {
+        width: '4px',
+        cursor: 'col-resize',
+        backgroundColor: 'transparent',
+        flexShrink: 0,
+        transition: 'background-color 0.15s',
+        ':hover': {
+            backgroundColor: tokens.colorBrandBackground,
+        },
+    },
+    resizeHandleActive: {
+        backgroundColor: tokens.colorBrandBackground,
     },
 })
 
@@ -132,9 +145,53 @@ export function Layout() {
     const { preferences } = usePreferences()
     const [sidebarExpanded, setSidebarExpanded] = useState(!preferences?.sidebarCollapsed)
     const [chatOpen, setChatOpen] = useState(false)
+
     const seedMutation = useSeedDatabase()
     const resetMutation = useResetDatabase()
     const { projectId, projectTitle } = useCurrentProject()
+
+    // Open chat pane when navigated with { state: { openChat: true } }
+    useEffect(() => {
+        if (location.state?.openChat && projectId) {
+            setChatOpen(true)
+            // Clear the state so it doesn't re-trigger on back/forward navigation
+            window.history.replaceState({}, '')
+        }
+    }, [location.state, projectId])
+
+    /* ── Chat pane resize state ── */
+    const MIN_CHAT_WIDTH = 340
+    const MAX_CHAT_WIDTH = 800
+    const DEFAULT_CHAT_WIDTH = 480
+    const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH)
+    const isResizing = useRef(false)
+
+    const handleResizeStart = useCallback(() => {
+        isResizing.current = true
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+    }, [])
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isResizing.current) return
+            const newWidth = window.innerWidth - e.clientX
+            setChatWidth(Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, newWidth)))
+        }
+        const handleMouseUp = () => {
+            if (isResizing.current) {
+                isResizing.current = false
+                document.body.style.cursor = ''
+                document.body.style.userSelect = ''
+            }
+        }
+        window.addEventListener('mousemove', handleMouseMove)
+        window.addEventListener('mouseup', handleMouseUp)
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+        }
+    }, [])
 
     const isActive = useCallback(
         (path: string, exact?: boolean) => {
@@ -308,7 +365,17 @@ export function Layout() {
                             <Outlet />
                         </div>
                         {chatOpen && projectId && (
-                            <div className={styles.chatPane}>
+                            <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
+                                <div
+                                    className={mergeClasses(
+                                        styles.resizeHandle,
+                                        isResizing.current ? styles.resizeHandleActive : undefined,
+                                    )}
+                                    onMouseDown={handleResizeStart}
+                                    role="separator"
+                                    aria-orientation="vertical"
+                                    aria-label="Resize chat pane"
+                                />
                                 <ChatDrawer
                                     projectId={projectId}
                                     onClose={() => setChatOpen(false)}

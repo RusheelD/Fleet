@@ -1,16 +1,25 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.Exceptions;
 
-public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IExceptionHandler
+public class GlobalExceptionHandler(
+    ILogger<GlobalExceptionHandler> logger,
+    IWebHostEnvironment environment,
+    IConfiguration configuration) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
-        logger.LogError(exception, "Unhandled exception occurred. TraceId: {TraceId}", httpContext.TraceIdentifier);
+        var includeExceptionDetailsInResponse =
+            environment.IsDevelopment() ||
+            configuration.GetValue<bool>("Diagnostics:IncludeExceptionDetailsInResponse");
+
+        logger.UnhandledException(exception, httpContext.TraceIdentifier);
+        logger.UnhandledExceptionDetails(httpContext.TraceIdentifier, exception.ToString().SanitizeForLogging());
 
         var statusCode = exception switch
         {
@@ -32,7 +41,11 @@ public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IE
                 InvalidOperationException => "Conflict",
                 _ => "Internal Server Error"
             },
-            Detail = exception.Message,
+            Detail = includeExceptionDetailsInResponse
+                ? exception.ToString()
+                : statusCode == StatusCodes.Status500InternalServerError
+                    ? "An internal server error occurred."
+                    : exception.Message,
             Instance = httpContext.Request.Path,
             Extensions = { ["traceId"] = httpContext.TraceIdentifier }
         };

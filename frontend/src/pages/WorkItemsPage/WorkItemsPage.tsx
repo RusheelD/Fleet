@@ -17,10 +17,8 @@ import {
     BoardRegular,
     TextBulletListLtrRegular,
     TextBulletListTreeRegular,
-    ChatRegular,
     AddRegular,
 } from '@fluentui/react-icons'
-import { ChatDrawer } from '../../components/chat'
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
 import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
@@ -94,7 +92,6 @@ export function WorkItemsPage() {
     const { data: levels } = useWorkItemLevels(projectId)
     const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
-    const [chatOpen, setChatOpen] = useState(false)
     const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null)
@@ -102,7 +99,8 @@ export function WorkItemsPage() {
     const updateMutation = useUpdateWorkItem(projectId)
 
     const handleReparent = useCallback((itemId: number, newParentId: number | null) => {
-        updateMutation.mutate({ id: itemId, data: { parentId: newParentId } })
+        // Send 0 to clear parent (backend treats 0 as 'set to null')
+        updateMutation.mutate({ id: itemId, data: { parentId: newParentId ?? 0 } })
     }, [updateMutation])
 
     const handleTitleChange = useCallback((itemId: number, newTitle: string) => {
@@ -130,7 +128,7 @@ export function WorkItemsPage() {
         )
     }, [workItems, searchQuery])
 
-    const boardColumns = getBoardColumns(items)
+    const boardColumns = useMemo(() => getBoardColumns(items), [items])
 
     if (isLoading) {
         return (
@@ -155,13 +153,6 @@ export function WorkItemsPage() {
                             >
                                 New Work Item
                             </Button>
-                            <Button
-                                appearance={chatOpen ? 'primary' : 'outline'}
-                                icon={<ChatRegular />}
-                                onClick={() => setChatOpen(!chatOpen)}
-                            >
-                                AI Chat
-                            </Button>
                         </div>
                     }
                 />
@@ -179,16 +170,15 @@ export function WorkItemsPage() {
                         </TabList>
                         <Toolbar>
                             <ToolbarDivider />
-                            <ToolbarButton icon={<SearchRegular />}>
-                                <Input
-                                    className={styles.searchInput}
-                                    placeholder="Search work items..."
-                                    size="small"
-                                    appearance="underline"
-                                    value={searchQuery}
-                                    onChange={(_e, data) => setSearchQuery(data.value)}
-                                />
-                            </ToolbarButton>
+                            <Input
+                                className={styles.searchInput}
+                                placeholder="Search work items..."
+                                size="small"
+                                appearance="underline"
+                                value={searchQuery}
+                                onChange={(_e, data) => setSearchQuery(data.value)}
+                                contentBefore={<SearchRegular />}
+                            />
                             <ToolbarButton icon={<FilterRegular />}>Filter</ToolbarButton>
                             <ToolbarDivider />
                             <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
@@ -224,7 +214,6 @@ export function WorkItemsPage() {
                 )}
             </div>
 
-            {chatOpen && <ChatDrawer projectId={projectId ?? ''} onClose={() => setChatOpen(false)} />}
             <CreateWorkItemDialog projectId={projectId ?? ''} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
             <WorkItemDetailDialog projectId={projectId ?? ''} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
             <ManageLevelsDialog projectId={projectId ?? ''} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />

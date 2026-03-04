@@ -1,4 +1,5 @@
 using Fleet.Server.Models;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.Agents;
 
@@ -8,13 +9,13 @@ public class AgentService(
 {
     public async Task<IReadOnlyList<AgentExecutionDto>> GetExecutionsAsync(string projectId)
     {
-        logger.LogInformation("Retrieving agent executions for project {ProjectId}", projectId);
+        logger.AgentsExecutionsRetrieving(projectId.SanitizeForLogging());
         return await agentTaskRepository.GetExecutionsByProjectIdAsync(projectId);
     }
 
     public async Task<IReadOnlyList<LogEntryDto>> GetLogsAsync(string projectId)
     {
-        logger.LogInformation("Retrieving agent logs for project {ProjectId}", projectId);
+        logger.AgentsLogsRetrieving(projectId.SanitizeForLogging());
         return await agentTaskRepository.GetLogsByProjectIdAsync(projectId);
     }
 }

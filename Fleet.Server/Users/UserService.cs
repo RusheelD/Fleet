@@ -1,4 +1,5 @@
 using Fleet.Server.Models;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.Users;
 
@@ -8,7 +9,7 @@ public class UserService(
 {
     public async Task<UserSettingsDto> GetSettingsAsync(int userId)
     {
-        logger.LogInformation("Retrieving user settings for user {UserId}", userId);
+        logger.UsersSettingsRetrieving(userId);
         var profile = await userRepository.GetProfileAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
         var connections = await userRepository.GetConnectionsAsync(userId);
@@ -19,13 +20,13 @@ public class UserService(
 
     public async Task<UserProfileDto> UpdateProfileAsync(int userId, UpdateProfileRequest request)
     {
-        logger.LogInformation("Updating user profile for user {UserId}", userId);
+        logger.UsersProfileUpdating(userId);
         return await userRepository.UpdateProfileAsync(userId, request);
     }
 
     public async Task<UserPreferencesDto> UpdatePreferencesAsync(int userId, UserPreferencesDto preferences)
     {
-        logger.LogInformation("Updating user preferences for user {UserId}", userId);
+        logger.UsersPreferencesUpdating(userId);
         return await userRepository.UpdatePreferencesAsync(userId, preferences);
     }
 }

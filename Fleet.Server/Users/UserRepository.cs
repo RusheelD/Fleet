@@ -1,5 +1,6 @@
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -60,7 +61,7 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
             SidebarCollapsed = preferences.SidebarCollapsed,
         };
         await context.SaveChangesAsync();
-        logger.LogInformation("Updated preferences for user {UserId}", userId);
+        logger.UsersPreferencesUpdated(userId);
         return preferences;
     }
 }

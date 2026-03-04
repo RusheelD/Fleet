@@ -71,8 +71,12 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         if (request.AssignedTo is not null) entity.AssignedTo = request.AssignedTo;
         if (request.Tags is not null) entity.Tags = [.. request.Tags];
         if (request.IsAI is not null) entity.IsAI = request.IsAI.Value;
-        if (request.ParentId is not null) entity.ParentId = request.ParentId;
-        if (request.LevelId is not null) entity.LevelId = request.LevelId;
+
+        // ParentId & LevelId: 0 = clear (set to null), null = don't change, >0 = set value
+        if (request.ParentId is not null)
+            entity.ParentId = request.ParentId == 0 ? null : request.ParentId;
+        if (request.LevelId is not null)
+            entity.LevelId = request.LevelId == 0 ? null : request.LevelId;
 
         await context.SaveChangesAsync();
 

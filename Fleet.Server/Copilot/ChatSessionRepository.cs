@@ -65,6 +65,16 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         return new ChatSessionDto(entity.Id, entity.Title, entity.LastMessage, entity.Timestamp, entity.IsActive);
     }
 
+    public async Task<bool> DeleteSessionAsync(string sessionId)
+    {
+        var entity = await context.ChatSessions.FindAsync(sessionId);
+        if (entity is null) return false;
+
+        context.ChatSessions.Remove(entity);
+        await context.SaveChangesAsync();
+        return true;
+    }
+
     public async Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content)
     {
         var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");

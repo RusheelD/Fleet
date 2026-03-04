@@ -9,7 +9,7 @@ import { App } from './'
  */
 export function ThemedApp() {
     const { preferences } = usePreferences()
-    const isDark = preferences?.darkMode ?? window.matchMedia('(prefers-color-scheme: dark)').matches
+    const isDark = preferences?.darkMode ?? true
 
     return (
         <FluentProvider theme={isDark ? warmDarkTheme : warmLightTheme} style={{ height: '100%' }}>

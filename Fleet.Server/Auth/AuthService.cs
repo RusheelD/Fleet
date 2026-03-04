@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 
 namespace Fleet.Server.Auth;
@@ -41,7 +42,7 @@ public class AuthService(
         var existing = await authRepository.GetByEntraObjectIdAsync(oid);
         if (existing is not null)
         {
-            logger.LogDebug("Resolved Entra user {Oid} to local user {UserId}", oid, existing.Id);
+            logger.AuthResolvedUser(oid.SanitizeForLogging(), existing.Id);
             _resolvedUserId = existing.Id;
             return existing;
         }
@@ -69,9 +70,7 @@ public class AuthService(
         };
 
         await authRepository.CreateUserAsync(user);
-        logger.LogInformation(
-            "Auto-provisioned local user {UserId} for Entra user {Oid} ({Email})",
-            user.Id, oid, email);
+        logger.AuthAutoProvisionedUser(user.Id, oid.SanitizeForLogging(), email.SanitizeForLogging());
 
         _resolvedUserId = user.Id;
         return user;

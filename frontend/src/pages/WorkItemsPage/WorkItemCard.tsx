@@ -90,10 +90,12 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
                         </Badge>
                     ))}
                 </div>
-                <div className={styles.assignee}>
-                    {item.isAI ? <BotRegular /> : <PersonRegular />}
-                    <Caption1>{item.assignedTo}</Caption1>
-                </div>
+                {item.assignedTo && (
+                    <div className={styles.assignee}>
+                        {item.isAI ? <BotRegular /> : <PersonRegular />}
+                        <Caption1>{item.assignedTo}</Caption1>
+                    </div>
+                )}
             </div>
         </Card>
     )

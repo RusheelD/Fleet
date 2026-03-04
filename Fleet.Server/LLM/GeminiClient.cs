@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Fleet.Server.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.LLM;
@@ -22,12 +23,19 @@ public class GeminiClient(
     public async Task<LLMResponse> CompleteAsync(LLMRequest request, CancellationToken cancellationToken = default)
     {
         var config = options.Value;
+
+        if (string.IsNullOrWhiteSpace(config.ApiKey))
+        {
+            throw new InvalidOperationException(
+                "Gemini API key is not configured. Set LLM:ApiKey or environment variable GEMINI_API_KEY.");
+        }
+
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{config.Model}:generateContent?key={config.ApiKey}";
 
         var body = BuildRequestBody(request);
-        logger.LogDebug("Gemini request body: {Body}", body.ToJsonString());
+        logger.LlmGeminiRequest(body.ToJsonString().SanitizeForLogging());
 
-        using var httpClient = httpClientFactory.CreateClient();
+        using var httpClient = httpClientFactory.CreateClient("LLM");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json"),
@@ -38,11 +46,11 @@ public class GeminiClient(
 
         if (!httpResponse.IsSuccessStatusCode)
         {
-            logger.LogError("Gemini API error {Status}: {Body}", httpResponse.StatusCode, responseBody);
+            logger.LlmGeminiApiError((int)httpResponse.StatusCode, responseBody.SanitizeForLogging());
             throw new InvalidOperationException($"Gemini API returned {httpResponse.StatusCode}: {responseBody}");
         }
 
-        logger.LogDebug("Gemini response: {Body}", responseBody);
+        logger.LlmGeminiResponse(responseBody.SanitizeForLogging());
         return ParseResponse(responseBody);
     }
 
@@ -61,15 +69,12 @@ public class GeminiClient(
             };
         }
 
-        // Contents (conversation history)
-        var contents = new JsonArray();
-        foreach (var msg in request.Messages)
-        {
-            contents.Add(ConvertMessageToGemini(msg));
-        }
-        body["contents"] = contents;
+        // Contents — convert messages and merge consecutive same-role blocks.
+        // Gemini requires strictly alternating user/model roles, and multiple
+        // function responses for one model turn must share a single content block.
+        body["contents"] = BuildMergedContents(request.Messages);
 
-        // Tools
+        // Tools — convert JSON Schema to Gemini's Schema format (uppercase types)
         if (request.Tools is { Count: > 0 })
         {
             var functionDeclarations = new JsonArray();
@@ -82,7 +87,8 @@ public class GeminiClient(
                 };
                 if (!string.IsNullOrWhiteSpace(tool.ParametersJsonSchema))
                 {
-                    declaration["parameters"] = JsonNode.Parse(tool.ParametersJsonSchema);
+                    var schema = JsonNode.Parse(tool.ParametersJsonSchema);
+                    declaration["parameters"] = ConvertToGeminiSchema(schema);
                 }
                 functionDeclarations.Add(declaration);
             }
@@ -90,9 +96,122 @@ public class GeminiClient(
             {
                 new JsonObject { ["functionDeclarations"] = functionDeclarations },
             };
+
+            // Explicitly enable function calling
+            body["toolConfig"] = new JsonObject
+            {
+                ["functionCallingConfig"] = new JsonObject { ["mode"] = "AUTO" },
+            };
         }
 
         return body;
+    }
+
+    /// <summary>
+    /// Converts messages to Gemini content blocks and merges consecutive
+    /// same-role entries (required because Gemini disallows back-to-back
+    /// content blocks with the same role).
+    /// </summary>
+    private static JsonArray BuildMergedContents(IReadOnlyList<LLMMessage> messages)
+    {
+        var merged = new JsonArray();
+        JsonObject? current = null;
+        string? currentRole = null;
+
+        foreach (var msg in messages)
+        {
+            var geminiMsg = ConvertMessageToGemini(msg);
+            var role = geminiMsg["role"]?.GetValue<string>();
+
+            if (role == currentRole && current is not null)
+            {
+                // Merge parts into the existing content block
+                var existingParts = current["parts"]!.AsArray();
+                var newParts = geminiMsg["parts"]!.AsArray();
+                // Must detach nodes from source array before adding to another
+                var partsToMove = newParts.Select(p => p).ToList();
+                foreach (var part in partsToMove)
+                {
+                    newParts.Remove(part);
+                    existingParts.Add(part);
+                }
+            }
+            else
+            {
+                current = geminiMsg;
+                currentRole = role;
+                merged.Add(geminiMsg);
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Converts a JSON Schema node to Gemini's Schema format:
+    /// - type values → UPPERCASE (STRING, OBJECT, INTEGER, NUMBER, BOOLEAN, ARRAY)
+    /// - Recursively processes properties and array items
+    /// - Passes through only Gemini-supported keywords
+    /// </summary>
+    private static JsonNode? ConvertToGeminiSchema(JsonNode? node)
+    {
+        if (node is not JsonObject obj) return node?.DeepClone();
+
+        var result = new JsonObject();
+
+        // Gemini only allows enum on STRING type, so detect if enum is present
+        var hasEnum = obj.ContainsKey("enum");
+
+        foreach (var kvp in obj.ToList())
+        {
+            switch (kvp.Key)
+            {
+                case "type":
+                    // Force STRING when enum is present — Gemini rejects enum on INTEGER/NUMBER types
+                    result["type"] = hasEnum
+                        ? "STRING"
+                        : kvp.Value?.GetValue<string>()?.ToUpperInvariant() ?? "STRING";
+                    break;
+
+                case "properties" when kvp.Value is JsonObject props:
+                    var converted = new JsonObject();
+                    foreach (var prop in props.ToList())
+                    {
+                        converted[prop.Key] = ConvertToGeminiSchema(prop.Value);
+                    }
+                    result["properties"] = converted;
+                    break;
+
+                case "items":
+                    result["items"] = ConvertToGeminiSchema(kvp.Value);
+                    break;
+
+                // Gemini requires enum values to be strings
+                case "enum" when kvp.Value is JsonArray enumArr:
+                    var stringEnum = new JsonArray();
+                    foreach (var item in enumArr)
+                    {
+                        stringEnum.Add(item?.ToString() ?? "");
+                    }
+                    result["enum"] = stringEnum;
+                    break;
+
+                // Pass through supported Gemini Schema keywords as-is
+                case "description":
+                case "required":
+                case "nullable":
+                case "format":
+                case "minItems":
+                case "maxItems":
+                case "anyOf":
+                    result[kvp.Key] = kvp.Value?.DeepClone();
+                    break;
+
+                    // Skip unsupported JSON Schema keywords (additionalProperties, $ref, etc.)
+            }
+        }
+
+        return result;
     }
 
     private static JsonObject ConvertMessageToGemini(LLMMessage msg)
@@ -130,15 +249,23 @@ public class GeminiClient(
 
             case "tool":
                 // Gemini expects function responses under role="user"
+                // Parse tool result as structured JSON when possible
+                JsonNode responseContent;
+                try
+                {
+                    responseContent = JsonNode.Parse(msg.Content ?? "{}") ?? new JsonObject { ["result"] = msg.Content ?? "" };
+                }
+                catch
+                {
+                    responseContent = new JsonObject { ["result"] = msg.Content ?? "" };
+                }
+
                 parts.Add(new JsonObject
                 {
                     ["functionResponse"] = new JsonObject
                     {
                         ["name"] = msg.ToolName ?? "unknown",
-                        ["response"] = new JsonObject
-                        {
-                            ["result"] = msg.Content ?? "",
-                        },
+                        ["response"] = responseContent,
                     },
                 });
                 return new JsonObject { ["role"] = "user", ["parts"] = parts };

@@ -1,4 +1,5 @@
 using Fleet.Server.Data;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
 {
     public async Task<IReadOnlyList<SearchResultDto>> SearchAsync(string? query, string? type)
     {
-        logger.LogInformation("Searching with query: {Query}, type: {Type}", query, type);
+        logger.SearchStarted((query ?? string.Empty).SanitizeForLogging(), (type ?? "all").SanitizeForLogging());
         var results = new List<SearchResultDto>();
 
         var includeAll = string.IsNullOrWhiteSpace(type) || type == "all";
@@ -65,7 +66,7 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
                 .ToList();
         }
 
-        logger.LogInformation("Search completed with {ResultCount} results", results.Count);
+        logger.SearchCompleted(results.Count);
         return results;
     }
 }

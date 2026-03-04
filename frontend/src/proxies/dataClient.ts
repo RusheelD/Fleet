@@ -6,7 +6,7 @@ import {
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs,
   getChatData, getMessages, createChatSession, sendChatMessage,
-  getAttachments, uploadAttachment, deleteAttachment,
+  getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos,
@@ -301,10 +301,21 @@ export function useCreateChatSession(projectId: string | undefined) {
   })
 }
 
+export function useDeleteSession(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => deleteChatSession(projectId!, sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
 export function useSendMessage(projectId: string | undefined, sessionId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (content: string) => sendChatMessage(projectId!, sessionId!, content),
+    mutationFn: ({ content, generateWorkItems }: { content: string; generateWorkItems?: boolean }) =>
+      sendChatMessage(projectId!, sessionId!, content, generateWorkItems),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })

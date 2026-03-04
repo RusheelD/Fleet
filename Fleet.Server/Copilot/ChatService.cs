@@ -1,6 +1,7 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Microsoft.Extensions.Options;
 
@@ -14,29 +15,33 @@ public class ChatService(
     IOptions<LLMOptions> llmOptions,
     ILogger<ChatService> logger) : IChatService
 {
-    private const string SystemPrompt = """
-        You are Fleet AI, an expert software project assistant embedded in the Fleet project management app.
-        You help users plan features, create and manage work items, summarise project status, and answer questions about their project.
+    private static readonly Lazy<string> SystemPromptLazy = new(() =>
+    {
+        var promptPath = Path.Combine(AppContext.BaseDirectory, "Copilot", "chat_prompt.txt");
+        if (File.Exists(promptPath))
+            return File.ReadAllText(promptPath);
 
-        Guidelines:
-        - Be concise and actionable. Prefer bullet points over long paragraphs.
-        - When the user asks you to create work items, use the create_work_item tool.
-        - When asked about the project, use get_project_info first.
-        - When asked about work items, use list_work_items.
-        - Always confirm what you did after using a tool (e.g. "I created work item #42: ...").
-        - If you're unsure, ask a clarifying question instead of guessing.
-        - Format responses in Markdown when it aids readability.
-        - If the user has uploaded reference documents, use their contents to answer questions accurately.
-        - When asked about the codebase or repository, use get_repo_tree to browse the file/folder structure.
-        - Use read_repo_file to read specific files from the connected GitHub repository.
-        """;
+        // Fallback: try relative to the project directory (development)
+        var devPath = Path.Combine(Directory.GetCurrentDirectory(), "Copilot", "chat_prompt.txt");
+        if (File.Exists(devPath))
+            return File.ReadAllText(devPath);
+
+        return "You are Fleet AI, an expert software project assistant. Help users plan features and create work items.";
+    });
+
+    private static string SystemPrompt => SystemPromptLazy.Value;
 
     /// <summary>Max total chars of attachment content to inject into the prompt.</summary>
     private const int MaxAttachmentContextLength = 50_000;
 
     public async Task<ChatDataDto> GetChatDataAsync(string projectId)
     {
-        logger.LogInformation("Retrieving chat data for project {ProjectId}", projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId
+        });
+
+        logger.CopilotChatDataRetrieving(projectId.SanitizeForLogging());
         var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
         var activeSession = sessions.FirstOrDefault(s => s.IsActive);
         var messages = activeSession is not null
@@ -44,25 +49,55 @@ public class ChatService(
             : [];
         var suggestions = await chatSessionRepository.GetSuggestionsAsync(projectId);
 
-        logger.LogInformation("Retrieved {SessionCount} sessions for project {ProjectId}", sessions.Count, projectId);
+        logger.CopilotChatDataRetrieved(projectId.SanitizeForLogging(), sessions.Count);
         return new ChatDataDto([.. sessions], [.. messages], suggestions);
     }
 
     public async Task<IReadOnlyList<ChatMessageDto>> GetMessagesAsync(string projectId, string sessionId)
     {
-        logger.LogInformation("Retrieving messages for session {SessionId} in project {ProjectId}", sessionId, projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId
+        });
+
+        logger.CopilotMessagesRetrieving(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging());
         return await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
     }
 
     public async Task<ChatSessionDto> CreateSessionAsync(string projectId, string title)
     {
-        logger.LogInformation("Creating chat session in project {ProjectId} with title: {Title}", projectId, title);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId
+        });
+
+        logger.CopilotSessionCreating(projectId.SanitizeForLogging(), title.SanitizeForLogging());
         return await chatSessionRepository.CreateSessionAsync(projectId, title);
     }
 
-    public async Task<SendMessageResponseDto> SendMessageAsync(string projectId, string sessionId, string content)
+    public async Task<bool> DeleteSessionAsync(string projectId, string sessionId)
     {
-        logger.LogInformation("Sending message in session {SessionId} for project {ProjectId}", sessionId, projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId
+        });
+
+        logger.CopilotSessionDeleting(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging());
+        return await chatSessionRepository.DeleteSessionAsync(sessionId);
+    }
+
+    public async Task<SendMessageResponseDto> SendMessageAsync(string projectId, string sessionId, string content, bool generateWorkItems = false)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId,
+            ["GenerateWorkItems"] = generateWorkItems
+        });
+
+        logger.CopilotMessageSending(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging(), generateWorkItems);
         var config = llmOptions.Value;
 
         // 1. Persist the user message
@@ -72,11 +107,25 @@ public class ChatService(
         var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
         var llmMessages = history.Select(ToLLMMessage).ToList();
 
+        // 2a. If generation was triggered, inject the system trigger message
+        if (generateWorkItems)
+        {
+            llmMessages.Add(new LLMMessage
+            {
+                Role = "user",
+                Content = "Generate work-items based on provided context",
+            });
+        }
+
         // 2b. Build system prompt with any uploaded documents
         var systemPrompt = await BuildSystemPromptAsync(sessionId);
 
-        // 3. Get tool definitions
-        var toolDefs = toolRegistry.ToLLMDefinitions();
+        // 3. Get tool definitions — only include create_work_item when generation is requested
+        var toolDefs = generateWorkItems
+            ? toolRegistry.ToLLMDefinitions()
+            : toolRegistry.ToLLMDefinitions()
+                .Where(t => !t.Name.Equals("create_work_item", StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
         // 4. Run the tool-calling loop with safety limits
         var toolEvents = new List<ToolEventDto>();
@@ -88,7 +137,9 @@ public class ChatService(
 
         for (var loop = 0; loop < config.MaxToolLoops; loop++)
         {
-            var request = new LLMRequest(systemPrompt, llmMessages, toolDefs);
+            // Use Sonnet for generation, Haiku for normal chat
+            var modelOverride = generateWorkItems ? config.GenerateModel : null;
+            var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, modelOverride);
             LLMResponse response;
 
             try
@@ -97,16 +148,17 @@ public class ChatService(
             }
             catch (OperationCanceledException)
             {
-                logger.LogWarning("LLM request timed out after {Timeout}s", config.TimeoutSeconds);
+                logger.CopilotLlmTimeout(config.TimeoutSeconds);
                 var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
                 return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "LLM request failed");
+                logger.CopilotLlmFailed(ex);
+                var assistantError = BuildAssistantErrorMessage(ex);
                 var errorMsg = await chatSessionRepository.AddMessageAsync(
-                    projectId, sessionId, "assistant", "I encountered an error connecting to the AI service. Please try again.");
+                    projectId, sessionId, "assistant", assistantError);
                 return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
             }
 
@@ -123,11 +175,16 @@ public class ChatService(
 
                 foreach (var toolCall in response.ToolCalls)
                 {
-                    totalToolCalls++;
-                    if (totalToolCalls > config.MaxToolCallsTotal)
+                    // Don't count create_work_item toward the limit — the LLM
+                    // should be able to create as many work items as needed
+                    if (!toolCall.Name.Equals("create_work_item", StringComparison.OrdinalIgnoreCase))
                     {
-                        logger.LogWarning("Max total tool calls ({Max}) exceeded", config.MaxToolCallsTotal);
-                        break;
+                        totalToolCalls++;
+                        if (totalToolCalls > config.MaxToolCallsTotal)
+                        {
+                            logger.CopilotMaxToolCallsExceeded(config.MaxToolCallsTotal);
+                            break;
+                        }
                     }
 
                     var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, cts.Token);
@@ -155,14 +212,13 @@ public class ChatService(
             var assistantMessage = await chatSessionRepository.AddMessageAsync(
                 projectId, sessionId, "assistant", assistantContent);
 
-            logger.LogInformation("AI response generated for session {SessionId} (loops={Loops}, tools={Tools})",
-                sessionId, loop + 1, totalToolCalls);
+            logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
             return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
         }
 
         // Exhausted tool loops — force a text response
-        logger.LogWarning("Exhausted tool loops ({Max}) for session {SessionId}", config.MaxToolLoops, sessionId);
+        logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), config.MaxToolLoops);
         var fallbackMsg = await chatSessionRepository.AddMessageAsync(
             projectId, sessionId, "assistant",
             "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
@@ -177,13 +233,14 @@ public class ChatService(
         var tool = toolRegistry.Get(toolCall.Name);
         if (tool is null)
         {
-            logger.LogWarning("Unknown tool requested: {Tool}", toolCall.Name);
+            logger.CopilotUnknownTool(toolCall.Name.SanitizeForLogging());
             return $"Error: unknown tool '{toolCall.Name}'.";
         }
 
         try
         {
-            logger.LogInformation("Executing tool {Tool} with args: {Args}", toolCall.Name, toolCall.ArgumentsJson);
+            var sanitizedArgs = LogSanitizer.SanitizeJson(toolCall.ArgumentsJson);
+            logger.CopilotExecutingTool(toolCall.Name.SanitizeForLogging(), sanitizedArgs.SanitizeForLogging());
             var result = await tool.ExecuteAsync(toolCall.ArgumentsJson, context, ct);
 
             // Truncate large outputs to avoid context blowup
@@ -196,7 +253,7 @@ public class ChatService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Tool {Tool} failed", toolCall.Name);
+            logger.CopilotToolExecutionFailed(ex, toolCall.Name.SanitizeForLogging());
             return $"Error executing tool '{toolCall.Name}': {ex.Message}";
         }
     }
@@ -243,12 +300,42 @@ public class ChatService(
         return builder.ToString();
     }
 
+    private static string BuildAssistantErrorMessage(Exception exception)
+    {
+        var message = exception.Message;
+
+        if (message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("quota", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The AI service quota for this API key is exhausted or disabled. Update your Gemini billing/quota settings or use a different API key, then try again.";
+        }
+
+        if (message.Contains("API key", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("403", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The AI service API key is missing or invalid. Update your Gemini API key in user secrets and restart Fleet.AppHost.";
+        }
+
+        if (message.Contains("429", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The AI service is rate-limiting requests right now. Wait a moment and try again.";
+        }
+
+        if (message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The AI service request timed out. Please try again.";
+        }
+
+        return "I encountered an error connecting to the AI service. Please try again.";
+    }
+
     // ── Attachment CRUD ───────────────────────────────────────
 
     public async Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content)
     {
-        logger.LogInformation("Uploading attachment '{FileName}' ({Length} chars) to session {SessionId}",
-            fileName, content.Length, sessionId);
+        logger.CopilotAttachmentUploading(sessionId.SanitizeForLogging(), fileName.SanitizeForLogging(), content.Length);
         return await chatSessionRepository.AddAttachmentAsync(sessionId, fileName, content);
     }
 
@@ -259,7 +346,7 @@ public class ChatService(
 
     public async Task<bool> DeleteAttachmentAsync(string attachmentId)
     {
-        logger.LogInformation("Deleting attachment {AttachmentId}", attachmentId);
+        logger.CopilotAttachmentDeleting(attachmentId.SanitizeForLogging());
         return await chatSessionRepository.DeleteAttachmentAsync(attachmentId);
     }
 }

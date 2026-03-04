@@ -6,7 +6,7 @@ export type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsPr
 export { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
 export type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
 export { getExecutions, getLogs } from './agentsProxy'
-export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment } from './chatProxy'
+export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
 export { getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos } from './userProxy'
@@ -44,6 +44,7 @@ export {
   useAttachments,
   useUploadAttachment,
   useDeleteAttachment,
+  useDeleteSession,
   useSeedDatabase,
   useResetDatabase,
 } from './dataClient'

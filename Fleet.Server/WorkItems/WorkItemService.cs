@@ -1,4 +1,5 @@
 using Fleet.Server.Models;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.WorkItems;
 
@@ -8,31 +9,59 @@ public class WorkItemService(
 {
     public async Task<IReadOnlyList<WorkItemDto>> GetByProjectIdAsync(string projectId)
     {
-        logger.LogInformation("Retrieving work items for project {ProjectId}", projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId
+        });
+
+        logger.WorkItemsRetrieving(projectId.SanitizeForLogging());
         return await workItemRepository.GetByProjectIdAsync(projectId);
     }
 
     public async Task<WorkItemDto?> GetByIdAsync(string projectId, int id)
     {
-        logger.LogInformation("Retrieving work item {WorkItemId} for project {ProjectId}", id, projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["WorkItemId"] = id
+        });
+
+        logger.WorkItemsRetrievingById(projectId.SanitizeForLogging(), id);
         return await workItemRepository.GetByIdAsync(projectId, id);
     }
 
     public async Task<WorkItemDto> CreateAsync(string projectId, CreateWorkItemRequest request)
     {
-        logger.LogInformation("Creating work item in project {ProjectId} with title: {Title}", projectId, request.Title);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId
+        });
+
+        logger.WorkItemsCreating(projectId.SanitizeForLogging(), request.Title.SanitizeForLogging());
         return await workItemRepository.CreateAsync(projectId, request);
     }
 
     public async Task<WorkItemDto?> UpdateAsync(string projectId, int id, UpdateWorkItemRequest request)
     {
-        logger.LogInformation("Updating work item {WorkItemId} in project {ProjectId}", id, projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["WorkItemId"] = id
+        });
+
+        logger.WorkItemsUpdating(projectId.SanitizeForLogging(), id);
         return await workItemRepository.UpdateAsync(projectId, id, request);
     }
 
     public async Task<bool> DeleteAsync(string projectId, int id)
     {
-        logger.LogInformation("Deleting work item {WorkItemId} from project {ProjectId}", id, projectId);
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["WorkItemId"] = id
+        });
+
+        logger.WorkItemsDeleting(projectId.SanitizeForLogging(), id);
         return await workItemRepository.DeleteAsync(projectId, id);
     }
 }

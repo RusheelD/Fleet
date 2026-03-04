@@ -7,15 +7,27 @@ using Fleet.Server.Data;
 using Fleet.Server.Exceptions;
 using Fleet.Server.GitHub;
 using Fleet.Server.LLM;
+using Fleet.Server.Logging;
 using Fleet.Server.Projects;
 using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
+
+#if DEBUG
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+    options.SingleLine = true;
+    options.IncludeScopes = true;
+});
+#endif
+
+// Always log EF Core DB command execution (query text + duration + status)
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Information);
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
@@ -28,7 +40,12 @@ builder.AddNpgsqlDbContext<FleetDbContext>("fleetdb");
 // Add services to the container.
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddControllers();
+builder.Services.AddScoped<ApiActionLoggingFilter>();
+builder.Services.AddTransient<OutboundHttpLoggingHandler>();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.AddService<ApiActionLoggingFilter>();
+});
 
 // Entra ID (Azure AD) Authentication
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
@@ -57,11 +74,33 @@ builder.Services.AddHttpClient("GitHub", client =>
     client.DefaultRequestHeaders.Accept.Add(
         new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Fleet/1.0");
-});
+})
+    .AddHttpMessageHandler<OutboundHttpLoggingHandler>();
 
 // LLM configuration + provider
 builder.Services.Configure<LLMOptions>(builder.Configuration.GetSection(LLMOptions.SectionName));
-builder.Services.AddSingleton<ILLMClient, GeminiClient>();
+builder.Services.PostConfigure<LLMOptions>(options =>
+{
+    if (string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        options.ApiKey =
+            Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ??
+            string.Empty;
+    }
+});
+
+// Named HttpClient for LLM with extended timeouts (tool-calling loops can take time)
+builder.Services.AddHttpClient("LLM")
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(3))
+    .AddStandardResilienceHandler(options =>
+    {
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(3);
+        options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(2);
+        options.Retry.MaxRetryAttempts = 2;
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(5);
+    });
+
+builder.Services.AddSingleton<ILLMClient, ClaudeClient>();
 
 // Chat tools (registered individually, collected by ChatToolRegistry)
 builder.Services.AddScoped<IChatTool, GetProjectInfoTool>();
@@ -95,22 +134,31 @@ builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
 builder.Services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 
-var app = builder.Build();
+// Background migration — runs after the host starts so health checks respond immediately
+var hasFleetDbConnection =
+    !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("fleetdb")) ||
+    !string.IsNullOrWhiteSpace(builder.Configuration["ConnectionString"]) ||
+    !string.IsNullOrWhiteSpace(builder.Configuration["Aspire:Npgsql:EntityFrameworkCore:PostgreSQL:ConnectionString"]) ||
+    !string.IsNullOrWhiteSpace(builder.Configuration["Aspire:Npgsql:EntityFrameworkCore:PostgreSQL:FleetDbContext:ConnectionString"]);
 
-// Apply pending migrations on startup.
-using (var scope = app.Services.CreateScope())
+if (hasFleetDbConnection)
 {
-    var db = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
-    await db.Database.MigrateAsync();
+    builder.Services.AddHostedService<DatabaseMigrationService>();
 }
 
-// Configure the HTTP request pipeline.
-app.UseExceptionHandler();
+var app = builder.Build();
 
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+// Always route unhandled exceptions through GlobalExceptionHandler
+app.UseExceptionHandler();
+
+app.UseMiddleware<ResponseHeadersMiddleware>();
+app.UseMiddleware<RequestLoggingMiddleware>();
 
 app.UseAuthentication();
 app.UseCors();

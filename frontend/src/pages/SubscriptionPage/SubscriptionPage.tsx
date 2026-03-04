@@ -3,6 +3,7 @@ import {
     Title3,
     Divider,
     Spinner,
+    Text,
 } from '@fluentui/react-components'
 import { PageHeader } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
@@ -74,7 +75,15 @@ export function SubscriptionPage() {
 
             <Divider className={styles.dividerSpacing} />
 
-            <Title3>Available Plans</Title3>
+            <div style={{ marginBottom: '1.5rem' }}>
+                <Title3>Available Plans</Title3>
+                <div style={{ marginTop: '0.25rem' }}>
+                    <Text>
+                        Pricing scales based on agents and simultaneous agents purchased. All plans include the same core features.
+                    </Text>
+                </div>
+            </div>
+
             <div className={styles.plansGrid}>
                 {subscription.plans.map((plan) => (
                     <PlanCard key={plan.name} plan={plan} />

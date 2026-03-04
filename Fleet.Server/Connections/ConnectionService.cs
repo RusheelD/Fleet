@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.Logging;
 using Fleet.Server.Models;
 
 namespace Fleet.Server.Connections;
@@ -14,6 +15,15 @@ public class ConnectionService(
 {
     public async Task<LinkedAccountDto> LinkGitHubAsync(int userId, string code, string redirectUri)
     {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["Provider"] = "GitHub"
+        });
+
+        var sanitizedRedirect = LogSanitizer.SanitizeUrl(redirectUri);
+        logger.ConnectionsLinkGitHubRequested(userId, sanitizedRedirect.SanitizeForLogging());
+
         // Check if already linked
         var existing = await connectionRepository.GetByProviderAsync(userId, "GitHub");
 
@@ -40,7 +50,7 @@ public class ConnectionService(
         var tokenBody = await tokenResponse.Content.ReadFromJsonAsync<GitHubTokenResponse>();
         if (tokenBody is null || string.IsNullOrEmpty(tokenBody.AccessToken))
         {
-            logger.LogError("GitHub token exchange failed. Error: {Error}", tokenBody?.Error);
+            logger.ConnectionsGitHubTokenExchangeFailed((tokenBody?.Error ?? string.Empty).SanitizeForLogging());
             throw new InvalidOperationException(
                 tokenBody?.ErrorDescription ?? "Failed to exchange GitHub authorization code for access token.");
         }
@@ -57,8 +67,7 @@ public class ConnectionService(
         if (gitHubUser is null)
             throw new InvalidOperationException("Failed to retrieve GitHub user profile.");
 
-        logger.LogInformation("Linking GitHub account {Login} (ID: {Id}) for user {UserId}",
-            gitHubUser.Login, gitHubUser.Id, userId);
+        logger.ConnectionsLinkingGitHubAccount(userId, gitHubUser.Login.SanitizeForLogging(), gitHubUser.Id);
 
         if (existing is not null)
         {
@@ -90,22 +99,38 @@ public class ConnectionService(
 
     public async Task UnlinkGitHubAsync(int userId)
     {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["Provider"] = "GitHub"
+        });
+
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub")
             ?? throw new InvalidOperationException("No GitHub account is linked.");
 
-        logger.LogInformation("Unlinking GitHub account {ConnectedAs} for user {UserId}",
-            account.ConnectedAs, userId);
+        logger.ConnectionsUnlinkingGitHubAccount(userId, (account.ConnectedAs ?? string.Empty).SanitizeForLogging());
 
         await connectionRepository.DeleteAsync(account);
     }
 
     public async Task<IReadOnlyList<LinkedAccountDto>> GetConnectionsAsync(int userId)
     {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId
+        });
+
         return await connectionRepository.GetAllAsync(userId);
     }
 
     public async Task<IReadOnlyList<GitHubRepoDto>> GetGitHubRepositoriesAsync(int userId)
     {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["Provider"] = "GitHub"
+        });
+
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub")
             ?? throw new InvalidOperationException("No GitHub account is linked.");
 
@@ -140,7 +165,7 @@ public class ConnectionService(
             page++;
         }
 
-        logger.LogInformation("Fetched {Count} GitHub repositories for user {UserId}", repos.Count, userId);
+        logger.ConnectionsFetchedGitHubRepositories(userId, repos.Count);
         return repos;
     }
 

@@ -145,8 +145,8 @@ public static class FleetDbSeeder
             ("Module",    "puzzle-piece", "#0078D4", 1),
             ("Feature",   "lightbulb",    "#00B7C3", 2),
             ("Component", "code",         "#498205", 3),
-            ("Bug",       "bug",          "#D13438", 4),
-            ("Task",      "task-list",    "#8A8886", 5),
+            ("Bug",       "bug",          "#D13438", 3),
+            ("Task",      "task-list",    "#8A8886", 4),
         };
 
         foreach (var projectId in projectIds)

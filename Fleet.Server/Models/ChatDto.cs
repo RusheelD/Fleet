@@ -15,7 +15,7 @@ public record ChatMessageDto(
     string Timestamp
 );
 
-public record SendMessageRequest(string Content);
+public record SendMessageRequest(string Content, bool GenerateWorkItems = false);
 
 public record CreateSessionRequest(string Title);
 

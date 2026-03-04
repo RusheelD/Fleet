@@ -4,13 +4,15 @@ using Fleet.Server.WorkItems;
 namespace Fleet.Server.Copilot.Tools;
 
 /// <summary>Creates a new work item in the current project.</summary>
-public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
+public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevelService workItemLevelService) : IChatTool
 {
     public string Name => "create_work_item";
 
     public string Description =>
         "Create a new work item in the current project. Returns the created work item. " +
-        "Valid states: New, Active, In Progress, Resolved, Closed. Priority: 1 (critical) to 4 (low).";
+        "Valid states: New, Active, In Progress, Resolved, Closed. Priority: 1 (critical) to 4 (low). " +
+        "Valid levels (types): Domain, Module, Feature, Component, Bug, Task. " +
+        "Use parent_id to nest under an existing work item (e.g. Tasks under a Feature).";
 
     public string ParametersJsonSchema => """
         {
@@ -25,14 +27,23 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
                     "description": "Detailed description of the work item."
                 },
                 "priority": {
-                    "type": "integer",
+                    "type": "string",
                     "description": "Priority: 1 (critical), 2 (high), 3 (medium), 4 (low). Default 3.",
-                    "enum": [1, 2, 3, 4]
+                    "enum": ["1", "2", "3", "4"]
                 },
                 "state": {
                     "type": "string",
                     "description": "Initial state. Default 'New'.",
                     "enum": ["New", "Active", "In Progress", "Resolved", "Closed"]
+                },
+                "level": {
+                    "type": "string",
+                    "description": "Work item type/level. Use to categorize: Domain (top-level), Module, Feature, Component, Bug, Task.",
+                    "enum": ["Domain", "Module", "Feature", "Component", "Bug", "Task"]
+                },
+                "parent_id": {
+                    "type": "integer",
+                    "description": "ID of the parent work item to nest this under. Omit for root-level items."
                 },
                 "tags": {
                     "type": "array",
@@ -48,6 +59,16 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
     {
         var args = ParseArgs(argumentsJson);
 
+        // Resolve level name to ID
+        int? levelId = null;
+        if (!string.IsNullOrWhiteSpace(args.Level))
+        {
+            var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+            var match = levels.FirstOrDefault(l =>
+                l.Name.Equals(args.Level, StringComparison.OrdinalIgnoreCase));
+            levelId = match?.Id;
+        }
+
         var request = new Models.CreateWorkItemRequest(
             Title: args.Title,
             Description: args.Description ?? "",
@@ -56,8 +77,8 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
             AssignedTo: "Unassigned",
             Tags: args.Tags,
             IsAI: false,
-            ParentId: null,
-            LevelId: null
+            ParentId: args.ParentId,
+            LevelId: levelId
         );
 
         var created = await workItemService.CreateAsync(context.ProjectId, request);
@@ -70,6 +91,8 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
             created.Priority,
             created.Description,
             created.Tags,
+            Level = args.Level,
+            created.ParentId,
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -82,8 +105,26 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
 
             var title = root.TryGetProperty("title", out var t) ? t.GetString() ?? "Untitled" : "Untitled";
             var description = root.TryGetProperty("description", out var d) ? d.GetString() : null;
-            var priority = root.TryGetProperty("priority", out var p) && p.TryGetInt32(out var pv) ? pv : 3;
+            var priority = 3;
+            if (root.TryGetProperty("priority", out var p))
+            {
+                // Gemini returns string enums; other providers may return integers
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var pv))
+                    priority = pv;
+                else if (p.ValueKind == JsonValueKind.String && int.TryParse(p.GetString(), out var ps))
+                    priority = ps;
+            }
             var state = root.TryGetProperty("state", out var s) ? s.GetString() ?? "New" : "New";
+            var level = root.TryGetProperty("level", out var lv) ? lv.GetString() : null;
+
+            int? parentId = null;
+            if (root.TryGetProperty("parent_id", out var pid))
+            {
+                if (pid.ValueKind == JsonValueKind.Number && pid.TryGetInt32(out var pidVal))
+                    parentId = pidVal;
+                else if (pid.ValueKind == JsonValueKind.String && int.TryParse(pid.GetString(), out var pidStr))
+                    parentId = pidStr;
+            }
 
             string[] tags = [];
             if (root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
@@ -94,13 +135,13 @@ public class CreateWorkItemTool(IWorkItemService workItemService) : IChatTool
                     .ToArray();
             }
 
-            return new CreateWorkItemArgs(title, description, priority, state, tags);
+            return new CreateWorkItemArgs(title, description, priority, state, level, parentId, tags);
         }
         catch
         {
-            return new CreateWorkItemArgs("Untitled", null, 3, "New", []);
+            return new CreateWorkItemArgs("Untitled", null, 3, "New", null, null, []);
         }
     }
 
-    private record CreateWorkItemArgs(string Title, string? Description, int Priority, string State, string[] Tags);
+    private record CreateWorkItemArgs(string Title, string? Description, int Priority, string State, string? Level, int? ParentId, string[] Tags);
 }

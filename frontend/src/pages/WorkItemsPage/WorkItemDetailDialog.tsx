@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
     makeStyles,
     tokens,
@@ -261,7 +261,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const [parentLabel, setParentLabel] = useState(NONE_PARENT)
     const [levelLabel, setLevelLabel] = useState(NONE_LEVEL)
 
-    const sortedLevels = [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal)
+    const sortedLevels = useMemo(() => [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal), [levels])
 
     const parentOptions = useMemo(() => {
         if (!item || !workItems) return []
@@ -304,7 +304,20 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             const lvl = sortedLevels.find((l) => l.id === item.levelId)
             setLevelLabel(lvl ? lvl.name : NONE_LEVEL)
         }
-    }, [item, workItems, sortedLevels])
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when item changes, not on every levels refetch
+    }, [item?.id])
+
+    /* ── Escape key handler ─────────────────────────────────── */
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose()
+    }, [onClose])
+
+    useEffect(() => {
+        if (item) {
+            document.addEventListener('keydown', handleKeyDown)
+            return () => document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [item, handleKeyDown])
 
     const handleSave = () => {
         if (!item || !title.trim()) return
@@ -323,8 +336,8 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         .split(',')
                         .map((t) => t.trim())
                         .filter(Boolean),
-                    parentId: parentLabel === NONE_PARENT ? null : (selectedParent?.id ?? item.parentId),
-                    levelId: levelLabel === NONE_LEVEL ? null : (selectedLevel?.id ?? item.levelId),
+                    parentId: parentLabel === NONE_PARENT ? 0 : (selectedParent?.id ?? item.parentId),
+                    levelId: levelLabel === NONE_LEVEL ? 0 : (selectedLevel?.id ?? item.levelId),
                 },
             },
             { onSuccess: () => onClose() },
@@ -348,7 +361,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                 {/* ── Header bar ──────────────────────────── */}
                 <div className={styles.headerBar}>
                     <div className={styles.headerType}>
-                        {currentLevel && (
+                        {currentLevel ? (
                             <>
                                 <span className={styles.headerTypeIcon} style={{ color: currentLevel.color }}>
                                     {resolveLevelIcon(currentLevel.iconName)}
@@ -357,6 +370,10 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                     {currentLevel.name}
                                 </Text>
                             </>
+                        ) : (
+                            <Text weight="semibold" style={{ color: tokens.colorNeutralForeground3 }}>
+                                Work Item
+                            </Text>
                         )}
                     </div>
                     <Text className={styles.headerId}>{item.id}</Text>

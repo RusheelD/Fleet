@@ -28,7 +28,7 @@ public class UserPreferences
     public bool PrOpenedNotification { get; set; }
     public bool AgentErrorsNotification { get; set; }
     public bool WorkItemUpdatesNotification { get; set; }
-    public bool DarkMode { get; set; }
+    public bool DarkMode { get; set; } = true;
     public bool CompactMode { get; set; }
     public bool SidebarCollapsed { get; set; }
 }

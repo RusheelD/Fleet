@@ -1,14 +1,20 @@
-import { useRef } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 import {
     makeStyles,
     tokens,
     Caption1,
     Button,
-    Textarea,
+    Menu,
+    MenuTrigger,
+    MenuPopover,
+    MenuList,
+    MenuItem,
 } from '@fluentui/react-components'
 import {
     SendRegular,
     AttachRegular,
+    ChevronDownRegular,
+    TaskListAddRegular,
 } from '@fluentui/react-icons'
 
 const useStyles = makeStyles({
@@ -18,6 +24,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.5rem',
+        flexShrink: 0,
     },
     inputRow: {
         display: 'flex',
@@ -26,9 +33,44 @@ const useStyles = makeStyles({
     },
     inputTextarea: {
         flex: 1,
+        fontFamily: tokens.fontFamilyBase,
+        fontSize: tokens.fontSizeBase300,
+        lineHeight: tokens.lineHeightBase300,
+        padding: '6px 12px',
+        borderRadius: tokens.borderRadiusMedium,
+        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        backgroundColor: tokens.colorNeutralBackground1,
+        color: tokens.colorNeutralForeground1,
+        resize: 'none',
+        overflow: 'hidden',
+        minHeight: '60px',
+        maxHeight: '200px',
+        boxSizing: 'border-box',
+        ':focus': {
+            outlineWidth: '2px',
+            outlineStyle: 'solid',
+            outlineColor: tokens.colorBrandStroke1,
+            borderColor: 'transparent',
+        },
+        '::placeholder': {
+            color: tokens.colorNeutralForeground4,
+        },
+    },
+    sendGroup: {
+        display: 'flex',
+        alignSelf: 'flex-end',
     },
     sendButton: {
-        alignSelf: 'flex-end',
+        borderTopRightRadius: 0,
+        borderBottomRightRadius: 0,
+    },
+    menuButton: {
+        borderTopLeftRadius: 0,
+        borderBottomLeftRadius: 0,
+        minWidth: 'auto',
+        paddingLeft: '4px',
+        paddingRight: '4px',
+        borderLeft: `1px solid ${tokens.colorNeutralForegroundOnBrand}`,
     },
     inputActions: {
         display: 'flex',
@@ -51,14 +93,31 @@ interface ChatInputProps {
     value: string
     onChange: (value: string) => void
     onSend?: () => void
+    onGenerate?: () => void
     onFileSelect?: (file: File) => void
     disabled?: boolean
     uploading?: boolean
 }
 
-export function ChatInput({ value, onChange, onSend, onFileSelect, disabled, uploading }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, disabled, uploading }: ChatInputProps) {
     const styles = useStyles()
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+    const hasText = value.trim().length > 0
+
+    const autoResize = useCallback(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.style.height = 'auto'
+        el.style.height = `${el.scrollHeight}px`
+        // Toggle overflow when content exceeds maxHeight
+        el.style.overflow = el.scrollHeight > 200 ? 'auto' : 'hidden'
+    }, [])
+
+    useEffect(() => {
+        autoResize()
+    }, [value, autoResize])
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -74,24 +133,60 @@ export function ChatInput({ value, onChange, onSend, onFileSelect, disabled, upl
     return (
         <div className={styles.inputArea}>
             <div className={styles.inputRow}>
-                <Textarea
+                <textarea
+                    ref={textareaRef}
                     placeholder="Describe what you want to build..."
                     value={value}
-                    onChange={(_e, data) => onChange(data.value)}
-                    resize="vertical"
+                    onChange={(e) => onChange(e.target.value)}
                     rows={2}
                     className={styles.inputTextarea}
                     disabled={disabled}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            if (hasText && onSend) onSend()
+                        }
+                    }}
                 />
-                <Button
-                    appearance="primary"
-                    icon={<SendRegular />}
-                    disabled={!value.trim() || disabled}
-                    className={styles.sendButton}
-                    onClick={onSend}
-                >
-                    Send
-                </Button>
+                <div className={styles.sendGroup}>
+                    <Button
+                        appearance="primary"
+                        icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
+                        disabled={(!hasText && !onGenerate) || disabled}
+                        className={styles.sendButton}
+                        onClick={hasText ? onSend : onGenerate}
+                    >
+                        {hasText ? 'Send' : 'Generate'}
+                    </Button>
+                    <Menu>
+                        <MenuTrigger disableButtonEnhancement>
+                            <Button
+                                appearance="primary"
+                                icon={<ChevronDownRegular />}
+                                disabled={disabled}
+                                className={styles.menuButton}
+                                size="medium"
+                            />
+                        </MenuTrigger>
+                        <MenuPopover>
+                            <MenuList>
+                                <MenuItem
+                                    icon={<SendRegular />}
+                                    disabled={!hasText}
+                                    onClick={onSend}
+                                >
+                                    Send
+                                </MenuItem>
+                                <MenuItem
+                                    icon={<TaskListAddRegular />}
+                                    onClick={onGenerate}
+                                >
+                                    {hasText ? 'Send & Generate' : 'Generate Work Items'}
+                                </MenuItem>
+                            </MenuList>
+                        </MenuPopover>
+                    </Menu>
+                </div>
             </div>
             <div className={styles.inputActions}>
                 <div className={styles.inputButtons}>

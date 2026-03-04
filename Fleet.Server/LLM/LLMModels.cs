@@ -4,7 +4,8 @@ namespace Fleet.Server.LLM;
 public record LLMRequest(
     string SystemPrompt,
     IReadOnlyList<LLMMessage> Messages,
-    IReadOnlyList<LLMToolDefinition>? Tools = null
+    IReadOnlyList<LLMToolDefinition>? Tools = null,
+    string? ModelOverride = null
 );
 
 /// <summary>Normalized response from any LLM provider.</summary>
@@ -34,11 +35,14 @@ public class LLMOptions
 {
     public const string SectionName = "LLM";
 
-    public string Provider { get; set; } = "gemini";
+    public string Provider { get; set; } = "claude";
     public string ApiKey { get; set; } = string.Empty;
-    public string Model { get; set; } = "gemini-2.0-flash";
-    public int MaxToolLoops { get; set; } = 5;
-    public int MaxToolCallsTotal { get; set; } = 15;
-    public int TimeoutSeconds { get; set; } = 60;
-    public int MaxToolOutputLength { get; set; } = 4000;
+    /// <summary>Default model used for normal chat (e.g., claude-haiku-4-20250514).</summary>
+    public string Model { get; set; } = "claude-haiku-4-20250514";
+    /// <summary>Stronger model used for work-item generation (e.g., claude-sonnet-4-20250514).</summary>
+    public string GenerateModel { get; set; } = "claude-sonnet-4-20250514";
+    public int MaxToolLoops { get; set; } = 10;
+    public int MaxToolCallsTotal { get; set; } = 20;
+    public int TimeoutSeconds { get; set; } = 180;
+    public int MaxToolOutputLength { get; set; } = 8000;
 }

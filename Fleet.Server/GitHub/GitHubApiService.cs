@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fleet.Server.Connections;
+using Fleet.Server.Logging;
 
 namespace Fleet.Server.GitHub;
 
@@ -17,7 +18,7 @@ public class GitHubApiService(
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
         if (account is null || string.IsNullOrEmpty(account.AccessToken))
         {
-            logger.LogWarning("No GitHub token available for user {UserId}; returning empty stats", userId);
+            logger.GitHubNoToken(userId);
             return new GitHubRepoStats(0, 0, 0, []);
         }
 
@@ -33,7 +34,7 @@ public class GitHubApiService(
         }
         catch (HttpRequestException ex)
         {
-            logger.LogWarning(ex, "GitHub API call failed for repo {Repo}; returning empty stats", repoFullName);
+            logger.GitHubApiFailed(ex, repoFullName.SanitizeForLogging());
             return new GitHubRepoStats(0, 0, 0, []);
         }
     }

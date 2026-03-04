@@ -43,13 +43,17 @@ const useStyles = makeStyles({
     },
     pricingGrid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gap: tokens.spacingHorizontalXL,
-        maxWidth: '1100px',
+        maxWidth: '1200px',
         marginLeft: 'auto',
         marginRight: 'auto',
         alignItems: 'start',
-        '@media (max-width: 900px)': {
+        '@media (max-width: 1100px)': {
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            maxWidth: '700px',
+        },
+        '@media (max-width: 600px)': {
             gridTemplateColumns: '1fr',
             maxWidth: '420px',
         },
@@ -151,13 +155,15 @@ const plans: PlanData[] = [
         name: 'Free',
         price: '$0',
         period: 'forever',
-        description: 'Perfect for individual developers and small side projects.',
+        description: 'Everything you need to get started — same features on every plan.',
         features: [
-            '1 project',
-            '50 agent tasks / month',
-            'Community support',
+            '1 concurrent agent per task',
+            '1 total agent',
+            'Limited monthly credits',
+            'Base AI model',
+            '3 projects',
             'GitHub integration',
-            'Basic work item hierarchy',
+            'Community support',
         ],
         cta: 'Get started free',
         ctaAppearance: 'outline',
@@ -167,15 +173,31 @@ const plans: PlanData[] = [
         popular: true,
         price: '$29',
         period: '/ month',
-        description: 'For professional developers and growing teams.',
+        description: 'More agents, more power — ship faster with parallel execution.',
         features: [
+            '5 concurrent agents per task',
+            '10 total agents',
+            'Higher monthly credits',
+            'Base + mid-tier AI models',
             'Unlimited projects',
-            '500 agent tasks / month',
             'Priority support',
-            'Advanced agent roles',
-            'Custom work item levels',
+        ],
+        cta: 'Start free trial',
+        ctaAppearance: 'primary',
+    },
+    {
+        name: 'Team',
+        price: '$99',
+        period: '/ month',
+        description: 'Maximum scale for teams and organizations.',
+        features: [
+            '10 concurrent agents per task',
+            '25 total agents',
+            'Highest monthly credits',
+            'All AI models including premium',
+            'Unlimited projects',
+            'Priority support',
             'Team collaboration',
-            'Execution analytics',
         ],
         cta: 'Start free trial',
         ctaAppearance: 'primary',
@@ -184,15 +206,15 @@ const plans: PlanData[] = [
         name: 'Enterprise',
         price: 'Custom',
         period: '',
-        description: 'For organizations that need scale, security, and control.',
+        description: 'For organizations that need security, compliance, and control.',
         features: [
-            'Unlimited everything',
-            'Unlimited agent tasks',
-            'Dedicated support',
+            'Custom agent limits',
+            'Unlimited monthly credits',
+            'All AI models including premium',
+            'Unlimited projects',
+            'Dedicated support & SLA',
             'SSO / Entra ID',
-            'Custom agent configurations',
             'Audit logging',
-            'SLA guarantee',
             'On-premises option',
         ],
         cta: 'Contact sales',
@@ -201,8 +223,8 @@ const plans: PlanData[] = [
 ]
 
 const faqs = [
-    { q: 'Can I try Fleet before paying?', a: 'Yes! The Free plan is free forever with generous limits. Pro includes a 14-day free trial.' },
-    { q: 'What counts as an agent task?', a: 'Each discrete piece of work an agent completes — like implementing a feature, fixing a bug, or creating a PR — counts as one task.' },
+    { q: 'Can I try Fleet before paying?', a: 'Yes! The Free plan is free forever with generous limits. Pro and Team include a 14-day free trial.' },
+    { q: 'How does agent-based pricing work?', a: 'Plans scale based on two dimensions: the total number of agents you can run simultaneously across all tasks, and how many concurrent agents can work on a single task in parallel. All plans include the same core features.' },
     { q: 'Can I cancel anytime?', a: 'Absolutely. No contracts, no cancellation fees. Downgrade to Free whenever you want.' },
     { q: 'Do you support GitHub Enterprise?', a: 'Yes, Enterprise plans support GitHub Enterprise Server and GitHub Enterprise Cloud.' },
 ]
@@ -216,7 +238,7 @@ export function PricingPage() {
             <section className={styles.hero}>
                 <Title1 as="h1">Simple, transparent pricing</Title1>
                 <Body1 className={styles.heroSubtitle} as="p">
-                    Start free, scale as you grow. No surprises.
+                    All plans include the same features. Scale by adding more agents and concurrency.
                 </Body1>
             </section>
 
@@ -224,7 +246,7 @@ export function PricingPage() {
             <section className={styles.section}>
                 <div className={styles.pricingGrid}>
                     {plans.map((plan) => (
-                        <Card key={plan.name} className={`${styles.card} ${plan.popular ? styles.cardPopular : ''}`}>
+                        <Card key={plan.name} className={`${styles.card} ${plan.popular ? styles.cardPopular : ''}`} style={{ minHeight: 0 }}>
                             <div className={styles.cardHeader}>
                                 <div className={styles.cardHeaderRow}>
                                     <Title3>{plan.name}</Title3>

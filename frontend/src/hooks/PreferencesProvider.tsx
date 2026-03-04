@@ -15,7 +15,7 @@ const defaults: UserPreferences = {
     prOpenedNotification: true,
     agentErrorsNotification: true,
     workItemUpdatesNotification: true,
-    darkMode: window.matchMedia('(prefers-color-scheme: dark)').matches,
+    darkMode: true,
     compactMode: false,
     sidebarCollapsed: false,
 }

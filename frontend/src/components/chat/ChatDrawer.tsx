@@ -1,25 +1,26 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { makeStyles, tokens, Spinner } from '@fluentui/react-components'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatSuggestions, ChatInput, AttachedFiles } from './'
 import { ToolEventMessage } from './ToolEventMessage'
 
 import {
-    useChatData, useChatMessages, useCreateChatSession, useSendMessage,
-    useAttachments, useUploadAttachment, useDeleteAttachment,
+    useChatData, useChatMessages, useCreateChatSession,
+    useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession,
+    sendChatMessage,
 } from '../../proxies'
-import type { ChatMessageData } from '../../models'
+import type { ChatMessageData, SendMessageResponse } from '../../models'
 
 const useStyles = makeStyles({
     drawer: {
-        width: '420px',
-        borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: tokens.colorNeutralBackground1,
         flexShrink: 0,
         height: '100%',
         overflow: 'hidden',
+        width: '100%',
     },
     messagesContainer: {
         flex: 1,
@@ -48,12 +49,13 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [isThinking, setIsThinking] = useState(false)
+    const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
     const { data: messages } = useChatMessages(projectId, activeSession)
     const createSessionMutation = useCreateChatSession(projectId)
-    const sendMutation = useSendMessage(projectId, activeSession ?? '')
+    const deletSessionMutation = useDeleteSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId, activeSession)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
@@ -82,31 +84,63 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         }
     }, [serverMessages.length, isThinking, optimisticMessages.length])
 
-    const handleSend = () => {
-        if (!message.trim() || !activeSession || sendMutation.isPending) return
+    const queryClient = useQueryClient()
 
-        const userContent = message.trim()
+    const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
         setMessage('')
 
+        const defaultGenerateMessage = 'Generate work items based on the context you have been given.'
+
+        // If generating with no user input, use the default generate message
+        const contentToSend = generateWorkItems && !userContent
+            ? defaultGenerateMessage
+            : userContent
+
         // Optimistic: show user message immediately
+        const displayContent = generateWorkItems && !userContent
+            ? '📋 Generate work items'
+            : userContent
         setOptimisticMessages([{
             id: `optimistic-${Date.now()}`,
             role: 'user',
-            content: userContent,
+            content: displayContent,
             timestamp: new Date().toISOString(),
         }])
         setIsThinking(true)
 
-        sendMutation.mutate(userContent, {
-            onSuccess: () => {
+        // Call API directly with the explicit sessionId to avoid stale closures
+        // when a session was just auto-created
+        sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
+            .then((response: SendMessageResponse) => {
                 setIsThinking(false)
                 setOptimisticMessages([])
-            },
-            onError: () => {
+                setLastSendResponse(response)
+                void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
+                void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+            })
+            .catch(() => {
                 setIsThinking(false)
                 setOptimisticMessages([])
-            },
-        })
+            })
+    }
+
+    const handleSend = (generateWorkItems = false) => {
+        const userContent = message.trim()
+        if (isThinking || createSessionMutation.isPending) return
+        if (!userContent && !generateWorkItems) return
+
+        // Auto-create a session if none exists, then send
+        if (!activeSession) {
+            createSessionMutation.mutate('New Chat', {
+                onSuccess: (session) => {
+                    setActiveSession(session.id)
+                    doSend(session.id, userContent, generateWorkItems)
+                },
+            })
+            return
+        }
+
+        doSend(activeSession, userContent, generateWorkItems)
     }
 
     const handleNewSession = () => {
@@ -118,9 +152,21 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         })
     }
 
+    const handleDeleteSession = (sessionId: string) => {
+        deletSessionMutation.mutate(sessionId, {
+            onSuccess: () => {
+                // If deleted session was active, switch to first remaining session or clear
+                if (activeSession === sessionId) {
+                    const remainingSessions = sessions.filter(s => s.id !== sessionId)
+                    setActiveSession(remainingSessions.length > 0 ? remainingSessions[0].id : undefined)
+                }
+                setOptimisticMessages([])
+            },
+        })
+    }
+
     // Show tool events from last response
-    const lastResponse = sendMutation.data
-    const toolEvents = lastResponse?.toolEvents ?? []
+    const toolEvents = lastSendResponse?.toolEvents ?? []
 
     const handleFileSelect = (file: File) => {
         if (!activeSession) return
@@ -135,6 +181,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                 sessions={sessions}
                 activeSessionId={activeSession ?? ''}
                 onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]) }}
+                onDeleteSession={handleDeleteSession}
                 onNewSession={handleNewSession}
             />
 
@@ -170,9 +217,10 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             <ChatInput
                 value={message}
                 onChange={setMessage}
-                onSend={handleSend}
+                onSend={() => handleSend(false)}
+                onGenerate={() => handleSend(true)}
                 onFileSelect={handleFileSelect}
-                disabled={sendMutation.isPending}
+                disabled={isThinking || createSessionMutation.isPending}
                 uploading={uploadMutation.isPending}
             />
         </div>

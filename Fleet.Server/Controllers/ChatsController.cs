@@ -31,10 +31,17 @@ public class ChatsController(IChatService chatService) : ControllerBase
         return Created($"/api/projects/{projectId}/chat/sessions/{session.Id}", session);
     }
 
+    [HttpDelete("sessions/{sessionId}")]
+    public async Task<IActionResult> DeleteSession(string projectId, string sessionId)
+    {
+        var deleted = await chatService.DeleteSessionAsync(projectId, sessionId);
+        return deleted ? NoContent() : NotFound();
+    }
+
     [HttpPost("sessions/{sessionId}/messages")]
     public async Task<IActionResult> SendMessage(string projectId, string sessionId, [FromBody] SendMessageRequest request)
     {
-        var response = await chatService.SendMessageAsync(projectId, sessionId, request.Content);
+        var response = await chatService.SendMessageAsync(projectId, sessionId, request.Content, request.GenerateWorkItems);
         return Ok(response);
     }
 

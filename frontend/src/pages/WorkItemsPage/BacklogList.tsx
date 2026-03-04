@@ -34,7 +34,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '100px 3fr 130px 60px 150px 140px',
+        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -46,6 +46,7 @@ const useStyles = makeStyles({
         position: 'sticky',
         top: 0,
         zIndex: 1,
+        borderLeft: '3px solid transparent',
     },
     headerCell: {
         display: 'flex',
@@ -58,11 +59,11 @@ const useStyles = makeStyles({
         },
     },
     headerText: {
-        fontSize: '12px',
+        fontSize: '11px',
         fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground3,
         textTransform: 'uppercase',
-        letterSpacing: '0.03em',
+        letterSpacing: '0.05em',
     },
     sortIcon: {
         fontSize: '10px',
@@ -72,24 +73,25 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '100px 3fr 130px 60px 150px 140px',
+        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
         alignItems: 'center',
-        paddingTop: '5px',
-        paddingBottom: '5px',
+        paddingTop: '3px',
+        paddingBottom: '3px',
         paddingLeft: tokens.spacingHorizontalM,
         paddingRight: tokens.spacingHorizontalM,
         gap: tokens.spacingHorizontalS,
         borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+        borderLeft: '3px solid transparent',
         cursor: 'pointer',
-        minHeight: '36px',
+        minHeight: '34px',
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
     },
     rowSelected: {
-        backgroundColor: tokens.colorNeutralBackground1Selected,
+        backgroundColor: tokens.colorBrandBackground2,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Selected,
+            backgroundColor: tokens.colorBrandBackground2,
         },
     },
 
@@ -108,10 +110,16 @@ const useStyles = makeStyles({
     },
     typeName: {
         fontSize: '12px',
-        fontWeight: tokens.fontWeightSemibold,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        color: tokens.colorNeutralForeground2,
+    },
+    titleIcon: {
+        fontSize: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        flexShrink: 0,
     },
 
     /* ── Title column ──────────────────────────────────────── */
@@ -314,26 +322,25 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                     <div
                         key={item.id}
                         className={mergeClasses(styles.row, isSelected && styles.rowSelected)}
+                        style={{ borderLeftColor: level?.color ?? 'transparent' }}
                         onClick={() => {
                             if (!isEditing) onItemClick?.(item)
                         }}
                     >
                         {/* Work Item Type */}
                         <div className={styles.typeCell}>
-                            {level && (
-                                <>
-                                    <span className={styles.typeIcon} style={{ color: level.color }}>
-                                        {resolveLevelIcon(level.iconName)}
-                                    </span>
-                                    <Text className={styles.typeName} style={{ color: level.color }}>
-                                        {level.name}
-                                    </Text>
-                                </>
-                            )}
+                            <Text className={styles.typeName}>
+                                {level?.name ?? '—'}
+                            </Text>
                         </div>
 
                         {/* Title */}
                         <div className={styles.titleCell}>
+                            {level && (
+                                <span className={styles.titleIcon} style={{ color: level.color }}>
+                                    {resolveLevelIcon(level.iconName)}
+                                </span>
+                            )}
                             {isEditing ? (
                                 <Input
                                     ref={editInputRef}
@@ -383,7 +390,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                         {/* Tags */}
                         <div className={styles.tagsCell}>
                             {item.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} appearance="outline" size="tiny">
+                                <Badge key={tag} appearance="tint" size="tiny" color="informative">
                                     {tag}
                                 </Badge>
                             ))}
