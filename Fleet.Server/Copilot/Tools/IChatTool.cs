@@ -16,6 +16,9 @@ public interface IChatTool
     /// <summary>JSON Schema (type: object) describing the tool's input parameters.</summary>
     string ParametersJsonSchema { get; }
 
+    /// <summary>True if this tool modifies data (create/update/delete). Only offered in generate mode.</summary>
+    bool IsWriteTool => false;
+
     /// <summary>Execute the tool and return a text result for the LLM to consume.</summary>
     Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default);
 }

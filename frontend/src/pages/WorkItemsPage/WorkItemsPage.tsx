@@ -100,11 +100,11 @@ export function WorkItemsPage() {
 
     const handleReparent = useCallback((itemId: number, newParentId: number | null) => {
         // Send 0 to clear parent (backend treats 0 as 'set to null')
-        updateMutation.mutate({ id: itemId, data: { parentId: newParentId ?? 0 } })
+        updateMutation.mutate({ workItemNumber: itemId, data: { parentWorkItemNumber: newParentId ?? 0 } })
     }, [updateMutation])
 
     const handleTitleChange = useCallback((itemId: number, newTitle: string) => {
-        updateMutation.mutate({ id: itemId, data: { title: newTitle } })
+        updateMutation.mutate({ workItemNumber: itemId, data: { title: newTitle } })
     }, [updateMutation])
 
     const levelMap = useMemo(() => {
@@ -190,7 +190,7 @@ export function WorkItemsPage() {
                     <BacklogTreeTable
                         items={items}
                         levelMap={levelMap}
-                        selectedItemId={selectedItem?.id}
+                        selectedItemId={selectedItem?.workItemNumber}
                         onItemClick={setSelectedItem}
                         onReparent={handleReparent}
                         onTitleChange={handleTitleChange}
@@ -200,7 +200,7 @@ export function WorkItemsPage() {
                     <BacklogList
                         items={items}
                         levelMap={levelMap}
-                        selectedItemId={selectedItem?.id}
+                        selectedItemId={selectedItem?.workItemNumber}
                         onItemClick={setSelectedItem}
                         onTitleChange={handleTitleChange}
                     />

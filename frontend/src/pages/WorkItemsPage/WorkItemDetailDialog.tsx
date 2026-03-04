@@ -270,22 +270,22 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const parentOptions = useMemo(() => {
         if (!item || !workItems) return []
         const descendantIds = new Set<number>()
-        const collectDescendants = (id: number) => {
+        const collectDescendants = (witNum: number) => {
             for (const wi of workItems) {
-                if (wi.parentId === id && !descendantIds.has(wi.id)) {
-                    descendantIds.add(wi.id)
-                    collectDescendants(wi.id)
+                if (wi.parentWorkItemNumber === witNum && !descendantIds.has(wi.workItemNumber)) {
+                    descendantIds.add(wi.workItemNumber)
+                    collectDescendants(wi.workItemNumber)
                 }
             }
         }
-        descendantIds.add(item.id)
-        collectDescendants(item.id)
-        return workItems.filter((wi) => !descendantIds.has(wi.id))
+        descendantIds.add(item.workItemNumber)
+        collectDescendants(item.workItemNumber)
+        return workItems.filter((wi) => !descendantIds.has(wi.workItemNumber))
     }, [item, workItems])
 
     const children = useMemo(() => {
         if (!item || !workItems) return []
-        return workItems.filter((wi) => wi.parentId === item.id)
+        return workItems.filter((wi) => wi.parentWorkItemNumber === item.workItemNumber)
     }, [item, workItems])
 
     const currentLevel = useMemo(() => {
@@ -303,13 +303,13 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             setState(item.state)
             setTags(item.tags.join(', '))
             setAssignedTo(item.assignedTo)
-            const parent = workItems?.find((wi) => wi.id === item.parentId)
-            setParentLabel(parent ? `#${parent.id} ${parent.title}` : NONE_PARENT)
+            const parent = workItems?.find((wi) => wi.workItemNumber === item.parentWorkItemNumber)
+            setParentLabel(parent ? `#${parent.workItemNumber} ${parent.title}` : NONE_PARENT)
             const lvl = sortedLevels.find((l) => l.id === item.levelId)
             setLevelLabel(lvl ? lvl.name : NONE_LEVEL)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when item changes, not on every levels refetch
-    }, [item?.id])
+    }, [item?.workItemNumber])
 
     /* ── Escape key handler ─────────────────────────────────── */
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -325,11 +325,11 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
     const handleSave = () => {
         if (!item || !title.trim()) return
-        const selectedParent = parentOptions.find((wi) => `#${wi.id} ${wi.title}` === parentLabel)
+        const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
         updateMutation.mutate(
             {
-                id: item.id,
+                workItemNumber: item.workItemNumber,
                 data: {
                     title: title.trim(),
                     description: description.trim(),
@@ -340,7 +340,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         .split(',')
                         .map((t) => t.trim())
                         .filter(Boolean),
-                    parentId: parentLabel === NONE_PARENT ? 0 : (selectedParent?.id ?? item.parentId),
+                    parentWorkItemNumber: parentLabel === NONE_PARENT ? 0 : (selectedParent?.workItemNumber ?? item.parentWorkItemNumber),
                     levelId: levelLabel === NONE_LEVEL ? 0 : (selectedLevel?.id ?? item.levelId),
                 },
             },
@@ -350,7 +350,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
     const handleDelete = () => {
         if (!item) return
-        deleteMutation.mutate(item.id, { onSuccess: () => onClose() })
+        deleteMutation.mutate(item.workItemNumber, { onSuccess: () => onClose() })
     }
 
     if (!item) return null
@@ -380,7 +380,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             </Text>
                         )}
                     </div>
-                    <Text className={styles.headerId}>{item.id}</Text>
+                    <Text className={styles.headerId}>{item.workItemNumber}</Text>
                     {item.isAI && (
                         <Badge appearance="filled" color="brand" size="small" className={styles.aiBadge}>
                             AI
@@ -524,7 +524,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             >
                                 <Option>{NONE_PARENT}</Option>
                                 {parentOptions.map((wi) => (
-                                    <Option key={wi.id}>{`#${wi.id} ${wi.title}`}</Option>
+                                    <Option key={wi.workItemNumber}>{`#${wi.workItemNumber} ${wi.title}`}</Option>
                                 ))}
                             </Dropdown>
                         </div>
@@ -565,7 +565,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                 const childLevel = child.levelId != null ? levels?.find((l) => l.id === child.levelId) : undefined
                                 return (
                                     <div
-                                        key={child.id}
+                                        key={child.workItemNumber}
                                         className={styles.childRow}
                                         onClick={() => onNavigate?.(child)}
                                         style={{ cursor: onNavigate ? 'pointer' : 'default' }}
@@ -575,7 +575,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                                 {resolveLevelIcon(childLevel.iconName)}
                                             </span>
                                         )}
-                                        <Text className={styles.childId}>{child.id}</Text>
+                                        <Text className={styles.childId}>{child.workItemNumber}</Text>
                                         <ChevronRightRegular fontSize={10} />
                                         <Text className={styles.childTitle}>{child.title}</Text>
                                         <StateDot state={child.state} />

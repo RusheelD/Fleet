@@ -13,7 +13,7 @@ export interface CreateWorkItemRequest {
   assignedTo: string
   tags: string[]
   isAI: boolean
-  parentId: number | null
+  parentWorkItemNumber: number | null
   levelId: number | null
 }
 
@@ -25,7 +25,7 @@ export interface UpdateWorkItemRequest {
   assignedTo?: string
   tags?: string[]
   isAI?: boolean
-  parentId?: number | null
+  parentWorkItemNumber?: number | null
   levelId?: number | null
 }
 
@@ -33,10 +33,10 @@ export function createWorkItem(projectId: string, request: CreateWorkItemRequest
   return post<WorkItem>(`/api/projects/${projectId}/work-items`, request)
 }
 
-export function updateWorkItem(projectId: string, id: number, request: UpdateWorkItemRequest): Promise<WorkItem> {
-  return put<WorkItem>(`/api/projects/${projectId}/work-items/${id}`, request)
+export function updateWorkItem(projectId: string, workItemNumber: number, request: UpdateWorkItemRequest): Promise<WorkItem> {
+  return put<WorkItem>(`/api/projects/${projectId}/work-items/${workItemNumber}`, request)
 }
 
-export function deleteWorkItem(projectId: string, id: number): Promise<void> {
-  return del<void>(`/api/projects/${projectId}/work-items/${id}`)
+export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {
+  return del<void>(`/api/projects/${projectId}/work-items/${workItemNumber}`)
 }

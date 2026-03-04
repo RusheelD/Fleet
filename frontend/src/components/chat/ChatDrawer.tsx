@@ -49,6 +49,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [isThinking, setIsThinking] = useState(false)
+    const [isGenerating, setIsGenerating] = useState(false)
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -61,8 +62,19 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
 
     const sessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
-    const serverMessages = messages ?? chatData?.messages ?? []
-    const displayMessages = [...serverMessages, ...optimisticMessages]
+    const serverMessages = useMemo(() => messages ?? chatData?.messages ?? [], [messages, chatData?.messages])
+
+    // Only show optimistic messages that haven't yet appeared in server data
+    const displayMessages = useMemo(() => {
+        const serverIds = new Set(serverMessages.map(m => m.id))
+        const pending = optimisticMessages.filter(m => !serverIds.has(m.id))
+        // Also deduplicate by content — if the server already has the user message, skip
+        const serverUserContents = new Set(
+            serverMessages.filter(m => m.role === 'user').map(m => m.content)
+        )
+        const unique = pending.filter(m => m.role !== 'user' || !serverUserContents.has(m.content))
+        return [...serverMessages, ...unique]
+    }, [serverMessages, optimisticMessages])
     const suggestions = chatData?.suggestions ?? []
 
     // Auto-select first session when chat data loads
@@ -107,12 +119,14 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             timestamp: new Date().toISOString(),
         }])
         setIsThinking(true)
+        setIsGenerating(generateWorkItems)
 
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
         sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
             .then((response: SendMessageResponse) => {
                 setIsThinking(false)
+                setIsGenerating(false)
                 setOptimisticMessages([])
                 setLastSendResponse(response)
                 void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
@@ -120,6 +134,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             })
             .catch(() => {
                 setIsThinking(false)
+                setIsGenerating(false)
                 setOptimisticMessages([])
             })
     }
@@ -199,7 +214,13 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                     ))}
                     {isThinking && (
                         <div className={styles.thinkingRow}>
-                            <Spinner size="tiny" label="Fleet AI is thinking..." labelPosition="after" />
+                            <Spinner
+                                size="tiny"
+                                label={isGenerating
+                                    ? 'Fleet AI is generating work items — this may take a while…'
+                                    : 'Fleet AI is thinking…'}
+                                labelPosition="after"
+                            />
                         </div>
                     )}
                     <div ref={messagesEndRef} />

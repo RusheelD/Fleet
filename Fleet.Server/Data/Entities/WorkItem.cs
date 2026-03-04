@@ -3,6 +3,10 @@ namespace Fleet.Server.Data.Entities;
 public class WorkItem
 {
     public int Id { get; set; }
+
+    /// <summary>Project-scoped sequential number (displayed in the UI).</summary>
+    public int WorkItemNumber { get; set; }
+
     public string Title { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public int Priority { get; set; }

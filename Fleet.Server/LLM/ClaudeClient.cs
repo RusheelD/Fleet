@@ -16,7 +16,7 @@ public class ClaudeClient(
 {
     private const string ApiBaseUrl = "https://api.anthropic.com/v1/messages";
     private const string AnthropicVersion = "2023-06-01";
-    private const int MaxTokens = 8192;
+    private const int MaxTokens = 16384;
 
     public async Task<LLMResponse> CompleteAsync(LLMRequest request, CancellationToken cancellationToken = default)
     {
@@ -65,10 +65,18 @@ public class ClaudeClient(
             ["max_tokens"] = MaxTokens,
         };
 
-        // System prompt
+        // System prompt — use structured format with cache_control for prompt caching
         if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
         {
-            body["system"] = request.SystemPrompt;
+            body["system"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = request.SystemPrompt,
+                    ["cache_control"] = new JsonObject { ["type"] = "ephemeral" },
+                },
+            };
         }
 
         // Messages

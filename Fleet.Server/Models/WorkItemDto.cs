@@ -1,7 +1,7 @@
 namespace Fleet.Server.Models;
 
 public record WorkItemDto(
-    int Id,
+    int WorkItemNumber,
     string Title,
     string State,
     int Priority,
@@ -9,8 +9,8 @@ public record WorkItemDto(
     string[] Tags,
     bool IsAI,
     string Description,
-    int? ParentId,
-    int[] ChildIds,
+    int? ParentWorkItemNumber,
+    int[] ChildWorkItemNumbers,
     int? LevelId
 );
 
@@ -22,7 +22,7 @@ public record CreateWorkItemRequest(
     string AssignedTo,
     string[] Tags,
     bool IsAI,
-    int? ParentId,
+    int? ParentWorkItemNumber,
     int? LevelId
 );
 
@@ -34,7 +34,7 @@ public record UpdateWorkItemRequest(
     string? AssignedTo,
     string[]? Tags,
     bool? IsAI,
-    int? ParentId,
+    int? ParentWorkItemNumber,
     int? LevelId
 );
 

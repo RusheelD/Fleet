@@ -17,10 +17,10 @@ public class WorkItemsController(IWorkItemService workItemService) : ControllerB
         return Ok(items);
     }
 
-    [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(string projectId, int id)
+    [HttpGet("{workItemNumber:int}")]
+    public async Task<IActionResult> GetByWorkItemNumber(string projectId, int workItemNumber)
     {
-        var item = await workItemService.GetByIdAsync(projectId, id);
+        var item = await workItemService.GetByWorkItemNumberAsync(projectId, workItemNumber);
         if (item is null) return NotFound();
         return Ok(item);
     }
@@ -29,21 +29,21 @@ public class WorkItemsController(IWorkItemService workItemService) : ControllerB
     public async Task<IActionResult> Create(string projectId, [FromBody] CreateWorkItemRequest request)
     {
         var item = await workItemService.CreateAsync(projectId, request);
-        return CreatedAtAction(nameof(GetById), new { projectId, id = item.Id }, item);
+        return CreatedAtAction(nameof(GetByWorkItemNumber), new { projectId, workItemNumber = item.WorkItemNumber }, item);
     }
 
-    [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(string projectId, int id, [FromBody] UpdateWorkItemRequest request)
+    [HttpPut("{workItemNumber:int}")]
+    public async Task<IActionResult> Update(string projectId, int workItemNumber, [FromBody] UpdateWorkItemRequest request)
     {
-        var item = await workItemService.UpdateAsync(projectId, id, request);
+        var item = await workItemService.UpdateAsync(projectId, workItemNumber, request);
         if (item is null) return NotFound();
         return Ok(item);
     }
 
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(string projectId, int id)
+    [HttpDelete("{workItemNumber:int}")]
+    public async Task<IActionResult> Delete(string projectId, int workItemNumber)
     {
-        var deleted = await workItemService.DeleteAsync(projectId, id);
+        var deleted = await workItemService.DeleteAsync(projectId, workItemNumber);
         if (!deleted) return NotFound();
         return NoContent();
     }

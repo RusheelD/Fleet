@@ -35,7 +35,7 @@ public class ListWorkItemsTool(IWorkItemService workItemService) : IChatTool
 
         IEnumerable<object> result = items.Select(i => new
         {
-            i.Id,
+            Id = i.WorkItemNumber,
             i.Title,
             i.State,
             i.Priority,

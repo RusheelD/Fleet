@@ -7,37 +7,69 @@ namespace Fleet.Server.WorkItems;
 
 public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
 {
+    public async Task<Dictionary<string, WorkItemSummaryDto>> GetSummariesByProjectAsync()
+    {
+        var summaries = await context.WorkItems
+            .AsNoTracking()
+            .GroupBy(w => w.ProjectId)
+            .Select(g => new
+            {
+                ProjectId = g.Key,
+                Total = g.Count(),
+                Active = g.Count(w =>
+                    w.State == "Active" || w.State == "New"),
+                Resolved = g.Count(w =>
+                    w.State == "Resolved" || w.State == "Resolved (AI)"),
+            })
+            .ToListAsync();
+
+        return summaries.ToDictionary(
+            s => s.ProjectId,
+            s => new WorkItemSummaryDto(s.Total, s.Active, s.Resolved));
+    }
+
     public async Task<IReadOnlyList<WorkItemDto>> GetByProjectIdAsync(string projectId)
     {
         var entities = await context.WorkItems
             .AsNoTracking()
             .Include(w => w.Children)
+            .Include(w => w.Parent)
             .Where(w => w.ProjectId == projectId)
             .ToListAsync();
 
         return entities.Select(MapToDto).ToList();
     }
 
-    public async Task<WorkItemDto?> GetByIdAsync(string projectId, int id)
+    public async Task<WorkItemDto?> GetByWorkItemNumberAsync(string projectId, int workItemNumber)
     {
         var entity = await context.WorkItems
             .AsNoTracking()
             .Include(w => w.Children)
-            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.Id == id);
+            .Include(w => w.Parent)
+            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.WorkItemNumber == workItemNumber);
 
         return entity is null ? null : MapToDto(entity);
     }
 
     public async Task<WorkItemDto> CreateAsync(string projectId, CreateWorkItemRequest request)
     {
-        // Determine next ID for this project
-        var maxId = await context.WorkItems
+        // Determine next project-scoped WorkItemNumber
+        var maxNumber = await context.WorkItems
             .Where(w => w.ProjectId == projectId)
-            .MaxAsync(w => (int?)w.Id) ?? 0;
+            .MaxAsync(w => (int?)w.WorkItemNumber) ?? 0;
+
+        // Resolve parent WorkItemNumber to DB Id
+        int? parentDbId = null;
+        if (request.ParentWorkItemNumber is not null)
+        {
+            var parentEntity = await context.WorkItems
+                .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.WorkItemNumber == request.ParentWorkItemNumber);
+            parentDbId = parentEntity?.Id;
+        }
 
         var entity = new WorkItem
         {
-            Id = maxId + 1,
+            WorkItemNumber = maxNumber + 1,
             Title = request.Title,
             Description = request.Description,
             State = request.State,
@@ -45,7 +77,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             AssignedTo = request.AssignedTo,
             Tags = [.. request.Tags],
             IsAI = request.IsAI,
-            ParentId = request.ParentId,
+            ParentId = parentDbId,
             LevelId = request.LevelId,
             ProjectId = projectId,
         };
@@ -53,14 +85,20 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         context.WorkItems.Add(entity);
         await context.SaveChangesAsync();
 
-        return MapToDto(entity);
+        return new WorkItemDto(
+            entity.WorkItemNumber, entity.Title, entity.State, entity.Priority, entity.AssignedTo,
+            [.. entity.Tags], entity.IsAI, entity.Description,
+            request.ParentWorkItemNumber,
+            [],
+            entity.LevelId
+        );
     }
 
-    public async Task<WorkItemDto?> UpdateAsync(string projectId, int id, UpdateWorkItemRequest request)
+    public async Task<WorkItemDto?> UpdateAsync(string projectId, int workItemNumber, UpdateWorkItemRequest request)
     {
         var entity = await context.WorkItems
             .Include(w => w.Children)
-            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.Id == id);
+            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.WorkItemNumber == workItemNumber);
 
         if (entity is null) return null;
 
@@ -72,21 +110,35 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         if (request.Tags is not null) entity.Tags = [.. request.Tags];
         if (request.IsAI is not null) entity.IsAI = request.IsAI.Value;
 
-        // ParentId & LevelId: 0 = clear (set to null), null = don't change, >0 = set value
-        if (request.ParentId is not null)
-            entity.ParentId = request.ParentId == 0 ? null : request.ParentId;
+        // ParentWorkItemNumber: 0 = clear (set to null), null = don't change, >0 = set by resolving WorkItemNumber
+        if (request.ParentWorkItemNumber is not null)
+        {
+            if (request.ParentWorkItemNumber == 0)
+            {
+                entity.ParentId = null;
+            }
+            else
+            {
+                var parentEntity = await context.WorkItems
+                    .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.WorkItemNumber == request.ParentWorkItemNumber);
+                entity.ParentId = parentEntity?.Id;
+            }
+        }
+
         if (request.LevelId is not null)
             entity.LevelId = request.LevelId == 0 ? null : request.LevelId;
 
         await context.SaveChangesAsync();
 
+        // Reload parent navigation to map WorkItemNumber
+        await context.Entry(entity).Reference(e => e.Parent).LoadAsync();
         return MapToDto(entity);
     }
 
-    public async Task<bool> DeleteAsync(string projectId, int id)
+    public async Task<bool> DeleteAsync(string projectId, int workItemNumber)
     {
         var entity = await context.WorkItems
-            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.Id == id);
+            .FirstOrDefaultAsync(w => w.ProjectId == projectId && w.WorkItemNumber == workItemNumber);
 
         if (entity is null) return false;
 
@@ -96,10 +148,10 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
     }
 
     private static WorkItemDto MapToDto(WorkItem w) => new(
-        w.Id, w.Title, w.State, w.Priority, w.AssignedTo,
+        w.WorkItemNumber, w.Title, w.State, w.Priority, w.AssignedTo,
         [.. w.Tags], w.IsAI, w.Description,
-        w.ParentId,
-        w.Children.Select(c => c.Id).ToArray(),
+        w.Parent?.WorkItemNumber,
+        w.Children.Select(c => c.WorkItemNumber).ToArray(),
         w.LevelId
     );
 }

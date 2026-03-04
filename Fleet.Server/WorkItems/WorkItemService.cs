@@ -18,16 +18,16 @@ public class WorkItemService(
         return await workItemRepository.GetByProjectIdAsync(projectId);
     }
 
-    public async Task<WorkItemDto?> GetByIdAsync(string projectId, int id)
+    public async Task<WorkItemDto?> GetByWorkItemNumberAsync(string projectId, int workItemNumber)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["ProjectId"] = projectId,
-            ["WorkItemId"] = id
+            ["WorkItemNumber"] = workItemNumber
         });
 
-        logger.WorkItemsRetrievingById(projectId.SanitizeForLogging(), id);
-        return await workItemRepository.GetByIdAsync(projectId, id);
+        logger.WorkItemsRetrievingById(projectId.SanitizeForLogging(), workItemNumber);
+        return await workItemRepository.GetByWorkItemNumberAsync(projectId, workItemNumber);
     }
 
     public async Task<WorkItemDto> CreateAsync(string projectId, CreateWorkItemRequest request)
@@ -41,27 +41,27 @@ public class WorkItemService(
         return await workItemRepository.CreateAsync(projectId, request);
     }
 
-    public async Task<WorkItemDto?> UpdateAsync(string projectId, int id, UpdateWorkItemRequest request)
+    public async Task<WorkItemDto?> UpdateAsync(string projectId, int workItemNumber, UpdateWorkItemRequest request)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["ProjectId"] = projectId,
-            ["WorkItemId"] = id
+            ["WorkItemNumber"] = workItemNumber
         });
 
-        logger.WorkItemsUpdating(projectId.SanitizeForLogging(), id);
-        return await workItemRepository.UpdateAsync(projectId, id, request);
+        logger.WorkItemsUpdating(projectId.SanitizeForLogging(), workItemNumber);
+        return await workItemRepository.UpdateAsync(projectId, workItemNumber, request);
     }
 
-    public async Task<bool> DeleteAsync(string projectId, int id)
+    public async Task<bool> DeleteAsync(string projectId, int workItemNumber)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["ProjectId"] = projectId,
-            ["WorkItemId"] = id
+            ["WorkItemNumber"] = workItemNumber
         });
 
-        logger.WorkItemsDeleting(projectId.SanitizeForLogging(), id);
-        return await workItemRepository.DeleteAsync(projectId, id);
+        logger.WorkItemsDeleting(projectId.SanitizeForLogging(), workItemNumber);
+        return await workItemRepository.DeleteAsync(projectId, workItemNumber);
     }
 }

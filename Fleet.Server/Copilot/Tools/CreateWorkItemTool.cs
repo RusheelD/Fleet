@@ -8,6 +8,8 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 {
     public string Name => "create_work_item";
 
+    public bool IsWriteTool => true;
+
     public string Description =>
         "Create a new work item in the current project. Returns the created work item. " +
         "Valid states: New, Active, In Progress, Resolved, Closed. Priority: 1 (critical) to 4 (low). " +
@@ -43,7 +45,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                 },
                 "parent_id": {
                     "type": "integer",
-                    "description": "ID of the parent work item to nest this under. Omit for root-level items."
+                    "description": "Work-item number of the parent to nest this under (the project-scoped number shown in the UI). Omit for root-level items."
                 },
                 "tags": {
                     "type": "array",
@@ -77,7 +79,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             AssignedTo: "Unassigned",
             Tags: args.Tags,
             IsAI: false,
-            ParentId: args.ParentId,
+            ParentWorkItemNumber: args.ParentId,
             LevelId: levelId
         );
 
@@ -85,14 +87,14 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
         return JsonSerializer.Serialize(new
         {
-            created.Id,
+            Id = created.WorkItemNumber,
             created.Title,
             created.State,
             created.Priority,
             created.Description,
             created.Tags,
             Level = args.Level,
-            created.ParentId,
+            ParentId = args.ParentId,
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 

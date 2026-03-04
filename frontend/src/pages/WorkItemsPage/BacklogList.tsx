@@ -228,7 +228,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
         sorted.sort((a, b) => {
             switch (sortKey) {
                 case 'id':
-                    return (a.id - b.id) * dir
+                    return (a.workItemNumber - b.workItemNumber) * dir
                 case 'title':
                     return a.title.localeCompare(b.title) * dir
                 case 'state':
@@ -256,14 +256,14 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
 
     const startEditing = useCallback((item: WorkItem, e: React.MouseEvent) => {
         e.stopPropagation()
-        setEditingId(item.id)
+        setEditingId(item.workItemNumber)
         setEditTitle(item.title)
         requestAnimationFrame(() => editInputRef.current?.focus())
     }, [])
 
     const commitEdit = useCallback(() => {
         if (editingId != null && editTitle.trim() && onTitleChange) {
-            const original = items.find((i) => i.id === editingId)
+            const original = items.find((i) => i.workItemNumber === editingId)
             if (original && original.title !== editTitle.trim()) {
                 onTitleChange(editingId, editTitle.trim())
             }
@@ -315,12 +315,12 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
             {/* rows */}
             {sortedItems.map((item) => {
                 const level = getLevel(item)
-                const isSelected = item.id === selectedItemId
-                const isEditing = editingId === item.id
+                const isSelected = item.workItemNumber === selectedItemId
+                const isEditing = editingId === item.workItemNumber
 
                 return (
                     <div
-                        key={item.id}
+                        key={item.workItemNumber}
                         className={mergeClasses(styles.row, isSelected && styles.rowSelected)}
                         style={{ borderLeftColor: level?.color ?? 'transparent' }}
                         onClick={() => {
@@ -373,7 +373,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                         </div>
 
                         {/* ID */}
-                        <Text className={styles.idText}>{item.id}</Text>
+                        <Text className={styles.idText}>{item.workItemNumber}</Text>
 
                         {/* Assigned To */}
                         <div className={styles.assigneeCell}>

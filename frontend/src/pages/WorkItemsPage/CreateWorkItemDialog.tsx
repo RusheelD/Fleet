@@ -87,7 +87,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
     const handleCreate = () => {
         if (!title.trim()) return
-        const selectedParent = parentOptions.find((wi) => `#${wi.id} ${wi.title}` === parentLabel)
+        const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
         createMutation.mutate(
             {
@@ -101,7 +101,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                     .map((t) => t.trim())
                     .filter(Boolean),
                 isAI: AGENT_MAP[agentLabel] ?? true,
-                parentId: selectedParent?.id ?? null,
+                parentWorkItemNumber: selectedParent?.workItemNumber ?? null,
                 levelId: selectedLevel?.id ?? null,
             },
             {
@@ -195,7 +195,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                 >
                                     <Option>{NONE_PARENT}</Option>
                                     {parentOptions.map((wi) => (
-                                        <Option key={wi.id}>{`#${wi.id} ${wi.title}`}</Option>
+                                        <Option key={wi.workItemNumber}>{`#${wi.workItemNumber} ${wi.title}`}</Option>
                                     ))}
                                 </Dropdown>
                             </Field>

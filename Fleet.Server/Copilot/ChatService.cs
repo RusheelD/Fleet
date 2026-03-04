@@ -120,12 +120,8 @@ public class ChatService(
         // 2b. Build system prompt with any uploaded documents
         var systemPrompt = await BuildSystemPromptAsync(sessionId);
 
-        // 3. Get tool definitions — only include create_work_item when generation is requested
-        var toolDefs = generateWorkItems
-            ? toolRegistry.ToLLMDefinitions()
-            : toolRegistry.ToLLMDefinitions()
-                .Where(t => !t.Name.Equals("create_work_item", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        // 3. Get tool definitions — only include write tools when generation is requested
+        var toolDefs = toolRegistry.ToLLMDefinitions(includeWriteTools: generateWorkItems);
 
         // 4. Run the tool-calling loop with safety limits
         var toolEvents = new List<ToolEventDto>();
@@ -186,9 +182,10 @@ public class ChatService(
 
                 foreach (var toolCall in response.ToolCalls)
                 {
-                    // Don't count create_work_item toward the limit — the LLM
-                    // should be able to create as many work items as needed
-                    if (!toolCall.Name.Equals("create_work_item", StringComparison.OrdinalIgnoreCase))
+                    // Don't count write tools (create/update/delete) toward the limit —
+                    // the LLM should be able to modify as many work items as needed
+                    var toolDef = toolRegistry.Get(toolCall.Name);
+                    if (toolDef is null || !toolDef.IsWriteTool)
                     {
                         totalToolCalls++;
                         if (totalToolCalls > config.MaxToolCallsTotal)

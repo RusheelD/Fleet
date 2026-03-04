@@ -238,7 +238,7 @@ export function useCreateWorkItem(projectId: string | undefined) {
 export function useUpdateWorkItem(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: UpdateWorkItemRequest }) => updateWorkItem(projectId!, id, data),
+    mutationFn: ({ workItemNumber, data }: { workItemNumber: number; data: UpdateWorkItemRequest }) => updateWorkItem(projectId!, workItemNumber, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['work-items'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
@@ -249,7 +249,7 @@ export function useUpdateWorkItem(projectId: string | undefined) {
 export function useDeleteWorkItem(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => deleteWorkItem(projectId!, id),
+    mutationFn: (workItemNumber: number) => deleteWorkItem(projectId!, workItemNumber),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['work-items'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })

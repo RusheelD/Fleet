@@ -21,7 +21,14 @@ public class ProjectService(
     public async Task<IReadOnlyList<ProjectDto>> GetAllProjectsAsync()
     {
         logger.ProjectsRetrievingAll();
-        return await projectRepository.GetAllAsync();
+        var projects = await projectRepository.GetAllAsync();
+        var summaries = await workItemRepository.GetSummariesByProjectAsync();
+
+        return projects.Select(p =>
+        {
+            var wi = summaries.GetValueOrDefault(p.Id, new WorkItemSummaryDto(0, 0, 0));
+            return p with { WorkItems = wi };
+        }).ToList();
     }
 
     public async Task<SlugCheckResult> CheckSlugAsync(string name)

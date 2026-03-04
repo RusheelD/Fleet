@@ -261,21 +261,21 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
     /* ── Build tree structure ──────────────────────────────── */
     const { roots, childrenMap } = useMemo(() => {
-        const idSet = new Set(items.map((i) => i.id))
+        const idSet = new Set(items.map((i) => i.workItemNumber))
         const cMap = new Map<number, WorkItem[]>()
         const rootItems: WorkItem[] = []
 
         for (const item of items) {
-            if (item.parentId == null || !idSet.has(item.parentId)) {
+            if (item.parentWorkItemNumber == null || !idSet.has(item.parentWorkItemNumber)) {
                 rootItems.push(item)
             } else {
-                const siblings = cMap.get(item.parentId) ?? []
+                const siblings = cMap.get(item.parentWorkItemNumber) ?? []
                 siblings.push(item)
-                cMap.set(item.parentId, siblings)
+                cMap.set(item.parentWorkItemNumber, siblings)
             }
         }
 
-        const sortItems = (a: WorkItem, b: WorkItem) => a.priority - b.priority || a.id - b.id
+        const sortItems = (a: WorkItem, b: WorkItem) => a.priority - b.priority || a.workItemNumber - b.workItemNumber
         rootItems.sort(sortItems)
         for (const children of cMap.values()) {
             children.sort(sortItems)
@@ -288,7 +288,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
     const [expanded, setExpanded] = useState<Set<number>>(() => {
         const initial = new Set<number>()
         for (const root of roots) {
-            if (childrenMap.has(root.id)) initial.add(root.id)
+            if (childrenMap.has(root.workItemNumber)) initial.add(root.workItemNumber)
         }
         return initial
     })
@@ -324,7 +324,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
     const startEditing = useCallback((item: WorkItem, e: React.MouseEvent) => {
         e.stopPropagation()
-        setEditingId(item.id)
+        setEditingId(item.workItemNumber)
         setEditTitle(item.title)
         // Focus the input after React renders it
         requestAnimationFrame(() => editInputRef.current?.focus())
@@ -332,7 +332,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
     const commitEdit = useCallback(() => {
         if (editingId != null && editTitle.trim() && onTitleChange) {
-            const original = items.find((i) => i.id === editingId)
+            const original = items.find((i) => i.workItemNumber === editingId)
             if (original && original.title !== editTitle.trim()) {
                 onTitleChange(editingId, editTitle.trim())
             }
@@ -357,7 +357,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
             visited.add(id)
             const children = childrenMap.get(id) ?? []
             for (const child of children) {
-                if (child.id === targetId || check(child.id)) return true
+                if (child.workItemNumber === targetId || check(child.workItemNumber)) return true
             }
             return false
         }
@@ -366,8 +366,8 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
     /** Find the parent id of an item */
     const findParentId = useCallback((itemId: number): number | null => {
-        const item = items.find((i) => i.id === itemId)
-        return item?.parentId ?? null
+        const item = items.find((i) => i.workItemNumber === itemId)
+        return item?.parentWorkItemNumber ?? null
     }, [items])
 
     const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, itemId: number) => {
@@ -449,9 +449,9 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
     const visibleRows = useMemo(() => {
         const rows: Array<{ item: WorkItem; depth: number; hasChildren: boolean }> = []
         function walk(item: WorkItem, depth: number) {
-            const children = childrenMap.get(item.id)
+            const children = childrenMap.get(item.workItemNumber)
             rows.push({ item, depth, hasChildren: (children?.length ?? 0) > 0 })
-            if (children && expanded.has(item.id)) {
+            if (children && expanded.has(item.workItemNumber)) {
                 for (const child of children) walk(child, depth + 1)
             }
         }
@@ -487,14 +487,14 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
             {/* rows */}
             {visibleRows.map(({ item, depth, hasChildren }) => {
                 const level = getLevel(item)
-                const isSelected = item.id === selectedItemId
-                const isDragging = item.id === draggedId
-                const dropClass = getDropClass(item.id)
-                const isEditing = editingId === item.id
+                const isSelected = item.workItemNumber === selectedItemId
+                const isDragging = item.workItemNumber === draggedId
+                const dropClass = getDropClass(item.workItemNumber)
+                const isEditing = editingId === item.workItemNumber
 
                 return (
                     <div
-                        key={item.id}
+                        key={item.workItemNumber}
                         className={mergeClasses(
                             styles.row,
                             isSelected && styles.rowSelected,
@@ -505,9 +505,9 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         onClick={() => {
                             if (!isEditing) onItemClick?.(item)
                         }}
-                        draggable={draggableRowId === item.id}
-                        onDragStart={(e) => handleDragStart(e, item.id)}
-                        onDragOver={(e) => handleDragOver(e, item.id)}
+                        draggable={draggableRowId === item.workItemNumber}
+                        onDragStart={(e) => handleDragStart(e, item.workItemNumber)}
+                        onDragOver={(e) => handleDragOver(e, item.workItemNumber)}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
                         onDragEnd={() => { handleDragEnd(); setDraggableRowId(null) }}
@@ -516,7 +516,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         <div className={styles.typeCell}>
                             <span
                                 className={styles.dragHandle}
-                                onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.id) }}
+                                onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.workItemNumber) }}
                                 onMouseUp={() => setDraggableRowId(null)}
                             >
                                 <ReOrderRegular />
@@ -533,9 +533,9 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                                     className={styles.expandButton}
                                     appearance="subtle"
                                     size="small"
-                                    icon={expanded.has(item.id) ? <ChevronDownRegular /> : <ChevronRightRegular />}
-                                    onClick={(e) => { e.stopPropagation(); toggleExpanded(item.id) }}
-                                    aria-label={expanded.has(item.id) ? 'Collapse' : 'Expand'}
+                                    icon={expanded.has(item.workItemNumber) ? <ChevronDownRegular /> : <ChevronRightRegular />}
+                                    onClick={(e) => { e.stopPropagation(); toggleExpanded(item.workItemNumber) }}
+                                    aria-label={expanded.has(item.workItemNumber) ? 'Collapse' : 'Expand'}
                                 />
                             ) : (
                                 <span className={styles.leafSpacer} />
@@ -573,7 +573,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
                             {hasChildren && !isEditing && (
                                 <Badge className={styles.childCount} appearance="tint" size="tiny" color="informative">
-                                    {childrenMap.get(item.id)?.length ?? 0}
+                                    {childrenMap.get(item.workItemNumber)?.length ?? 0}
                                 </Badge>
                             )}
                         </div>
@@ -585,7 +585,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         </div>
 
                         {/* ID */}
-                        <Text className={styles.idText}>{item.id}</Text>
+                        <Text className={styles.idText}>{item.workItemNumber}</Text>
 
                         {/* Assigned To */}
                         <div className={styles.assigneeCell}>

@@ -76,7 +76,7 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
         <Card className={styles.workItemCard} size="small" onClick={() => onItemClick?.(item)}>
             <div className={styles.cardTop}>
                 <div className={styles.tagsRow}>
-                    <Text className={styles.cardId}>#{item.id}</Text>
+                    <Text className={styles.cardId}>#{item.workItemNumber}</Text>
                     <LevelBadge level={level} />
                 </div>
                 <PriorityDot priority={item.priority} />

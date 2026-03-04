@@ -39,7 +39,9 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         modelBuilder.Entity<WorkItem>(builder =>
         {
             builder.HasKey(w => w.Id);
-            builder.Property(w => w.Id).ValueGeneratedNever(); // Explicit IDs (work item numbers)
+            builder.Property(w => w.Id).ValueGeneratedOnAdd();
+
+            builder.HasIndex(w => new { w.ProjectId, w.WorkItemNumber }).IsUnique();
 
             builder.HasOne(w => w.Project)
                 .WithMany(p => p.WorkItems)

@@ -22,7 +22,9 @@ public class ChatToolRegistry
     public IChatTool? Get(string name) =>
         _tools.TryGetValue(name, out var tool) ? tool : null;
 
-    /// <summary>Convert all tools to the normalized LLM format.</summary>
-    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions() =>
-        All.Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema)).ToList();
+    /// <summary>Convert tools to LLM definitions, optionally excluding write tools.</summary>
+    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(bool includeWriteTools = true) =>
+        All.Where(t => includeWriteTools || !t.IsWriteTool)
+           .Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema))
+           .ToList();
 }

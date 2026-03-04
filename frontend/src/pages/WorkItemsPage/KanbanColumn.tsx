@@ -76,7 +76,7 @@ export function KanbanColumn({ state, items, levelMap, onItemClick }: KanbanColu
             </div>
             <div className={styles.cardList}>
                 {items.map((item) => (
-                    <WorkItemCard key={item.id} item={item} levelMap={levelMap} onItemClick={onItemClick} />
+                    <WorkItemCard key={item.workItemNumber} item={item} levelMap={levelMap} onItemClick={onItemClick} />
                 ))}
             </div>
         </div>
