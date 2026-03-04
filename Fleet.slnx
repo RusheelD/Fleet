@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="Fleet.AppHost/Fleet.AppHost.csproj" />
   <Project Path="Fleet.Server/Fleet.Server.csproj" />
+  <Project Path="Fleet.Server.Tests/Fleet.Server.Tests.csproj" />
   <Project Path="frontend/frontend.esproj">
     <Build />
     <Deploy />
