@@ -9,7 +9,6 @@ import {
     Textarea,
     Badge,
     Text,
-    Title3,
     Caption1,
     Divider,
     Tooltip,
@@ -134,50 +133,42 @@ const useStyles = makeStyles({
         color: tokens.colorPaletteRedForeground1,
     },
 
-    /* ── Main body: two-column layout ──────────────────────── */
+    /* ── Scrollable body ──────────────────────────────────── */
     body: {
         display: 'flex',
-        flex: 1,
-        overflow: 'hidden',
-    },
-    mainContent: {
+        flexDirection: 'column',
         flex: 1,
         overflow: 'auto',
-        paddingTop: tokens.spacingVerticalXL,
+        paddingTop: tokens.spacingVerticalL,
         paddingBottom: tokens.spacingVerticalXL,
         paddingLeft: tokens.spacingHorizontalXL,
         paddingRight: tokens.spacingHorizontalXL,
-        display: 'flex',
-        flexDirection: 'column',
         gap: tokens.spacingVerticalL,
-        minWidth: 0,
     },
-    descriptionContainer: {
+
+    /* ── Fields grid (compact strip across top) ────────────── */
+    fieldsGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalM,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+    },
+
+    /* ── Description (full width, fills remaining space) ───── */
+    descriptionSection: {
         display: 'flex',
         flexDirection: 'column',
         flex: 1,
-        minHeight: '300px',
+        minHeight: '200px',
     },
     descriptionTextarea: {
         marginTop: '8px',
         flex: 1,
         '& > textarea': {
-            minHeight: '260px',
+            minHeight: '200px',
         },
-    },
-    sidePanel: {
-        width: '280px',
-        flexShrink: 0,
-        overflow: 'auto',
-        paddingTop: tokens.spacingVerticalXL,
-        paddingBottom: tokens.spacingVerticalXL,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalL,
-        borderLeft: `1px solid ${tokens.colorNeutralStroke3}`,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
-        backgroundColor: tokens.colorNeutralBackground2,
     },
 
     /* ── Section headers ───────────────────────────────────── */
@@ -189,7 +180,7 @@ const useStyles = makeStyles({
         letterSpacing: '0.03em',
     },
 
-    /* ── Field rows in side panel ──────────────────────────── */
+    /* ── Field rows ────────────────────────────────────────── */
     fieldRow: {
         display: 'flex',
         flexDirection: 'column',
@@ -443,59 +434,10 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     </Button>
                 </div>
 
-                {/* ── Body: main content + side panel ─────── */}
+                {/* ── Body: fields grid → description → children ── */}
                 <div className={styles.body}>
-                    {/* Main content (left) */}
-                    <div className={styles.mainContent}>
-                        {/* Description */}
-                        <div className={styles.descriptionContainer}>
-                            <Text className={styles.sectionTitle}>Description</Text>
-                            <Textarea
-                                className={styles.descriptionTextarea}
-                                value={description}
-                                onChange={(_e, data) => setDescription(data.value)}
-                                resize="vertical"
-                                placeholder="Add a description…"
-                            />
-                        </div>
-
-                        {/* Children */}
-                        {children.length > 0 && (
-                            <div>
-                                <Divider />
-                                <Text className={styles.sectionTitle} style={{ marginTop: '12px', marginBottom: '8px', display: 'block' }}>
-                                    Child Items ({children.length})
-                                </Text>
-                                {children.map((child) => {
-                                    const childLevel = child.levelId != null ? levels?.find((l) => l.id === child.levelId) : undefined
-                                    return (
-                                        <div
-                                            key={child.id}
-                                            className={styles.childRow}
-                                            onClick={() => onNavigate?.(child)}
-                                            style={{ cursor: onNavigate ? 'pointer' : 'default' }}
-                                        >
-                                            {childLevel && (
-                                                <span className={styles.childIcon} style={{ color: childLevel.color }}>
-                                                    {resolveLevelIcon(childLevel.iconName)}
-                                                </span>
-                                            )}
-                                            <Text className={styles.childId}>{child.id}</Text>
-                                            <ChevronRightRegular fontSize={10} />
-                                            <Text className={styles.childTitle}>{child.title}</Text>
-                                            <StateDot state={child.state} />
-                                            <Caption1>{child.state}</Caption1>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Side panel (right) - field details */}
-                    <div className={styles.sidePanel}>
-                        <Title3 className={styles.sectionTitle}>Details</Title3>
-
+                    {/* Detail fields in a compact grid */}
+                    <div className={styles.fieldsGrid}>
                         {/* State */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>State</Text>
@@ -555,8 +497,6 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             </div>
                         </div>
 
-                        <Divider />
-
                         {/* Assigned To */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Assigned To</Text>
@@ -589,8 +529,6 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             </Dropdown>
                         </div>
 
-                        <Divider />
-
                         {/* Tags */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Tags</Text>
@@ -603,6 +541,50 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             />
                         </div>
                     </div>
+
+                    {/* Full-width description */}
+                    <div className={styles.descriptionSection}>
+                        <Text className={styles.sectionTitle}>Description</Text>
+                        <Textarea
+                            className={styles.descriptionTextarea}
+                            value={description}
+                            onChange={(_e, data) => setDescription(data.value)}
+                            resize="vertical"
+                            placeholder="Add a description…"
+                        />
+                    </div>
+
+                    {/* Children */}
+                    {children.length > 0 && (
+                        <div>
+                            <Divider />
+                            <Text className={styles.sectionTitle} style={{ marginTop: '12px', marginBottom: '8px', display: 'block' }}>
+                                Child Items ({children.length})
+                            </Text>
+                            {children.map((child) => {
+                                const childLevel = child.levelId != null ? levels?.find((l) => l.id === child.levelId) : undefined
+                                return (
+                                    <div
+                                        key={child.id}
+                                        className={styles.childRow}
+                                        onClick={() => onNavigate?.(child)}
+                                        style={{ cursor: onNavigate ? 'pointer' : 'default' }}
+                                    >
+                                        {childLevel && (
+                                            <span className={styles.childIcon} style={{ color: childLevel.color }}>
+                                                {resolveLevelIcon(childLevel.iconName)}
+                                            </span>
+                                        )}
+                                        <Text className={styles.childId}>{child.id}</Text>
+                                        <ChevronRightRegular fontSize={10} />
+                                        <Text className={styles.childTitle}>{child.title}</Text>
+                                        <StateDot state={child.state} />
+                                        <Caption1>{child.state}</Caption1>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
         </>
