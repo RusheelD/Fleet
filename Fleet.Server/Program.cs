@@ -1,4 +1,5 @@
 using Fleet.Server.Agents;
+using Fleet.Server.Agents.Tools;
 using Fleet.Server.Auth;
 using Fleet.Server.Connections;
 using Fleet.Server.Copilot;
@@ -89,6 +90,10 @@ builder.Services.PostConfigure<LLMOptions>(options =>
     }
 });
 
+builder.Services.Configure<ModelCatalogOptions>(builder.Configuration
+    .GetSection($"{LLMOptions.SectionName}:{ModelCatalogOptions.SectionName}"));
+builder.Services.AddSingleton<IModelCatalog, ModelCatalog>();
+
 // Named HttpClient for LLM with extended timeouts (tool-calling loops can take time)
 builder.Services.AddHttpClient("LLM")
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(3))
@@ -118,6 +123,25 @@ builder.Services.AddScoped<IChatTool, TryBulkUpdateWorkItemsTool>();
 builder.Services.AddScoped<IChatTool, GetRepoTreeTool>();
 builder.Services.AddScoped<IChatTool, ReadRepoFileTool>();
 builder.Services.AddScoped<ChatToolRegistry>();
+
+// Agent tools (registered individually, collected by AgentToolRegistry)
+builder.Services.AddScoped<IAgentTool, ListDirectoryTool>();
+builder.Services.AddScoped<IAgentTool, ReadFileTool>();
+builder.Services.AddScoped<IAgentTool, WriteFileTool>();
+builder.Services.AddScoped<IAgentTool, EditFileTool>();
+builder.Services.AddScoped<IAgentTool, DeleteFileTool>();
+builder.Services.AddScoped<IAgentTool, SearchFilesTool>();
+builder.Services.AddScoped<IAgentTool, RunCommandTool>();
+builder.Services.AddScoped<IAgentTool, CreatePullRequestTool>();
+builder.Services.AddScoped<IAgentTool, GetChangeSummaryTool>();
+builder.Services.AddScoped<IAgentTool, FetchWebPageTool>();
+builder.Services.AddScoped<AgentToolRegistry>();
+
+// Agent infrastructure
+builder.Services.AddSingleton<IAgentPromptLoader, AgentPromptLoader>();
+builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();
+builder.Services.AddScoped<IRepoSandbox, RepoSandbox>();
+builder.Services.AddScoped<IAgentOrchestrationService, AgentOrchestrationService>();
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();

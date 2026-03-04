@@ -38,12 +38,12 @@ Detailed role specifications will be provided in `.agent.md` files (to be added 
      │
      ▼
 ┌──────────────────────────────────────────┐
-│  Phase 3 — Parallel Execution            │
+│  Phase 3/4 — Parallel Execution          │
 │  ┌──────────┐  ┌──────────┐              │
-│  │ Backend  │  │ Frontend │              │
+│  │ Backend  │--│ Frontend │  Parallel    │
 │  └──────────┘  └──────────┘              │
 │  ┌──────────┐  ┌──────────┐              │
-│  │ Testing  │  │ Styling  │              │
+│  │ Testing  │--│ Styling  │  Parallel    │
 │  └──────────┘  └──────────┘              │
 └────────────────────┬─────────────────────┘
                      │
@@ -54,7 +54,7 @@ Detailed role specifications will be provided in `.agent.md` files (to be added 
                    │
                    ▼
      ┌─────────────────────────────┐
-     │  Phase 5 — Parallel         │
+     │  Phase 6 — Parallel         │
      │  ┌────────┐  ┌─────────┐    │
      │  │ Review │  │  Docs   │    │
      │  └────────┘  └─────────┘    │
@@ -73,7 +73,7 @@ Detailed role specifications will be provided in `.agent.md` files (to be added 
 
 ### Phase Rules
 
-1. **Sequential phases (1→2→3→4→5)** — each phase must complete before the next begins
+1. **Sequential phases (1→2→3→4→5→6)** — each phase must complete before the next begins
 2. **Parallel within phases** — agents in the same phase run concurrently
 3. **Contracts before code** — the Contracts agent runs before Backend/Frontend/Testing/Styling so that all parallel agents share the same data models and interfaces
 4. **Consolidation is singular** — one agent merges all parallel outputs and resolves conflicts before review begins

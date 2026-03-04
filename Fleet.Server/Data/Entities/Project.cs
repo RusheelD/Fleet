@@ -22,16 +22,3 @@ public class Project
     public List<LogEntry> LogEntries { get; set; } = [];
     public List<DashboardAgent> DashboardAgents { get; set; } = [];
 }
-
-public class WorkItemSummary
-{
-    public int Total { get; set; }
-    public int Active { get; set; }
-    public int Resolved { get; set; }
-}
-
-public class AgentSummary
-{
-    public int Total { get; set; }
-    public int Running { get; set; }
-}

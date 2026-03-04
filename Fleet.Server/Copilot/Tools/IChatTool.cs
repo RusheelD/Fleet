@@ -22,6 +22,3 @@ public interface IChatTool
     /// <summary>Execute the tool and return a text result for the LLM to consume.</summary>
     Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default);
 }
-
-/// <summary>Runtime context passed to every tool invocation.</summary>
-public record ChatToolContext(string ProjectId, string UserId);

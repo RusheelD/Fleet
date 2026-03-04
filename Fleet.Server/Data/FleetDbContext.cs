@@ -17,6 +17,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<AgentPhaseResult> AgentPhaseResults => Set<AgentPhaseResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +91,20 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
 
             // JSON column for nested agent collection (PostgreSQL jsonb)
             builder.OwnsMany(e => e.Agents, b => b.ToJson());
+        });
+
+        // ── AgentPhaseResult ───────────────────────────────────────
+        modelBuilder.Entity<AgentPhaseResult>(builder =>
+        {
+            builder.HasKey(r => r.Id);
+            builder.Property(r => r.Id).ValueGeneratedOnAdd();
+
+            builder.HasOne(r => r.Execution)
+                .WithMany(e => e.PhaseResults)
+                .HasForeignKey(r => r.ExecutionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(r => new { r.ExecutionId, r.PhaseOrder });
         });
 
         // ── LogEntry ───────────────────────────────────────────────
