@@ -33,6 +33,11 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                     "description": "Priority: 1 (critical), 2 (high), 3 (medium), 4 (low). Default 3.",
                     "enum": ["1", "2", "3", "4"]
                 },
+                "difficulty": {
+                    "type": "string",
+                    "description": "Difficulty: 1 (very easy), 2 (easy), 3 (medium), 4 (hard), 5 (very hard). Default 3.",
+                    "enum": ["1", "2", "3", "4", "5"]
+                },
                 "state": {
                     "type": "string",
                     "description": "Initial state. Default 'New'.",
@@ -75,6 +80,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             Title: args.Title,
             Description: args.Description ?? "",
             Priority: args.Priority,
+            Difficulty: args.Difficulty,
             State: args.State,
             AssignedTo: "Unassigned",
             Tags: args.Tags,
@@ -91,6 +97,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             created.Title,
             created.State,
             created.Priority,
+            created.Difficulty,
             created.Description,
             created.Tags,
             Level = args.Level,
@@ -116,6 +123,14 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                 else if (p.ValueKind == JsonValueKind.String && int.TryParse(p.GetString(), out var ps))
                     priority = ps;
             }
+            var difficulty = 3;
+            if (root.TryGetProperty("difficulty", out var df))
+            {
+                if (df.ValueKind == JsonValueKind.Number && df.TryGetInt32(out var dv))
+                    difficulty = dv;
+                else if (df.ValueKind == JsonValueKind.String && int.TryParse(df.GetString(), out var ds))
+                    difficulty = ds;
+            }
             var state = root.TryGetProperty("state", out var s) ? s.GetString() ?? "New" : "New";
             var level = root.TryGetProperty("level", out var lv) ? lv.GetString() : null;
 
@@ -137,13 +152,13 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                     .ToArray();
             }
 
-            return new CreateWorkItemArgs(title, description, priority, state, level, parentId, tags);
+            return new CreateWorkItemArgs(title, description, priority, difficulty, state, level, parentId, tags);
         }
         catch
         {
-            return new CreateWorkItemArgs("Untitled", null, 3, "New", null, null, []);
+            return new CreateWorkItemArgs("Untitled", null, 3, 3, "New", null, null, []);
         }
     }
 
-    private record CreateWorkItemArgs(string Title, string? Description, int Priority, string State, string? Level, int? ParentId, string[] Tags);
+    private record CreateWorkItemArgs(string Title, string? Description, int Priority, int Difficulty, string State, string? Level, int? ParentId, string[] Tags);
 }

@@ -34,6 +34,11 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                                 "description": "Priority: 1-4. Default 3.",
                                 "enum": ["1", "2", "3", "4"]
                             },
+                            "difficulty": {
+                                "type": "string",
+                                "description": "Difficulty: 1-5. Default 3.",
+                                "enum": ["1", "2", "3", "4", "5"]
+                            },
                             "state": {
                                 "type": "string",
                                 "description": "Initial state. Default 'New'.",
@@ -89,6 +94,7 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     Title: title,
                     Description: UpdateWorkItemTool.GetString(item, "description") ?? "",
                     Priority: UpdateWorkItemTool.GetInt(item, "priority") ?? 3,
+                    Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty") ?? 3,
                     State: UpdateWorkItemTool.GetString(item, "state") ?? "New",
                     AssignedTo: "Unassigned",
                     Tags: UpdateWorkItemTool.GetStringArray(item, "tags") ?? [],
@@ -106,6 +112,7 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     created.Title,
                     created.State,
                     created.Priority,
+                    created.Difficulty,
                     Level = levelName,
                     ParentId = created.ParentWorkItemNumber,
                 });

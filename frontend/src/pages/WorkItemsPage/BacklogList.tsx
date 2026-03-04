@@ -19,7 +19,7 @@ import { resolveLevelIcon } from '../../proxies'
 import { StateDot } from './StateDot'
 
 /* ── Sortable columns ─────────────────────────────────────── */
-type SortKey = 'type' | 'title' | 'state' | 'id' | 'assignedTo' | 'priority'
+type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
 type SortDir = 'asc' | 'desc'
 
 const useStyles = makeStyles({
@@ -34,7 +34,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
+        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -73,7 +73,7 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
+        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -162,6 +162,12 @@ const useStyles = makeStyles({
         fontSize: '12px',
     },
 
+    /* ── Difficulty column ──────────────────────────────────── */
+    difficultyText: {
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground2,
+    },
+
     /* ── Assigned To column ────────────────────────────────── */
     assigneeCell: {
         display: 'flex',
@@ -242,6 +248,8 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                     return a.assignedTo.localeCompare(b.assignedTo) * dir
                 case 'priority':
                     return (a.priority - b.priority) * dir
+                case 'difficulty':
+                    return (a.difficulty - b.difficulty) * dir
                 default:
                     return 0
             }
@@ -304,6 +312,10 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                 <div className={styles.headerCell} onClick={() => handleSort('id')}>
                     <Caption1 className={styles.headerText}>ID</Caption1>
                     <SortIndicator col="id" />
+                </div>
+                <div className={styles.headerCell} onClick={() => handleSort('difficulty')}>
+                    <Caption1 className={styles.headerText}>Difficulty</Caption1>
+                    <SortIndicator col="difficulty" />
                 </div>
                 <div className={styles.headerCell} onClick={() => handleSort('assignedTo')}>
                     <Caption1 className={styles.headerText}>Assigned To</Caption1>
@@ -374,6 +386,11 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
 
                         {/* ID */}
                         <Text className={styles.idText}>{item.workItemNumber}</Text>
+
+                        {/* Difficulty */}
+                        <Text className={styles.difficultyText}>
+                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '—'}
+                        </Text>
 
                         {/* Assigned To */}
                         <div className={styles.assigneeCell}>

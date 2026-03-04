@@ -94,6 +94,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                 title: title.trim(),
                 description: description.trim(),
                 priority: PRIORITY_MAP[priorityLabel] ?? 2,
+                difficulty: 3,
                 state,
                 assignedTo: agentLabel === 'Manual assignment' ? 'Unassigned' : 'Fleet AI',
                 tags: tags

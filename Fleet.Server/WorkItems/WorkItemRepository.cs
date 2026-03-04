@@ -74,6 +74,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             Description = request.Description,
             State = request.State,
             Priority = request.Priority,
+            Difficulty = request.Difficulty,
             AssignedTo = request.AssignedTo,
             Tags = [.. request.Tags],
             IsAI = request.IsAI,
@@ -86,7 +87,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         await context.SaveChangesAsync();
 
         return new WorkItemDto(
-            entity.WorkItemNumber, entity.Title, entity.State, entity.Priority, entity.AssignedTo,
+            entity.WorkItemNumber, entity.Title, entity.State, entity.Priority, entity.Difficulty, entity.AssignedTo,
             [.. entity.Tags], entity.IsAI, entity.Description,
             request.ParentWorkItemNumber,
             [],
@@ -106,6 +107,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         if (request.Description is not null) entity.Description = request.Description;
         if (request.State is not null) entity.State = request.State;
         if (request.Priority is not null) entity.Priority = request.Priority.Value;
+        if (request.Difficulty is not null) entity.Difficulty = request.Difficulty.Value;
         if (request.AssignedTo is not null) entity.AssignedTo = request.AssignedTo;
         if (request.Tags is not null) entity.Tags = [.. request.Tags];
         if (request.IsAI is not null) entity.IsAI = request.IsAI.Value;
@@ -148,7 +150,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
     }
 
     private static WorkItemDto MapToDto(WorkItem w) => new(
-        w.WorkItemNumber, w.Title, w.State, w.Priority, w.AssignedTo,
+        w.WorkItemNumber, w.Title, w.State, w.Priority, w.Difficulty, w.AssignedTo,
         [.. w.Tags], w.IsAI, w.Description,
         w.Parent?.WorkItemNumber,
         w.Children.Select(c => c.WorkItemNumber).ToArray(),

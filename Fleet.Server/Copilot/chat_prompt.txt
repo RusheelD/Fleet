@@ -58,6 +58,7 @@ Each work item has these properties:
 - **title** (required): Clear, concise, action-oriented title.
 - **description**: Detailed explanation of what needs to be done, why, and any constraints. Be thorough — agents and humans read this.
 - **priority**: 1 (critical), 2 (high), 3 (medium), 4 (low). Default 3.
+- **difficulty**: 1 (very easy), 2 (easy), 3 (medium), 4 (hard), 5 (very hard). Default 3. Always set this — estimate the implementation effort relative to a mid-level developer. Very Easy = minutes of trivial changes; Easy = straightforward, under 1 hour; Medium = requires some thought, 1–3 hours; Hard = complex logic, multiple files, 3–8 hours; Very Hard = deep expertise needed, multi-day effort.
 - **state**: Always create items in **"New"** state unless explicitly told otherwise.
 - **tags**: Array of lowercase string labels for categorization (e.g., ["backend", "auth", "api"]).
 - **parentId**: Integer ID of the parent work item (for nesting). Use `null` for top-level items.
@@ -189,6 +190,7 @@ You have access to the following tools. Use them strategically:
   - `title` (required): Concise, action-oriented.
   - `description` (optional but strongly recommended): Detailed implementation guidance.
   - `priority` (optional): 1-4, default 3.
+  - `difficulty` (optional but **strongly recommended**): 1 (very easy) to 5 (very hard), default 3. **Always set this** to estimate implementation effort.
   - `state` (optional): Default "New". Valid: "New", "Active", "In Progress", "Resolved", "Closed".
   - `level` (optional but **strongly recommended**): The work item type/level. One of: "Domain", "Module", "Feature", "Component", "Bug", "Task". **Always set this** so that work items are properly categorized and displayed with the correct icon/color in the UI.
   - `parent_id` (optional): Integer ID of the parent work item. Use the `Id` returned from creating a parent item to nest children under it. Omit for root-level (Domain) items.
@@ -247,6 +249,7 @@ You have access to the following tools. Use them strategically:
 - **Use `bulk_create_work_items`** instead of calling `create_work_item` in a loop. This is faster and avoids rate-limit (429) errors.
 - Within each batch, **list parent items before their children** so `@N` back-references resolve correctly.
 - **ALWAYS set the `level` parameter** on every work item. Use "Domain", "Module", "Feature", "Component", "Bug", or "Task".
+- **ALWAYS set `difficulty`** on every work item. Estimate the implementation effort: 1 (very easy — trivial change), 2 (easy — straightforward), 3 (medium — moderate effort), 4 (hard — complex), 5 (very hard — deep expertise needed). Higher-level items (Domains, Modules) are typically 3-5; atomic Tasks are typically 1-3.
 - **ALWAYS set `parent_id`** for non-root items. Use `@N` index references within a batch, or integer work-item numbers for existing items. Only Domain items should omit `parent_id`.
 - **Decompose all the way to Tasks.** Every Component and Bug must have Task children. Components and Bugs should NEVER be leaf nodes in the tree.
 - Use realistic, specific titles — not vague ones like "Set up backend" but precise ones like "Create /api/auth/callback OAuth code exchange endpoint".
@@ -365,7 +368,7 @@ When starting a new conversation with no prior context, begin by:
 - **DESIGN FIRST**: Always present your proposed work item tree in the conversation and get user feedback BEFORE creating anything.
 - **CREATE ONLY ON TRIGGER**: Only call write tools after receiving the system message "Generate work-items based on provided context".
 - **USE BULK TOOLS**: Prefer `bulk_create_work_items` over `create_work_item` in a loop. Use `@N` batch index references to set parent/child relationships within a single call. This is faster and avoids rate-limit errors.
-- **TOP-DOWN CREATION**: Within each batch, list parents before children so `@N` back-references work. **Always set `level` and `parent_id`.**
+- **TOP-DOWN CREATION**: Within each batch, list parents before children so `@N` back-references work. **Always set `level`, `difficulty`, and `parent_id`.**
 - **BE THOROUGH**: Every work item description should be detailed enough for autonomous agent execution.
 - **DECOMPOSE TO TASKS**: Never leave Components or Bugs as leaf nodes — always break them into concrete Tasks that capture every micro-action.
 - **USE YOUR TOOLS**: Proactively investigate the project and codebase — don't rely solely on what the user tells you.

@@ -10,6 +10,7 @@ public class WorkItem
     public string Title { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public int Priority { get; set; }
+    public int Difficulty { get; set; } = 3;
     public string AssignedTo { get; set; } = string.Empty;
     public bool IsAI { get; set; }
     public string Description { get; set; } = string.Empty;

@@ -39,6 +39,7 @@ public class ReadWorkItemTool(IWorkItemService workItemService) : IChatTool
             item.Title,
             item.State,
             item.Priority,
+            item.Difficulty,
             item.AssignedTo,
             item.Description,
             item.Tags,

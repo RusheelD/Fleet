@@ -5,6 +5,7 @@ export interface WorkItem {
   title: string
   state: WorkItemState
   priority: 1 | 2 | 3 | 4
+  difficulty: 1 | 2 | 3 | 4 | 5
   assignedTo: string
   tags: string[]
   isAI: boolean

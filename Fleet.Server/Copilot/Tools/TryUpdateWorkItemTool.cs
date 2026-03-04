@@ -30,6 +30,11 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                     "description": "Priority: 1-4.",
                     "enum": ["1", "2", "3", "4"]
                 },
+                "difficulty": {
+                    "type": "string",
+                    "description": "Difficulty: 1-5.",
+                    "enum": ["1", "2", "3", "4", "5"]
+                },
                 "state": {
                     "type": "string",
                     "description": "State.",
@@ -75,6 +80,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                 Title: UpdateWorkItemTool.GetString(args, "title"),
                 Description: UpdateWorkItemTool.GetString(args, "description"),
                 Priority: UpdateWorkItemTool.GetInt(args, "priority"),
+                Difficulty: UpdateWorkItemTool.GetInt(args, "difficulty"),
                 State: UpdateWorkItemTool.GetString(args, "state"),
                 AssignedTo: null,
                 Tags: UpdateWorkItemTool.GetStringArray(args, "tags"),
@@ -93,6 +99,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                     updated.Title,
                     updated.State,
                     updated.Priority,
+                    updated.Difficulty,
                     updated.Description,
                     updated.Tags,
                     updated.ParentWorkItemNumber,
@@ -107,6 +114,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
             Title: title,
             Description: UpdateWorkItemTool.GetString(args, "description") ?? "",
             Priority: UpdateWorkItemTool.GetInt(args, "priority") ?? 3,
+            Difficulty: UpdateWorkItemTool.GetInt(args, "difficulty") ?? 3,
             State: UpdateWorkItemTool.GetString(args, "state") ?? "New",
             AssignedTo: "Unassigned",
             Tags: UpdateWorkItemTool.GetStringArray(args, "tags") ?? [],
@@ -124,6 +132,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
             created.Title,
             created.State,
             created.Priority,
+            created.Difficulty,
             created.Description,
             created.Tags,
             ParentId = created.ParentWorkItemNumber,

@@ -28,6 +28,7 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                             "title": { "type": "string" },
                             "description": { "type": "string" },
                             "priority": { "type": "string", "enum": ["1", "2", "3", "4"] },
+                            "difficulty": { "type": "string", "enum": ["1", "2", "3", "4", "5"] },
                             "state": { "type": "string", "enum": ["New", "Active", "In Progress", "Resolved", "Closed"] },
                             "level": { "type": "string", "enum": ["Domain", "Module", "Feature", "Component", "Bug", "Task"] },
                             "parent_id": { "type": "integer", "description": "Set to 0 to clear parent." },
@@ -66,6 +67,7 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     Title: UpdateWorkItemTool.GetString(item, "title"),
                     Description: UpdateWorkItemTool.GetString(item, "description"),
                     Priority: UpdateWorkItemTool.GetInt(item, "priority"),
+                    Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty"),
                     State: UpdateWorkItemTool.GetString(item, "state"),
                     AssignedTo: null,
                     Tags: UpdateWorkItemTool.GetStringArray(item, "tags"),
@@ -87,6 +89,7 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                         updated.Title,
                         updated.State,
                         updated.Priority,
+                        updated.Difficulty,
                         updated.LevelId,
                     });
                 }

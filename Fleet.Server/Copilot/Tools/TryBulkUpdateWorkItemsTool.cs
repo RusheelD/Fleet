@@ -32,6 +32,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                             "title": { "type": "string", "description": "Title (required when creating)." },
                             "description": { "type": "string" },
                             "priority": { "type": "string", "enum": ["1", "2", "3", "4"] },
+                            "difficulty": { "type": "string", "enum": ["1", "2", "3", "4", "5"] },
                             "state": { "type": "string", "enum": ["New", "Active", "In Progress", "Resolved", "Closed"] },
                             "level": { "type": "string", "enum": ["Domain", "Module", "Feature", "Component", "Bug", "Task"] },
                             "parent_id": { "type": ["integer", "string"], "description": "Parent work-item number (integer), or batch index ref like '@2'. Set to 0 to clear." },
@@ -75,6 +76,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                         Title: UpdateWorkItemTool.GetString(item, "title"),
                         Description: UpdateWorkItemTool.GetString(item, "description"),
                         Priority: UpdateWorkItemTool.GetInt(item, "priority"),
+                        Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty"),
                         State: UpdateWorkItemTool.GetString(item, "state"),
                         AssignedTo: null,
                         Tags: UpdateWorkItemTool.GetStringArray(item, "tags"),
@@ -95,6 +97,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                             updated.Title,
                             updated.State,
                             updated.Priority,
+                            updated.Difficulty,
                             updated.LevelId,
                         });
                         continue;
@@ -107,6 +110,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                     Title: title,
                     Description: UpdateWorkItemTool.GetString(item, "description") ?? "",
                     Priority: UpdateWorkItemTool.GetInt(item, "priority") ?? 3,
+                    Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty") ?? 3,
                     State: UpdateWorkItemTool.GetString(item, "state") ?? "New",
                     AssignedTo: "Unassigned",
                     Tags: UpdateWorkItemTool.GetStringArray(item, "tags") ?? [],
@@ -125,6 +129,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                     created.Title,
                     created.State,
                     created.Priority,
+                    created.Difficulty,
                     created.LevelId,
                 });
             }

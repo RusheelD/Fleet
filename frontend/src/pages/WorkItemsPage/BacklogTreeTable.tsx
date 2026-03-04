@@ -35,7 +35,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
+        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -60,7 +60,7 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 150px 150px',
+        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -217,6 +217,12 @@ const useStyles = makeStyles({
     idText: {
         color: tokens.colorNeutralForeground2,
         fontSize: '12px',
+    },
+
+    /* ── Difficulty column ──────────────────────────────────── */
+    difficultyText: {
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground2,
     },
 
     /* ── Assigned To column ────────────────────────────────── */
@@ -480,6 +486,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                 <Caption1 className={styles.headerText}>Title</Caption1>
                 <Caption1 className={styles.headerText}>State</Caption1>
                 <Caption1 className={styles.headerText}>ID</Caption1>
+                <Caption1 className={styles.headerText}>Difficulty</Caption1>
                 <Caption1 className={styles.headerText}>Assigned To</Caption1>
                 <Caption1 className={styles.headerText}>Tags</Caption1>
             </div>
@@ -586,6 +593,11 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
                         {/* ID */}
                         <Text className={styles.idText}>{item.workItemNumber}</Text>
+
+                        {/* Difficulty */}
+                        <Text className={styles.difficultyText}>
+                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '—'}
+                        </Text>
 
                         {/* Assigned To */}
                         <div className={styles.assigneeCell}>

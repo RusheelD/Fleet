@@ -31,6 +31,11 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                     "description": "New priority: 1-4.",
                     "enum": ["1", "2", "3", "4"]
                 },
+                "difficulty": {
+                    "type": "string",
+                    "description": "New difficulty: 1-5.",
+                    "enum": ["1", "2", "3", "4", "5"]
+                },
                 "state": {
                     "type": "string",
                     "description": "New state.",
@@ -72,6 +77,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             Title: GetString(args, "title"),
             Description: GetString(args, "description"),
             Priority: GetInt(args, "priority"),
+            Difficulty: GetInt(args, "difficulty"),
             State: GetString(args, "state"),
             AssignedTo: null,
             Tags: GetStringArray(args, "tags"),
@@ -89,6 +95,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             updated.Title,
             updated.State,
             updated.Priority,
+            updated.Difficulty,
             updated.Description,
             updated.Tags,
             updated.ParentWorkItemNumber,

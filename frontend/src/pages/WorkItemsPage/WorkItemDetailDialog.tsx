@@ -43,6 +43,22 @@ const PRIORITY_MAP: Record<string, number> = {
     'P4 — Low': 4,
 }
 
+const DIFFICULTY_LABELS: Record<number, string> = {
+    1: 'D1 — Very Easy',
+    2: 'D2 — Easy',
+    3: 'D3 — Medium',
+    4: 'D4 — Hard',
+    5: 'D5 — Very Hard',
+}
+
+const DIFFICULTY_MAP: Record<string, number> = {
+    'D1 — Very Easy': 1,
+    'D2 — Easy': 2,
+    'D3 — Medium': 3,
+    'D4 — Hard': 4,
+    'D5 — Very Hard': 5,
+}
+
 const useStyles = makeStyles({
     /* ── Overlay backdrop ──────────────────────────────────── */
     overlay: {
@@ -259,6 +275,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
     const [priorityLabel, setPriorityLabel] = useState('P2 — High')
+    const [difficultyLabel, setDifficultyLabel] = useState('D3 — Medium')
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [assignedTo, setAssignedTo] = useState('')
@@ -300,6 +317,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             setTitle(item.title)
             setDescription(item.description)
             setPriorityLabel(PRIORITY_LABELS[item.priority] ?? 'P2 — High')
+            setDifficultyLabel(DIFFICULTY_LABELS[item.difficulty] ?? 'D3 — Medium')
             setState(item.state)
             setTags(item.tags.join(', '))
             setAssignedTo(item.assignedTo)
@@ -334,6 +352,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     title: title.trim(),
                     description: description.trim(),
                     priority: PRIORITY_MAP[priorityLabel] ?? 2,
+                    difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                     state,
                     assignedTo: assignedTo.trim() || 'Unassigned',
                     tags: tags
@@ -495,6 +514,23 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                     <Option>P4 — Low</Option>
                                 </Dropdown>
                             </div>
+                        </div>
+
+                        {/* Difficulty */}
+                        <div className={styles.fieldRow}>
+                            <Text className={styles.fieldLabel}>Difficulty</Text>
+                            <Dropdown
+                                className={styles.fieldDropdown}
+                                size="small"
+                                value={difficultyLabel}
+                                onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? 'D3 — Medium')}
+                            >
+                                <Option>D1 — Very Easy</Option>
+                                <Option>D2 — Easy</Option>
+                                <Option>D3 — Medium</Option>
+                                <Option>D4 — Hard</Option>
+                                <Option>D5 — Very Hard</Option>
+                            </Dropdown>
                         </div>
 
                         {/* Assigned To */}

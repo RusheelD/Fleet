@@ -9,6 +9,7 @@ export interface CreateWorkItemRequest {
   title: string
   description: string
   priority: number
+  difficulty: number
   state: string
   assignedTo: string
   tags: string[]
@@ -21,6 +22,7 @@ export interface UpdateWorkItemRequest {
   title?: string
   description?: string
   priority?: number
+  difficulty?: number
   state?: string
   assignedTo?: string
   tags?: string[]
