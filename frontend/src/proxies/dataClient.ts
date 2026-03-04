@@ -4,13 +4,12 @@ import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug,
   getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs,
+  getExecutions, getLogs, startExecution,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos,
-  get,
 } from './'
 import type {
   CreateProjectRequest, UpdateProjectRequest,
@@ -36,6 +35,7 @@ export const useDataQuery = <TData>(
     refetchOnMount?: boolean | 'always'
     refetchOnWindowFocus?: boolean | 'always'
     enableFetch?: boolean
+    refetchInterval?: number | false
   }
 ) => {
   const queryClient = useQueryClient()
@@ -56,6 +56,7 @@ export const useDataQuery = <TData>(
     staleTime: queryOptions?.staleTime ?? FIVE_MINUTES_IN_MILLISECONDS,
     refetchOnMount: queryOptions?.refetchOnMount,
     refetchOnWindowFocus: queryOptions?.refetchOnWindowFocus ?? false,
+    refetchInterval: queryOptions?.refetchInterval,
   })
 
   const setQueryData = (data: TData) => queryClient.setQueryData(queryKey, data)
@@ -143,11 +144,24 @@ export function useWorkItemLevels(projectId: string | undefined) {
 // ── Agents ────────────────────────────────────────────────
 
 export function useExecutions(projectId: string | undefined) {
-  return useDataQuery('executions', () => getExecutions(projectId!), [projectId])
+  return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], { refetchInterval: 30_000 })
 }
 
 export function useLogs(projectId: string | undefined) {
-  return useDataQuery('logs', () => getLogs(projectId!), [projectId])
+  return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], { refetchInterval: 30_000 })
+}
+
+export function useStartExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workItemNumber: number) => startExecution(projectId!, workItemNumber),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
 }
 
 // ── Chat ──────────────────────────────────────────────────
@@ -349,24 +363,4 @@ export function useDeleteAttachment(projectId: string | undefined, sessionId: st
   })
 }
 
-// ── Admin / Seed Mutations ────────────────────────────────
 
-export function useSeedDatabase() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => get<{ message: string }>('/api/admin/seed'),
-    onSuccess: () => {
-      void queryClient.invalidateQueries()
-    },
-  })
-}
-
-export function useResetDatabase() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => get<{ message: string }>('/api/admin/reset'),
-    onSuccess: () => {
-      void queryClient.invalidateQueries()
-    },
-  })
-}

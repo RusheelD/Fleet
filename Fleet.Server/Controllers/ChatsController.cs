@@ -1,3 +1,4 @@
+using Fleet.Server.Auth;
 using Fleet.Server.Copilot;
 using Fleet.Server.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ namespace Fleet.Server.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/projects/{projectId}/chat")]
+[ServiceFilter(typeof(ProjectOwnershipFilter))]
 public class ChatsController(IChatService chatService) : ControllerBase
 {
     [HttpGet]

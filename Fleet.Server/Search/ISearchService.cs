@@ -4,5 +4,5 @@ namespace Fleet.Server.Search;
 
 public interface ISearchService
 {
-    Task<IReadOnlyList<SearchResultDto>> SearchAsync(string? query, string? type);
+    Task<IReadOnlyList<SearchResultDto>> SearchAsync(string ownerId, string? query, string? type);
 }

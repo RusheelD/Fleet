@@ -1,3 +1,4 @@
+using Fleet.Server.Auth;
 using Fleet.Server.Models;
 using Fleet.Server.WorkItems;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ namespace Fleet.Server.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/projects/{projectId}/work-items")]
+[ServiceFilter(typeof(ProjectOwnershipFilter))]
 public class WorkItemsController(IWorkItemService workItemService) : ControllerBase
 {
     [HttpGet]

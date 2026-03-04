@@ -21,13 +21,16 @@ public class ProjectService(
     public async Task<IReadOnlyList<ProjectDto>> GetAllProjectsAsync()
     {
         logger.ProjectsRetrievingAll();
-        var projects = await projectRepository.GetAllAsync();
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var projects = await projectRepository.GetAllByOwnerAsync(ownerId);
         var summaries = await workItemRepository.GetSummariesByProjectAsync();
+        var agentSummaries = await agentTaskRepository.GetAgentSummariesByProjectAsync();
 
         return projects.Select(p =>
         {
             var wi = summaries.GetValueOrDefault(p.Id, new WorkItemSummaryDto(0, 0, 0));
-            return p with { WorkItems = wi };
+            var agents = agentSummaries.GetValueOrDefault(p.Id, new AgentSummaryDto(0, 0));
+            return p with { WorkItems = wi, Agents = agents };
         }).ToList();
     }
 
@@ -66,7 +69,8 @@ public class ProjectService(
         });
 
         logger.ProjectsUpdating(id.SanitizeForLogging());
-        return await projectRepository.UpdateAsync(id, title, description, repo);
+        var ownerId = await GetCurrentOwnerIdAsync();
+        return await projectRepository.UpdateAsync(id, ownerId, title, description, repo);
     }
 
     public async Task<bool> DeleteProjectAsync(string id)
@@ -77,7 +81,8 @@ public class ProjectService(
         });
 
         logger.ProjectsDeleting(id.SanitizeForLogging());
-        return await projectRepository.DeleteAsync(id);
+        var ownerId = await GetCurrentOwnerIdAsync();
+        return await projectRepository.DeleteAsync(id, ownerId);
     }
 
     public async Task<ProjectDashboardDto?> GetDashboardBySlugAsync(string slug)
@@ -88,7 +93,8 @@ public class ProjectService(
         });
 
         logger.ProjectsDashboardBySlug(slug.SanitizeForLogging());
-        var project = await projectRepository.GetBySlugAsync(slug);
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var project = await projectRepository.GetBySlugAsync(slug, ownerId);
         if (project is null)
         {
             logger.ProjectsNotFoundBySlug(slug.SanitizeForLogging());
@@ -106,7 +112,8 @@ public class ProjectService(
         });
 
         logger.ProjectsDashboardById(projectId.SanitizeForLogging());
-        var project = await projectRepository.GetByIdAsync(projectId);
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var project = await projectRepository.GetByIdAsync(projectId, ownerId);
         if (project is null)
         {
             logger.ProjectsNotFoundById(projectId.SanitizeForLogging());
@@ -118,8 +125,7 @@ public class ProjectService(
 
     private async Task<ProjectDashboardDto> BuildDashboard(ProjectDto project)
     {
-        var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id);
-
+        var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id); var agentSummary = await agentTaskRepository.GetAgentSummaryByProjectIdAsync(project.Id);
         // ── Real work item metrics from the database ──────────────
         var workItems = await workItemRepository.GetByProjectIdAsync(project.Id);
         var totalItems = workItems.Count;
@@ -152,8 +158,8 @@ public class ProjectService(
         {
             new("board", "Total Work Items", totalItems.ToString(),
                 $"{activeItems} active · {resolvedItems} resolved · {closedItems} closed", null),
-            new("bot", "Active Agents", project.Agents.Running.ToString(),
-                $"of {project.Agents.Total} allocated", null),
+            new("bot", "Active Agents", agentSummary.Running.ToString(),
+                $"of {agentSummary.Total} total", null),
             new("branch", "Pull Requests", (gitHubStats.OpenPullRequests + gitHubStats.MergedPullRequests).ToString(),
                 $"{gitHubStats.OpenPullRequests} open · {gitHubStats.MergedPullRequests} merged", null),
             new("commit", "Commits (30d)", gitHubStats.RecentCommits.ToString(),

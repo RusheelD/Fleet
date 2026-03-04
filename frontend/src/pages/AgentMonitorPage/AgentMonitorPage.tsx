@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
     makeStyles,
     tokens,
@@ -7,18 +7,25 @@ import {
     Toolbar,
     ToolbarButton,
     Spinner,
+    Toast,
+    ToastTitle,
+    useToastController,
+    useId,
+    Toaster,
+    Input,
 } from '@fluentui/react-components'
 import {
     BotRegular,
     PlayRegular,
     CheckmarkCircleRegular,
     ErrorCircleRegular,
-    FilterRegular,
+    SearchRegular,
     ArrowClockwiseRegular,
+    RocketRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
-import { SummaryCard, ExecutionCard, LogPanel } from './'
-import { useExecutions, useLogs } from '../../proxies'
+import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
+import { useExecutions, useLogs, useWorkItems, useStartExecution } from '../../proxies'
 import { useCurrentProject } from '../../hooks'
 
 const useStyles = makeStyles({
@@ -76,6 +83,10 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '0.75rem',
     },
+    searchInput: {
+        maxWidth: '260px',
+        flex: 1,
+    },
 })
 
 export function AgentMonitorPage() {
@@ -83,7 +94,13 @@ export function AgentMonitorPage() {
     const { projectId } = useCurrentProject()
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
+    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
+    const startExecution = useStartExecution(projectId)
     const [tab, setTab] = useState<string>('active')
+    const [dialogOpen, setDialogOpen] = useState(false)
+    const [searchQuery, setSearchQuery] = useState('')
+    const toasterId = useId('agent-monitor-toaster')
+    const { dispatchToast } = useToastController(toasterId)
 
     const allExecutions = executions ?? []
     const allLogs = logs ?? []
@@ -92,11 +109,40 @@ export function AgentMonitorPage() {
     const completed = allExecutions.filter((e) => e.status === 'completed')
     const failed = allExecutions.filter((e) => e.status === 'failed')
 
-    const filteredExecutions =
+    const filteredByTab =
         tab === 'active' ? running :
             tab === 'completed' ? completed :
                 tab === 'failed' ? failed :
                     allExecutions
+
+    const filteredExecutions = useMemo(() => {
+        if (!searchQuery) return filteredByTab
+        const q = searchQuery.toLowerCase()
+        return filteredByTab.filter((e) =>
+            e.workItemTitle.toLowerCase().includes(q) ||
+            e.id.toLowerCase().includes(q) ||
+            e.agents.some((a) => a.role.toLowerCase().includes(q)),
+        )
+    }, [filteredByTab, searchQuery])
+
+    const handleStartExecution = (workItemNumber: number) => {
+        startExecution.mutate(workItemNumber, {
+            onSuccess: (result) => {
+                setDialogOpen(false)
+                dispatchToast(
+                    <Toast><ToastTitle>Agent execution started (ID: {result.executionId})</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchExec()
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to start agent execution</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
 
     if (loadingExec || loadingLogs) {
         return (
@@ -108,13 +154,28 @@ export function AgentMonitorPage() {
 
     return (
         <div className={styles.page}>
+            <Toaster toasterId={toasterId} />
             <PageHeader
                 title="Agent Monitor"
                 subtitle="Track agent executions and view real-time logs"
                 actions={
                     <div className={styles.headerActions}>
                         <Toolbar>
-                            <ToolbarButton icon={<FilterRegular />}>Filter</ToolbarButton>
+                            <ToolbarButton
+                                icon={<RocketRegular />}
+                                onClick={() => setDialogOpen(true)}
+                            >
+                                Start Execution
+                            </ToolbarButton>
+                            <Input
+                                className={styles.searchInput}
+                                placeholder="Search executions..."
+                                size="small"
+                                appearance="underline"
+                                value={searchQuery}
+                                onChange={(_e, data) => setSearchQuery(data.value)}
+                                contentBefore={<SearchRegular />}
+                            />
                             <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={() => { void refetchExec(); void refetchLogs() }}>Refresh</ToolbarButton>
                         </Toolbar>
                     </div>
@@ -166,6 +227,15 @@ export function AgentMonitorPage() {
 
                 <LogPanel logs={allLogs} onRefresh={() => void refetchLogs()} />
             </div>
+
+            <StartExecutionDialog
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+                workItems={workItems ?? []}
+                isLoading={loadingWorkItems}
+                isPending={startExecution.isPending}
+                onStart={handleStartExecution}
+            />
         </div>
     )
 }

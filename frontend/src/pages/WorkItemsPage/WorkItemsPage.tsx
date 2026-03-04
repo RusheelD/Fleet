@@ -10,6 +10,12 @@ import {
     ToolbarButton,
     ToolbarDivider,
     Spinner,
+    Popover,
+    PopoverTrigger,
+    PopoverSurface,
+    Checkbox,
+    Text,
+    Divider,
 } from '@fluentui/react-components'
 import {
     SearchRegular,
@@ -18,12 +24,13 @@ import {
     TextBulletListLtrRegular,
     TextBulletListTreeRegular,
     AddRegular,
+    DismissRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
 import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
 import { useCurrentProject } from '../../hooks'
-import type { WorkItem, WorkItemLevel } from '../../models'
+import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'Resolved', 'Closed']
 
@@ -83,7 +90,39 @@ const useStyles = makeStyles({
         overflow: 'auto',
         paddingBottom: tokens.spacingVerticalM,
     },
+    filterSurface: {
+        padding: '0.75rem',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '0.5rem',
+        minWidth: '200px',
+    },
+    filterSection: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '0.25rem',
+    },
+    filterHeader: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
 })
+
+const ALL_STATES: WorkItemState[] = ['New', 'Active', 'In Progress', 'In Progress (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
+const ALL_PRIORITIES = [1, 2, 3, 4] as const
+
+interface WorkItemFilters {
+    states: Set<WorkItemState>
+    priorities: Set<number>
+    aiOnly: boolean | null
+}
+
+const EMPTY_FILTERS: WorkItemFilters = { states: new Set(), priorities: new Set(), aiOnly: null }
+
+function isFiltered(filters: WorkItemFilters): boolean {
+    return filters.states.size > 0 || filters.priorities.size > 0 || filters.aiOnly !== null
+}
 
 export function WorkItemsPage() {
     const styles = useStyles()
@@ -95,6 +134,7 @@ export function WorkItemsPage() {
     const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null)
+    const [filters, setFilters] = useState<WorkItemFilters>(EMPTY_FILTERS)
 
     const updateMutation = useUpdateWorkItem(projectId)
 
@@ -116,17 +156,35 @@ export function WorkItemsPage() {
     }, [levels])
 
     const items = useMemo(() => {
-        const all = workItems ?? []
-        if (!searchQuery) return all
-        const q = searchQuery.toLowerCase()
-        return all.filter(
-            (wi) =>
-                wi.title.toLowerCase().includes(q) ||
-                wi.description.toLowerCase().includes(q) ||
-                wi.assignedTo.toLowerCase().includes(q) ||
-                wi.tags.some((t) => t.toLowerCase().includes(q)),
-        )
-    }, [workItems, searchQuery])
+        let all = workItems ?? []
+
+        // Apply filters
+        if (filters.states.size > 0) {
+            all = all.filter((wi) => filters.states.has(wi.state))
+        }
+        if (filters.priorities.size > 0) {
+            all = all.filter((wi) => filters.priorities.has(wi.priority))
+        }
+        if (filters.aiOnly === true) {
+            all = all.filter((wi) => wi.isAI)
+        } else if (filters.aiOnly === false) {
+            all = all.filter((wi) => !wi.isAI)
+        }
+
+        // Apply text search
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase()
+            all = all.filter(
+                (wi) =>
+                    wi.title.toLowerCase().includes(q) ||
+                    wi.description.toLowerCase().includes(q) ||
+                    wi.assignedTo.toLowerCase().includes(q) ||
+                    wi.tags.some((t) => t.toLowerCase().includes(q)),
+            )
+        }
+
+        return all
+    }, [workItems, searchQuery, filters])
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
 
@@ -179,7 +237,84 @@ export function WorkItemsPage() {
                                 onChange={(_e, data) => setSearchQuery(data.value)}
                                 contentBefore={<SearchRegular />}
                             />
-                            <ToolbarButton icon={<FilterRegular />}>Filter</ToolbarButton>
+                            <Popover withArrow>
+                                <PopoverTrigger disableButtonEnhancement>
+                                    <ToolbarButton icon={<FilterRegular />}
+                                        appearance={isFiltered(filters) ? 'primary' : undefined}
+                                    >
+                                        Filter{isFiltered(filters) ? ' (active)' : ''}
+                                    </ToolbarButton>
+                                </PopoverTrigger>
+                                <PopoverSurface className={styles.filterSurface}>
+                                    <div className={styles.filterHeader}>
+                                        <Text weight="semibold" size={300}>Filters</Text>
+                                        {isFiltered(filters) && (
+                                            <Button
+                                                appearance="subtle"
+                                                size="small"
+                                                icon={<DismissRegular />}
+                                                onClick={() => setFilters(EMPTY_FILTERS)}
+                                            >
+                                                Clear
+                                            </Button>
+                                        )}
+                                    </div>
+                                    <Divider />
+                                    <div className={styles.filterSection}>
+                                        <Text size={200} weight="semibold">State</Text>
+                                        {ALL_STATES.map((state) => (
+                                            <Checkbox
+                                                key={state}
+                                                label={state}
+                                                size="medium"
+                                                checked={filters.states.has(state)}
+                                                onChange={(_e, data) => {
+                                                    setFilters((prev) => {
+                                                        const next = new Set(prev.states)
+                                                        if (data.checked) next.add(state); else next.delete(state)
+                                                        return { ...prev, states: next }
+                                                    })
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                    <Divider />
+                                    <div className={styles.filterSection}>
+                                        <Text size={200} weight="semibold">Priority</Text>
+                                        {ALL_PRIORITIES.map((p) => (
+                                            <Checkbox
+                                                key={p}
+                                                label={`Priority ${p}`}
+                                                size="medium"
+                                                checked={filters.priorities.has(p)}
+                                                onChange={(_e, data) => {
+                                                    setFilters((prev) => {
+                                                        const next = new Set(prev.priorities)
+                                                        if (data.checked) next.add(p); else next.delete(p)
+                                                        return { ...prev, priorities: next }
+                                                    })
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                    <Divider />
+                                    <div className={styles.filterSection}>
+                                        <Text size={200} weight="semibold">AI</Text>
+                                        <Checkbox
+                                            label="AI-assigned only"
+                                            size="medium"
+                                            checked={filters.aiOnly === true}
+                                            onChange={(_e, data) => setFilters((prev) => ({ ...prev, aiOnly: data.checked ? true : null }))}
+                                        />
+                                        <Checkbox
+                                            label="Human-assigned only"
+                                            size="medium"
+                                            checked={filters.aiOnly === false}
+                                            onChange={(_e, data) => setFilters((prev) => ({ ...prev, aiOnly: data.checked ? false : null }))}
+                                        />
+                                    </div>
+                                </PopoverSurface>
+                            </Popover>
                             <ToolbarDivider />
                             <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
                         </Toolbar>

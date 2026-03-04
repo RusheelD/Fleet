@@ -2,6 +2,7 @@ using Fleet.Server.Connections;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.LLM;
+using Fleet.Server.Models;
 using Fleet.Server.WorkItems;
 using Microsoft.EntityFrameworkCore;
 
@@ -104,7 +105,18 @@ public class AgentOrchestrationService(
         db.AgentExecutions.Add(execution);
         await db.SaveChangesAsync(cancellationToken);
 
-        // 6. Fire-and-forget the pipeline on a background thread
+        // 6. Mark the work item as in-progress
+        await workItemRepository.UpdateAsync(projectId, workItemNumber,
+            new UpdateWorkItemRequest(
+                Title: null, Description: null, Priority: null, Difficulty: null,
+                State: "Active", AssignedTo: null, Tags: null, IsAI: null,
+                ParentWorkItemNumber: null, LevelId: null));
+
+        // 7. Write an initial log entry
+        await WriteLogEntryAsync(db, projectId, "System", "info",
+            $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}");
+
+        // 8. Fire-and-forget the pipeline on a background thread
         //    We use IServiceProvider to create a new scope so the DbContext isn't shared.
         _ = Task.Run(() => RunPipelineAsync(
             executionId, projectId, workItem, childWorkItems, repoFullName,
@@ -143,6 +155,7 @@ public class AgentOrchestrationService(
         await using var scope = serviceProvider.CreateAsyncScope();
         var scopedDb = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
         var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
+        var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
 
         var model = modelCatalog.Get(selectedModelKey);
         logger.LogInformation("Execution {ExecutionId}: using model {Model} (key={ModelKey})",
@@ -173,9 +186,17 @@ public class AgentOrchestrationService(
             {
                 foreach (var role in group)
                 {
-                    // Update status
+                    // Update execution status
                     await UpdateExecutionAsync(scopedDb, executionId, role.ToString(),
                         (double)completedRoles / totalRoles);
+
+                    // Mark this agent as running with a meaningful task description
+                    await SetAgentRunningAsync(scopedDb, executionId, role.ToString(),
+                        GetPhaseTaskDescription(role));
+
+                    // Write a log entry for phase start
+                    await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info",
+                        $"Starting phase: {GetPhaseTaskDescription(role)}");
 
                     // Build the message for this phase: work item context + all prior outputs
                     var userMessage = BuildPhaseMessage(role, workItemContext, phaseOutputs);
@@ -207,8 +228,17 @@ public class AgentOrchestrationService(
                     await UpdateAgentInfoAsync(scopedDb, executionId, role.ToString(),
                         result.Success ? "completed" : "failed", result.ToolCallCount);
 
-                    if (!result.Success)
+                    // Write a log entry for phase completion
+                    if (result.Success)
                     {
+                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "success",
+                            $"Phase completed ({result.ToolCallCount} tool calls)");
+                    }
+                    else
+                    {
+                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "error",
+                            $"Phase failed: {result.Error ?? "Unknown error"}");
+
                         logger.LogWarning("Execution {ExecutionId}: phase {Role} failed: {Error}",
                             executionId, role, result.Error);
                         // Continue — downstream phases can still attempt recovery
@@ -224,12 +254,25 @@ public class AgentOrchestrationService(
 
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
 
+            // Update work item state to reflect AI completion
+            await scopedWorkItemRepo.UpdateAsync(projectId, workItem.WorkItemNumber,
+                new UpdateWorkItemRequest(
+                    Title: null, Description: null, Priority: null, Difficulty: null,
+                    State: "Resolved (AI)", AssignedTo: null, Tags: null, IsAI: null,
+                    ParentWorkItemNumber: null, LevelId: null));
+
+            await WriteLogEntryAsync(scopedDb, projectId, "System", "success",
+                $"Execution {executionId} completed successfully" +
+                (prUrl is not null ? $" — PR: {prUrl}" : ""));
+
             logger.LogInformation("Execution {ExecutionId}: pipeline completed successfully", executionId);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Execution {ExecutionId}: pipeline failed with exception", executionId);
             await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
+            await WriteLogEntryAsync(scopedDb, projectId, "System", "error",
+                $"Execution {executionId} failed: {ex.Message}");
         }
         finally
         {
@@ -325,7 +368,7 @@ public class AgentOrchestrationService(
         return Pipeline.SelectMany(g => g).Select(role => new AgentInfo
         {
             Role = role.ToString(),
-            Status = "pending",
+            Status = "idle",
             CurrentTask = "Waiting",
             Progress = 0,
         }).ToList();
@@ -366,6 +409,60 @@ public class AgentOrchestrationService(
 
         await scopedDb.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// Marks an agent as "running" with a descriptive task before its phase executes.
+    /// </summary>
+    private static async Task SetAgentRunningAsync(
+        FleetDbContext scopedDb, string executionId, string role, string taskDescription)
+    {
+        var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
+        if (exec is null) return;
+
+        var agent = exec.Agents.FirstOrDefault(a => a.Role == role);
+        if (agent is not null)
+        {
+            agent.Status = "running";
+            agent.CurrentTask = taskDescription;
+            agent.Progress = 0;
+        }
+
+        await scopedDb.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Writes a log entry to the database for real-time pipeline observability.
+    /// </summary>
+    private static async Task WriteLogEntryAsync(
+        FleetDbContext scopedDb, string projectId, string agent, string level, string message)
+    {
+        scopedDb.LogEntries.Add(new LogEntry
+        {
+            Time = DateTime.UtcNow.ToString("o"),
+            Agent = agent,
+            Level = level,
+            Message = message,
+            ProjectId = projectId,
+        });
+        await scopedDb.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Returns a human-readable description of what each agent role does.
+    /// </summary>
+    private static string GetPhaseTaskDescription(AgentRole role) => role switch
+    {
+        AgentRole.Planner => "Creating implementation plan",
+        AgentRole.Contracts => "Defining interfaces and contracts",
+        AgentRole.Backend => "Implementing backend changes",
+        AgentRole.Frontend => "Implementing frontend changes",
+        AgentRole.Testing => "Writing and running tests",
+        AgentRole.Styling => "Applying styles and polish",
+        AgentRole.Consolidation => "Merging and resolving conflicts",
+        AgentRole.Review => "Reviewing code quality",
+        AgentRole.Documentation => "Generating documentation",
+        _ => "Processing",
+    };
 
     private static async Task FinalizeExecutionAsync(
         FleetDbContext scopedDb, string executionId, string status,

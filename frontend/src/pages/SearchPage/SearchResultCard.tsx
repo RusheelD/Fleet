@@ -87,19 +87,21 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
     const navigate = useNavigate()
 
     const handleClick = () => {
-        // Navigate based on result type. The meta field typically contains project/item IDs.
+        const slug = result.projectSlug
+        if (!slug) return
+
         switch (result.type) {
             case 'project':
-                navigate(`/projects/${encodeURIComponent(result.title.toLowerCase().replace(/\s+/g, '-'))}`)
+                navigate(`/projects/${slug}`)
                 break
             case 'workitem':
-                navigate('/projects')
+                navigate(`/projects/${slug}/work-items`)
                 break
             case 'agent':
-                navigate('/projects')
+                navigate(`/projects/${slug}/agents`)
                 break
             case 'chat':
-                navigate('/projects')
+                navigate(`/projects/${slug}`, { state: { openChat: true } })
                 break
         }
     }

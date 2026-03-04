@@ -1,4 +1,4 @@
-import { get } from './'
+import { get, post } from './'
 import type { AgentExecution, LogEntry } from '../models'
 
 export function getExecutions(projectId: string): Promise<AgentExecution[]> {
@@ -7,4 +7,22 @@ export function getExecutions(projectId: string): Promise<AgentExecution[]> {
 
 export function getLogs(projectId: string): Promise<LogEntry[]> {
   return get<LogEntry[]>(`/api/projects/${projectId}/agents/logs`)
+}
+
+export function startExecution(projectId: string, workItemNumber: number): Promise<{ executionId: string }> {
+  return post<{ executionId: string }>(`/api/projects/${projectId}/agents/execute`, { workItemNumber })
+}
+
+export interface ExecutionStatus {
+  id: string
+  status: string
+  currentPhase: string | null
+  progress: number
+  branchName: string | null
+  pullRequestUrl: string | null
+  error: string | null
+}
+
+export function getExecutionStatus(projectId: string, executionId: string): Promise<ExecutionStatus> {
+  return get<ExecutionStatus>(`/api/projects/${projectId}/agents/executions/${executionId}/status`)
 }

@@ -5,8 +5,6 @@ import {
     mergeClasses,
     tokens,
     Text,
-    Button,
-    Tooltip,
 } from '@fluentui/react-components'
 import {
     FolderRegular,
@@ -16,14 +14,11 @@ import {
     BoardRegular,
     BotRegular,
     HomeFilled,
-    DatabaseRegular,
-    DeleteRegular,
 } from '@fluentui/react-icons'
 
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useSeedDatabase, useResetDatabase } from '../../proxies'
 import { useCurrentProject, usePreferences } from '../../hooks'
 
 import type { NavItemConfig } from '../../models'
@@ -85,20 +80,6 @@ const useStyles = makeStyles({
         padding: '0.375rem',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     },
-    mockButtonRow: {
-        display: 'flex',
-        gap: '4px',
-        padding: '0.25rem 0.375rem',
-    },
-    seedButton: {
-        flex: 1,
-        fontSize: '11px',
-    },
-    resetButton: {
-        flex: 1,
-        fontSize: '11px',
-        color: tokens.colorPaletteRedForeground1,
-    },
 
     /* ───── Main content area ───── */
     content: {
@@ -146,8 +127,6 @@ export function Layout() {
     const [sidebarExpanded, setSidebarExpanded] = useState(!preferences?.sidebarCollapsed)
     const [chatOpen, setChatOpen] = useState(false)
 
-    const seedMutation = useSeedDatabase()
-    const resetMutation = useResetDatabase()
     const { projectId, projectTitle } = useCurrentProject()
 
     // Open chat pane when navigated with { state: { openChat: true } }
@@ -312,41 +291,6 @@ export function Layout() {
                                 expanded={sidebarExpanded}
                             />
                         ))}
-                        {sidebarExpanded ? (
-                            <div className={styles.mockButtonRow}>
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<DatabaseRegular />}
-                                    className={styles.seedButton}
-                                    onClick={() => seedMutation.mutate()}
-                                    disabled={seedMutation.isPending}
-                                >
-                                    {seedMutation.isPending ? 'Seeding...' : 'Seed Data'}
-                                </Button>
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<DeleteRegular />}
-                                    className={styles.resetButton}
-                                    onClick={() => resetMutation.mutate()}
-                                    disabled={resetMutation.isPending}
-                                >
-                                    {resetMutation.isPending ? 'Resetting...' : 'Reset'}
-                                </Button>
-                            </div>
-                        ) : (
-                            <Tooltip content="Seed mock data" relationship="label">
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<DatabaseRegular />}
-                                    onClick={() => seedMutation.mutate()}
-                                    disabled={seedMutation.isPending}
-                                    style={{ width: '100%' }}
-                                />
-                            </Tooltip>
-                        )}
                     </div>
                 </nav>
             }

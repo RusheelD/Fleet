@@ -8,6 +8,7 @@ namespace Fleet.Server.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/projects/{projectId}/agents")]
+[ServiceFilter(typeof(ProjectOwnershipFilter))]
 public class AgentsController(
     IAgentService agentService,
     IAgentOrchestrationService orchestrationService,
@@ -46,7 +47,6 @@ public class AgentsController(
     [HttpGet("executions/{executionId}/status")]
     public async Task<IActionResult> GetExecutionStatus(string projectId, string executionId)
     {
-        _ = projectId; // Route parameter for consistency
         var status = await orchestrationService.GetExecutionStatusAsync(executionId);
         if (status is null) return NotFound();
         return Ok(status);

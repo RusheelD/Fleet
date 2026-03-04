@@ -5,7 +5,8 @@ export { getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem } from './
 export type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsProxy'
 export { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
 export type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
-export { getExecutions, getLogs } from './agentsProxy'
+export { getExecutions, getLogs, startExecution, getExecutionStatus } from './agentsProxy'
+export type { ExecutionStatus } from './agentsProxy'
 export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
@@ -23,6 +24,7 @@ export {
   useWorkItemLevels,
   useExecutions,
   useLogs,
+  useStartExecution,
   useChatData,
   useChatMessages,
   useSearch,
@@ -45,8 +47,6 @@ export {
   useUploadAttachment,
   useDeleteAttachment,
   useDeleteSession,
-  useSeedDatabase,
-  useResetDatabase,
 } from './dataClient'
 export type { DataResult } from './dataClient'
 export { resolveIcon } from './iconMap'

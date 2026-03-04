@@ -39,6 +39,14 @@ Likely services (TBD exact configuration):
 
 ## Future Considerations
 
+### Post-MVP — Priority 1
+
+| Item | Details |
+| --- | --- |
+| **Pagination** | No list endpoint is paginated today — every query loads the full dataset with no `LIMIT`/`OFFSET`. The `PagedResult<T>` envelope and `page`/`pageSize` query parameters defined in [spec-api-conventions.md](spec-api-conventions.md) must be implemented across all layers (repositories → services → controllers → frontend proxies → UI). **Highest-severity endpoints:** work items, chat messages, agent executions, agent logs, and search (which materializes 4 full tables into memory per request). Without this, response times and memory usage will grow linearly with data. |
+
+### Post-MVP — Future
+
 | Item | Status |
 | --- | --- |
 | **Mobile support** | Post-MVP — responsive web first, native mobile later |

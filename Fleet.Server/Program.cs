@@ -42,6 +42,7 @@ builder.AddNpgsqlDbContext<FleetDbContext>("fleetdb");
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddScoped<ApiActionLoggingFilter>();
+builder.Services.AddScoped<ProjectOwnershipFilter>();
 builder.Services.AddTransient<OutboundHttpLoggingHandler>();
 builder.Services.AddControllers(options =>
 {

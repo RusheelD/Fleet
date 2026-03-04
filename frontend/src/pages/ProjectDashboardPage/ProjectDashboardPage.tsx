@@ -7,11 +7,7 @@ import {
     Button,
     Divider,
     Spinner,
-    Toast,
-    ToastTitle,
-    useToastController,
-    useId,
-    Toaster,
+    Text,
 } from '@fluentui/react-components'
 import {
     ChatRegular,
@@ -100,15 +96,6 @@ export function ProjectDashboardPage() {
     const { slug } = useCurrentProject()
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
-    const toasterId = useId('dashboard-toaster')
-    const { dispatchToast } = useToastController(toasterId)
-
-    const notify = (msg: string) => {
-        dispatchToast(
-            <Toast><ToastTitle>{msg}</ToastTitle></Toast>,
-            { intent: 'info' },
-        )
-    }
 
     if (isLoading || !dashboard) {
         return (
@@ -120,7 +107,6 @@ export function ProjectDashboardPage() {
 
     return (
         <div className={styles.page}>
-            <Toaster toasterId={toasterId} />
             <PageHeader
                 title={dashboard.title}
                 subtitle={undefined}
@@ -166,7 +152,7 @@ export function ProjectDashboardPage() {
                     icon={<RocketRegular />}
                     title="Run Agents"
                     description="Start new agent execution"
-                    onClick={() => notify('Agent execution is not available in this version')}
+                    onClick={() => navigate(`/projects/${slug}/agents`)}
                 />
             </div>
 
@@ -214,15 +200,21 @@ export function ProjectDashboardPage() {
                     </div>
                     <Divider />
                     <div className={styles.agentList}>
-                        {dashboard.agents.map((agent, i) => (
-                            <AgentStatusRow
-                                key={i}
-                                name={agent.name}
-                                status={agent.status}
-                                task={agent.task}
-                                progress={agent.progress}
-                            />
-                        ))}
+                        {dashboard.agents.length > 0 ? (
+                            dashboard.agents.map((agent, i) => (
+                                <AgentStatusRow
+                                    key={i}
+                                    name={agent.name}
+                                    status={agent.status}
+                                    task={agent.task}
+                                    progress={agent.progress}
+                                />
+                            ))
+                        ) : (
+                            <Text size={200} italic>
+                                No agent activity yet. Start an execution from the Agent Monitor.
+                            </Text>
+                        )}
                     </div>
                 </Card>
             </div>

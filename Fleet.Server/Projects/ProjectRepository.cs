@@ -6,22 +6,25 @@ namespace Fleet.Server.Projects;
 
 public class ProjectRepository(FleetDbContext context) : IProjectRepository
 {
-    public async Task<IReadOnlyList<ProjectDto>> GetAllAsync()
+    public async Task<IReadOnlyList<ProjectDto>> GetAllByOwnerAsync(string ownerId)
     {
-        var entities = await context.Projects.AsNoTracking().ToListAsync();
+        var entities = await context.Projects.AsNoTracking()
+            .Where(p => p.OwnerId == ownerId)
+            .ToListAsync();
         return entities.Select(MapToDto).ToList();
     }
 
-    public async Task<ProjectDto?> GetByIdAsync(string id)
+    public async Task<ProjectDto?> GetByIdAsync(string id, string ownerId)
     {
-        var p = await context.Projects.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+        var p = await context.Projects.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.OwnerId == ownerId);
         return p is null ? null : MapToDto(p);
     }
 
-    public async Task<ProjectDto?> GetBySlugAsync(string slug)
+    public async Task<ProjectDto?> GetBySlugAsync(string slug, string ownerId)
     {
         var p = await context.Projects.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Slug == slug);
+            .FirstOrDefaultAsync(x => x.Slug == slug && x.OwnerId == ownerId);
         return p is null ? null : MapToDto(p);
     }
 
@@ -59,9 +62,9 @@ public class ProjectRepository(FleetDbContext context) : IProjectRepository
         return MapToDto(entity);
     }
 
-    public async Task<ProjectDto?> UpdateAsync(string id, string? title, string? description, string? repo)
+    public async Task<ProjectDto?> UpdateAsync(string id, string ownerId, string? title, string? description, string? repo)
     {
-        var entity = await context.Projects.FirstOrDefaultAsync(x => x.Id == id);
+        var entity = await context.Projects.FirstOrDefaultAsync(x => x.Id == id && x.OwnerId == ownerId);
         if (entity is null) return null;
 
         if (title is not null)
@@ -83,9 +86,9 @@ public class ProjectRepository(FleetDbContext context) : IProjectRepository
         return MapToDto(entity);
     }
 
-    public async Task<bool> DeleteAsync(string id)
+    public async Task<bool> DeleteAsync(string id, string ownerId)
     {
-        var entity = await context.Projects.FirstOrDefaultAsync(x => x.Id == id);
+        var entity = await context.Projects.FirstOrDefaultAsync(x => x.Id == id && x.OwnerId == ownerId);
         if (entity is null) return false;
 
         context.Projects.Remove(entity);

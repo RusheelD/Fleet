@@ -3,4 +3,5 @@ export interface SearchResult {
   title: string
   description: string
   meta: string
+  projectSlug?: string
 }

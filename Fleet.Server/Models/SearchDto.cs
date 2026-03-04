@@ -4,5 +4,6 @@ public record SearchResultDto(
     string Type,
     string Title,
     string Description,
-    string Meta
+    string Meta,
+    string? ProjectSlug
 );
