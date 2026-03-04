@@ -59,7 +59,7 @@ const useStyles = makeStyles({
         top: 0,
         right: 0,
         bottom: 0,
-        width: '720px',
+        width: '960px',
         maxWidth: '100vw',
         backgroundColor: tokens.colorNeutralBackground1,
         boxShadow: tokens.shadow64,
@@ -143,22 +143,35 @@ const useStyles = makeStyles({
     mainContent: {
         flex: 1,
         overflow: 'auto',
-        paddingTop: tokens.spacingVerticalL,
-        paddingBottom: tokens.spacingVerticalL,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalL,
+        paddingTop: tokens.spacingVerticalXL,
+        paddingBottom: tokens.spacingVerticalXL,
+        paddingLeft: tokens.spacingHorizontalXL,
+        paddingRight: tokens.spacingHorizontalXL,
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalL,
         minWidth: 0,
     },
+    descriptionContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: '300px',
+    },
+    descriptionTextarea: {
+        marginTop: '8px',
+        flex: 1,
+        '& > textarea': {
+            minHeight: '260px',
+        },
+    },
     sidePanel: {
-        width: '240px',
+        width: '280px',
         flexShrink: 0,
         overflow: 'auto',
-        paddingTop: tokens.spacingVerticalL,
-        paddingBottom: tokens.spacingVerticalL,
-        paddingLeft: tokens.spacingHorizontalM,
+        paddingTop: tokens.spacingVerticalXL,
+        paddingBottom: tokens.spacingVerticalXL,
+        paddingLeft: tokens.spacingHorizontalL,
         paddingRight: tokens.spacingHorizontalL,
         borderLeft: `1px solid ${tokens.colorNeutralStroke3}`,
         display: 'flex',
@@ -435,15 +448,14 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     {/* Main content (left) */}
                     <div className={styles.mainContent}>
                         {/* Description */}
-                        <div>
+                        <div className={styles.descriptionContainer}>
                             <Text className={styles.sectionTitle}>Description</Text>
                             <Textarea
+                                className={styles.descriptionTextarea}
                                 value={description}
                                 onChange={(_e, data) => setDescription(data.value)}
                                 resize="vertical"
-                                rows={6}
                                 placeholder="Add a description…"
-                                style={{ marginTop: '8px' }}
                             />
                         </div>
 

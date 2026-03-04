@@ -46,6 +46,15 @@ public static partial class LogMessages
     [LoggerMessage(EventId = 99113, Level = LogLevel.Error, Message = "Tool execution failed. tool={tool}")]
     public static partial void CopilotToolExecutionFailed(this ILogger logger, Exception exception, string tool);
 
+    [LoggerMessage(EventId = 99116, Level = LogLevel.Information, Message = "LLM responded. loop={loop} hasToolCalls={hasToolCalls} toolCallCount={toolCallCount} textLength={textLength}")]
+    public static partial void CopilotLlmResponseReceived(this ILogger logger, int loop, bool hasToolCalls, int toolCallCount, int textLength);
+
+    [LoggerMessage(EventId = 99117, Level = LogLevel.Information, Message = "Executing tool batch. count={count} totalSoFar={totalSoFar}")]
+    public static partial void CopilotToolBatchStarting(this ILogger logger, int count, int totalSoFar);
+
+    [LoggerMessage(EventId = 99118, Level = LogLevel.Information, Message = "Tool completed. tool={tool} resultLength={resultLength} elapsedMs={elapsedMs}")]
+    public static partial void CopilotToolExecutionCompleted(this ILogger logger, string tool, int resultLength, long elapsedMs);
+
     [LoggerMessage(EventId = 99114, Level = LogLevel.Information, Message = "Uploading attachment. sessionId={sessionId} fileName={fileName} length={length}")]
     public static partial void CopilotAttachmentUploading(this ILogger logger, string sessionId, string fileName, int length);
 

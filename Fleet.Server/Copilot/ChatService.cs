@@ -133,9 +133,11 @@ public class ChatService(
         var toolContext = new ChatToolContext(projectId, userId);
         var totalToolCalls = 0;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(config.TimeoutSeconds));
+        var timeoutSeconds = generateWorkItems ? config.GenerateTimeoutSeconds : config.TimeoutSeconds;
+        var maxLoops = generateWorkItems ? config.GenerateMaxToolLoops : config.MaxToolLoops;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 
-        for (var loop = 0; loop < config.MaxToolLoops; loop++)
+        for (var loop = 0; loop < maxLoops; loop++)
         {
             // Use Sonnet for generation, Haiku for normal chat
             var modelOverride = generateWorkItems ? config.GenerateModel : null;
@@ -148,7 +150,7 @@ public class ChatService(
             }
             catch (OperationCanceledException)
             {
-                logger.CopilotLlmTimeout(config.TimeoutSeconds);
+                logger.CopilotLlmTimeout(timeoutSeconds);
                 var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
                 return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
@@ -162,9 +164,18 @@ public class ChatService(
                 return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
             }
 
+            // Log what the LLM returned
+            logger.CopilotLlmResponseReceived(
+                loop + 1,
+                response.ToolCalls is { Count: > 0 },
+                response.ToolCalls?.Count ?? 0,
+                response.Content?.Length ?? 0);
+
             // If the model returned tool calls, execute them
             if (response.ToolCalls is { Count: > 0 })
             {
+                logger.CopilotToolBatchStarting(response.ToolCalls.Count, totalToolCalls);
+
                 // Add the assistant's tool-call message to context
                 llmMessages.Add(new LLMMessage
                 {
@@ -218,7 +229,7 @@ public class ChatService(
         }
 
         // Exhausted tool loops — force a text response
-        logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), config.MaxToolLoops);
+        logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
         var fallbackMsg = await chatSessionRepository.AddMessageAsync(
             projectId, sessionId, "assistant",
             "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
@@ -241,7 +252,13 @@ public class ChatService(
         {
             var sanitizedArgs = LogSanitizer.SanitizeJson(toolCall.ArgumentsJson);
             logger.CopilotExecutingTool(toolCall.Name.SanitizeForLogging(), sanitizedArgs.SanitizeForLogging());
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var result = await tool.ExecuteAsync(toolCall.ArgumentsJson, context, ct);
+            sw.Stop();
+
+            logger.CopilotToolExecutionCompleted(
+                toolCall.Name.SanitizeForLogging(), result.Length, sw.ElapsedMilliseconds);
 
             // Truncate large outputs to avoid context blowup
             if (result.Length > config.MaxToolOutputLength)
