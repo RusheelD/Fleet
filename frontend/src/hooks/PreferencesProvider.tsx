@@ -21,20 +21,24 @@ const defaults: UserPreferences = {
 }
 
 export function PreferencesProvider({ children }: PreferencesProviderProps) {
-    const { isAuthenticated } = useAuth()
+    const { isAuthenticated, user } = useAuth()
     const queryClient = useQueryClient()
-    const { data: settings, isError, refetch } = useUserSettings(isAuthenticated)
+    // Only enable fetching once the AuthProvider has finished loading the user profile.
+    // This prevents a premature /api/user/settings call that races with /api/auth/me
+    // and causes duplicate acquireTokenSilent iframe errors.
+    const authReady = isAuthenticated && user !== null
+    const { data: settings, isError, refetch } = useUserSettings(authReady)
     const updateMutation = useUpdatePreferences()
     const [local, setLocal] = useState<UserPreferences>(defaults)
     const hasLoadedPreferencesRef = useRef(false)
 
     // When authentication completes, explicitly refetch preferences to ensure fresh data
     useEffect(() => {
-        if (isAuthenticated && !hasLoadedPreferencesRef.current) {
+        if (authReady && !hasLoadedPreferencesRef.current) {
             console.debug('[PreferencesProvider] User authenticated, refreshing preferences from backend')
             void refetch()
         }
-    }, [isAuthenticated, refetch])
+    }, [authReady, refetch])
 
     // Sync local state when settings arrive from the server
     useEffect(() => {

@@ -20,16 +20,20 @@ public class AgentPhaseRunner(
     private const int MaxToolLoops = 200;
 
     /// <summary>Max total non-write tool calls per phase.</summary>
-    private const int MaxToolCallsTotal = 500;
+    public const int MaxToolCallsTotal = 500;
 
     /// <summary>Timeout per phase (30 minutes).</summary>
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>How often (in tool calls) to invoke the progress callback.</summary>
+    private const int ProgressReportInterval = 3;
 
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
         string userMessage,
         AgentToolContext toolContext,
         string? modelOverride = null,
+        PhaseProgressCallback? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         var model = modelOverride ?? llmOptions.Value.GenerateModel;
@@ -103,6 +107,19 @@ public class AgentPhaseRunner(
                             ToolCallId = toolCall.Id,
                             ToolName = toolCall.Name,
                         });
+
+                        // Report progress periodically so the DB/UI stays up-to-date
+                        if (onProgress is not null && totalToolCalls % ProgressReportInterval == 0)
+                        {
+                            try
+                            {
+                                await onProgress(totalToolCalls, toolCall.Name);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
+                            }
+                        }
                     }
 
                     if (totalToolCalls > MaxToolCallsTotal)

@@ -16,7 +16,7 @@ public class AgentOrchestrationService(
     FleetDbContext db,
     IConnectionRepository connectionRepository,
     IWorkItemRepository workItemRepository,
-    IServiceProvider serviceProvider,
+    IServiceScopeFactory serviceScopeFactory,
     ILogger<AgentOrchestrationService> logger,
     IModelCatalog modelCatalog) : IAgentOrchestrationService
 {
@@ -60,7 +60,7 @@ public class AgentOrchestrationService(
             throw new InvalidOperationException("Project has no linked repository.");
 
         // 3. Get the user's GitHub access token
-        var linkedAccount = await connectionRepository.GetByProviderAsync(userId, "github")
+        var linkedAccount = await connectionRepository.GetByProviderAsync(userId, "GitHub")
             ?? throw new InvalidOperationException("No GitHub account linked. Please connect your GitHub account first.");
 
         if (string.IsNullOrWhiteSpace(linkedAccount.AccessToken))
@@ -151,21 +151,24 @@ public class AgentOrchestrationService(
         string repoFullName, string accessToken, string branchName,
         int userId, string selectedModelKey)
     {
-        // Create a new DI scope for this background work
-        await using var scope = serviceProvider.CreateAsyncScope();
+        // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
+        // The HTTP request scope is disposed after the controller returns Accepted(),
+        // so a scoped IServiceProvider would throw ObjectDisposedException here.
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
         var scopedDb = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
         var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
         var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
 
-        var model = modelCatalog.Get(selectedModelKey);
-        logger.LogInformation("Execution {ExecutionId}: using model {Model} (key={ModelKey})",
-            executionId, model, selectedModelKey);
-
-        // Create and clone the sandbox
-        var sandbox = scope.ServiceProvider.GetRequiredService<IRepoSandbox>();
+        IRepoSandbox? sandbox = null;
 
         try
         {
+            var model = modelCatalog.Get(selectedModelKey);
+            logger.LogInformation("Execution {ExecutionId}: using model {Model} (key={ModelKey})",
+                executionId, model, selectedModelKey);
+
+            // Create and clone the sandbox
+            sandbox = scope.ServiceProvider.GetRequiredService<IRepoSandbox>();
             logger.LogInformation("Execution {ExecutionId}: cloning {Repo} → branch {Branch}",
                 executionId, repoFullName, branchName);
 
@@ -204,8 +207,30 @@ public class AgentOrchestrationService(
                     logger.LogInformation("Execution {ExecutionId}: starting phase {Role}",
                         executionId, role);
 
+                    // Progress callback: flushes tool-call progress to the DB so the polling
+                    // endpoint returns live data instead of waiting until the phase finishes.
+                    PhaseProgressCallback onProgress = async (toolCallsSoFar, lastToolName) =>
+                    {
+                        var phaseProgress = (double)toolCallsSoFar / AgentPhaseRunner.MaxToolCallsTotal;
+                        var overallProgress = ((double)completedRoles + phaseProgress) / totalRoles;
+
+                        var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
+                        if (exec is null) return;
+
+                        exec.Progress = Math.Clamp(overallProgress, 0, 0.99);
+
+                        var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
+                        if (agent is not null)
+                        {
+                            agent.CurrentTask = $"{GetPhaseTaskDescription(role)} ({toolCallsSoFar} tool calls — last: {lastToolName})";
+                            agent.Progress = Math.Clamp(phaseProgress, 0, 0.99);
+                        }
+
+                        await scopedDb.SaveChangesAsync();
+                    };
+
                     var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model);
+                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, onProgress);
                     var phaseEnd = DateTime.UtcNow;
 
                     // Persist the phase result
@@ -270,13 +295,24 @@ public class AgentOrchestrationService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Execution {ExecutionId}: pipeline failed with exception", executionId);
-            await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
-            await WriteLogEntryAsync(scopedDb, projectId, "System", "error",
-                $"Execution {executionId} failed: {ex.Message}");
+
+            // Wrap error-handling DB writes in their own try/catch so a secondary failure
+            // (e.g., broken DB connection) doesn't mask the original error.
+            try
+            {
+                await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
+                await WriteLogEntryAsync(scopedDb, projectId, "System", "error",
+                    $"Execution {executionId} failed: {ex.Message}");
+            }
+            catch (Exception dbEx)
+            {
+                logger.LogError(dbEx, "Execution {ExecutionId}: failed to persist error status to DB", executionId);
+            }
         }
         finally
         {
-            await sandbox.DisposeAsync();
+            if (sandbox is not null)
+                await sandbox.DisposeAsync();
         }
     }
 

@@ -59,6 +59,14 @@ const DIFFICULTY_MAP: Record<string, number> = {
     'D5 — Very Hard': 5,
 }
 
+const AGENT_MAP: Record<string, boolean> = {
+    'Auto-detect': true,
+    '1 agent': true,
+    '3 agents': true,
+    '5 agents': true,
+    'Manual assignment': false,
+}
+
 const useStyles = makeStyles({
     /* ── Overlay backdrop ──────────────────────────────────── */
     overlay: {
@@ -279,6 +287,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [assignedTo, setAssignedTo] = useState('')
+    const [agentLabel, setAgentLabel] = useState('Auto-detect')
     const [parentLabel, setParentLabel] = useState(NONE_PARENT)
     const [levelLabel, setLevelLabel] = useState(NONE_LEVEL)
 
@@ -321,6 +330,8 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             setState(item.state)
             setTags(item.tags.join(', '))
             setAssignedTo(item.assignedTo)
+            // Initialize agent selector based on whether this item was AI-assigned
+            setAgentLabel(item.isAI ? 'Auto-detect' : 'Manual assignment')
             const parent = workItems?.find((wi) => wi.workItemNumber === item.parentWorkItemNumber)
             setParentLabel(parent ? `#${parent.workItemNumber} ${parent.title}` : NONE_PARENT)
             const lvl = sortedLevels.find((l) => l.id === item.levelId)
@@ -355,6 +366,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                     state,
                     assignedTo: assignedTo.trim() || 'Unassigned',
+                    isAI: AGENT_MAP[agentLabel] ?? true,
                     tags: tags
                         .split(',')
                         .map((t) => t.trim())
@@ -533,19 +545,49 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             </Dropdown>
                         </div>
 
-                        {/* Assigned To */}
+                        {/* Agent Assignment */}
+                        <div className={styles.fieldRow}>
+                            <Text className={styles.fieldLabel}>Agent Assignment</Text>
+                            <div className={styles.fieldValue}>
+                                {agentLabel !== 'Manual assignment' ? <BotRegular /> : <PersonRegular />}
+                                <Dropdown
+                                    className={styles.fieldDropdown}
+                                    size="small"
+                                    value={agentLabel}
+                                    onOptionSelect={(_e, data) => {
+                                        const label = data.optionText ?? 'Auto-detect'
+                                        setAgentLabel(label)
+                                        if (label !== 'Manual assignment') {
+                                            setAssignedTo('Fleet AI')
+                                        }
+                                    }}
+                                >
+                                    <Option>Auto-detect</Option>
+                                    <Option>1 agent</Option>
+                                    <Option>3 agents</Option>
+                                    <Option>5 agents</Option>
+                                    <Option>Manual assignment</Option>
+                                </Dropdown>
+                            </div>
+                        </div>
+
+                        {/* Assigned To — only editable for manual assignment */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Assigned To</Text>
-                            <div className={styles.fieldValue}>
-                                {item.isAI ? <BotRegular /> : <PersonRegular />}
+                            {agentLabel === 'Manual assignment' ? (
                                 <Input
                                     size="small"
                                     appearance="underline"
                                     value={assignedTo}
                                     onChange={(_e, data) => setAssignedTo(data.value)}
-                                    style={{ flex: 1 }}
+                                    placeholder="Enter name…"
                                 />
-                            </div>
+                            ) : (
+                                <div className={styles.fieldValue}>
+                                    <BotRegular />
+                                    <Text size={200}>{assignedTo}</Text>
+                                </div>
+                            )}
                         </div>
 
                         {/* Parent */}

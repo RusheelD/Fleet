@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
-import { InteractionStatus } from '@azure/msal-browser'
+import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
 import { apiLoginRequest, googleLoginRequest, githubLoginRequest } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
@@ -16,6 +16,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [user, setUser] = useState<UserProfile | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const fetchedRef = useRef(false)
+    const redirectingRef = useRef(false)
+    // Deduplicate concurrent acquireTokenSilent calls — all callers share one in-flight promise
+    const tokenPromiseRef = useRef<Promise<string | undefined> | null>(null)
 
     const login = useCallback(async (provider?: 'microsoft' | 'google' | 'github') => {
         if (inProgress === InteractionStatus.None) {
@@ -30,6 +33,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const logout = useCallback(() => {
         setUser(null)
         fetchedRef.current = false
+        redirectingRef.current = false
         void instance.logoutRedirect({ postLogoutRedirectUri: '/' })
     }, [instance])
 
@@ -37,18 +41,45 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const accounts = instance.getAllAccounts()
         if (accounts.length === 0) return undefined
 
-        try {
-            const result = await instance.acquireTokenSilent({
-                ...apiLoginRequest,
-                account: accounts[0],
-            })
-            return result.accessToken
-        } catch {
-            // Silent token acquisition failed — trigger interactive login
-            await instance.loginRedirect(apiLoginRequest)
-            return undefined
+        // If there's already an in-flight token request, piggyback on it
+        // instead of spawning another acquireTokenSilent (which opens a
+        // hidden iframe and causes sandbox navigation errors).
+        if (tokenPromiseRef.current) {
+            return tokenPromiseRef.current
         }
-    }, [instance])
+
+        const tokenPromise = (async () => {
+            try {
+                const result = await instance.acquireTokenSilent({
+                    ...apiLoginRequest,
+                    account: accounts[0],
+                })
+                return result.accessToken
+            } catch (error: unknown) {
+                // Only redirect for genuine interaction-required errors (consent, MFA, expired session).
+                // All other failures (timing, cache, network) should NOT trigger a redirect —
+                // that creates an infinite login loop when multiple API calls fire concurrently.
+                if (error instanceof InteractionRequiredAuthError) {
+                    // Guard against multiple concurrent redirects
+                    if (!redirectingRef.current && inProgress === InteractionStatus.None) {
+                        redirectingRef.current = true
+                        await instance.loginRedirect(apiLoginRequest)
+                    }
+                } else {
+                    console.warn('Silent token acquisition failed (non-interactive):', error)
+                }
+                return undefined
+            }
+        })()
+
+        tokenPromiseRef.current = tokenPromise
+
+        try {
+            return await tokenPromise
+        } finally {
+            tokenPromiseRef.current = null
+        }
+    }, [instance, inProgress])
 
     // Wire the token getter into the proxy layer so API calls include the Bearer token
     useEffect(() => {

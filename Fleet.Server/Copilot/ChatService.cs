@@ -120,8 +120,12 @@ public class ChatService(
         // 2b. Build system prompt with any uploaded documents
         var systemPrompt = await BuildSystemPromptAsync(sessionId);
 
-        // 3. Get tool definitions — only include write tools when generation is requested
-        var toolDefs = toolRegistry.ToLLMDefinitions(includeWriteTools: generateWorkItems);
+        // 3. Get tool definitions — only include write tools when generation is requested.
+        //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
+        //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
+        var toolDefs = toolRegistry.ToLLMDefinitions(
+            includeWriteTools: generateWorkItems,
+            bulkOnly: generateWorkItems);
 
         // 4. Run the tool-calling loop with safety limits
         var toolEvents = new List<ToolEventDto>();
@@ -195,7 +199,7 @@ public class ChatService(
                         }
                     }
 
-                    var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, cts.Token);
+                    var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, cts.Token);
                     toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
 
                     // Add tool result to context for the LLM
@@ -236,8 +240,18 @@ public class ChatService(
     // ── Helpers ───────────────────────────────────────────────
 
     private async Task<string> ExecuteToolAsync(
-        LLMToolCall toolCall, ChatToolContext context, LLMOptions config, CancellationToken ct)
+        LLMToolCall toolCall, ChatToolContext context, LLMOptions config,
+        IReadOnlyList<LLMToolDefinition> allowedTools, CancellationToken ct)
     {
+        // Guard: only execute tools that were actually sent to the LLM.
+        // Models sometimes hallucinate tool calls for tools not in their definitions.
+        var isAllowed = allowedTools.Any(t => string.Equals(t.Name, toolCall.Name, StringComparison.OrdinalIgnoreCase));
+        if (!isAllowed)
+        {
+            logger.CopilotUnknownTool(toolCall.Name.SanitizeForLogging());
+            return $"Error: tool '{toolCall.Name}' is not available. Do not call it. Use only the tools provided in your tool definitions.";
+        }
+
         var tool = toolRegistry.Get(toolCall.Name);
         if (tool is null)
         {

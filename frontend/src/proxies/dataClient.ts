@@ -144,11 +144,11 @@ export function useWorkItemLevels(projectId: string | undefined) {
 // ── Agents ────────────────────────────────────────────────
 
 export function useExecutions(projectId: string | undefined) {
-  return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], { refetchInterval: 30_000 })
+  return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], { refetchInterval: 5_000 })
 }
 
 export function useLogs(projectId: string | undefined) {
-  return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], { refetchInterval: 30_000 })
+  return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], { refetchInterval: 5_000 })
 }
 
 export function useStartExecution(projectId: string | undefined) {

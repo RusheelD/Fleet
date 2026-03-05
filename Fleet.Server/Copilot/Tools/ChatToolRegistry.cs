@@ -23,8 +23,21 @@ public class ChatToolRegistry
         _tools.TryGetValue(name, out var tool) ? tool : null;
 
     /// <summary>Convert tools to LLM definitions, optionally excluding write tools.</summary>
-    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(bool includeWriteTools = true) =>
+    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(bool includeWriteTools = true, bool bulkOnly = false) =>
         All.Where(t => includeWriteTools || !t.IsWriteTool)
+           .Where(t => !bulkOnly || !SingleItemWriteTools.Contains(t.Name))
            .Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema))
            .ToList();
+
+    /// <summary>
+    /// Single-item write tool names that have bulk equivalents.
+    /// When <c>bulkOnly</c> is true, these are excluded so the LLM
+    /// is forced to batch operations and reduce API round-trips.
+    /// </summary>
+    private static readonly HashSet<string> SingleItemWriteTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "create_work_item",
+        "update_work_item",
+        "delete_work_item",
+    };
 }
