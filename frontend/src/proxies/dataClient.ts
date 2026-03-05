@@ -4,7 +4,7 @@ import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug,
   getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs, startExecution,
+  getExecutions, getLogs, startExecution, cancelExecution, pauseExecution,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
@@ -160,6 +160,30 @@ export function useStartExecution(projectId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useCancelExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => cancelExecution(projectId!, executionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+    },
+  })
+}
+
+export function usePauseExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => pauseExecution(projectId!, executionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
     },
   })
 }

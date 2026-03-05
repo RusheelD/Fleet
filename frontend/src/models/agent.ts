@@ -2,7 +2,7 @@ export interface AgentExecution {
   id: string
   workItemId: number
   workItemTitle: string
-  status: 'running' | 'completed' | 'failed' | 'queued'
+  status: 'running' | 'completed' | 'failed' | 'queued' | 'cancelled' | 'paused'
   agents: AgentInfo[]
   startedAt: string
   duration: string

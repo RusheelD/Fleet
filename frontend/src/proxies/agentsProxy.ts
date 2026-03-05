@@ -26,3 +26,11 @@ export interface ExecutionStatus {
 export function getExecutionStatus(projectId: string, executionId: string): Promise<ExecutionStatus> {
   return get<ExecutionStatus>(`/api/projects/${projectId}/agents/executions/${executionId}/status`)
 }
+
+export function cancelExecution(projectId: string, executionId: string): Promise<{ executionId: string; status: string }> {
+  return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/cancel`, {})
+}
+
+export function pauseExecution(projectId: string, executionId: string): Promise<{ executionId: string; status: string }> {
+  return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/pause`, {})
+}

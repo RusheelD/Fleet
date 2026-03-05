@@ -126,15 +126,19 @@ public class ClaudeClient(
     /// Converts normalized messages to Claude's message format.
     /// Claude requires strictly alternating user/assistant roles.
     /// Tool results are sent as user messages with tool_result content blocks.
-    /// When <paramref name="cacheFirstUser"/> is true, marks the last content block
-    /// of the first user message with cache_control so the provider caches it.
+    /// After building the message list, the 2 largest tool_result blocks are marked
+    /// with cache_control to use the remaining 2 of 4 allowed cache breakpoints
+    /// (the first 2 are system prompt and tools).
     /// </summary>
     private static JsonArray BuildMessages(IReadOnlyList<LLMMessage> messages, bool cacheFirstUser = false)
     {
+        // cacheFirstUser kept for API compat but no longer used as a breakpoint;
+        // the 2 biggest tool results are more valuable since they grow over the conversation.
+        _ = cacheFirstUser;
+
         var result = new JsonArray();
         JsonObject? current = null;
         string? currentRole = null;
-        var firstUserDone = false;
 
         foreach (var msg in messages)
         {
@@ -162,21 +166,44 @@ public class ClaudeClient(
                 currentRole = role;
                 result.Add(current);
             }
+        }
 
-            // Mark the last content block of the first user message with cache_control
-            // so the stable work-item context is cached across tool-loop iterations.
-            if (cacheFirstUser && role == "user" && !firstUserDone && current is not null)
+        // Mark the 2 largest tool_result blocks with cache_control.
+        // This uses the remaining 2 cache breakpoints (system prompt = 1, tools = 2).
+        MarkLargestToolResults(result, maxBreakpoints: 2);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Finds all tool_result content blocks across the message array,
+    /// sorts them by content length descending, and marks the top N
+    /// with cache_control: ephemeral.
+    /// </summary>
+    private static void MarkLargestToolResults(JsonArray messages, int maxBreakpoints)
+    {
+        var candidates = new List<(JsonObject Block, int Length)>();
+
+        foreach (var msgNode in messages)
+        {
+            if (msgNode is not JsonObject msg) continue;
+            if (msg["content"] is not JsonArray content) continue;
+
+            foreach (var blockNode in content)
             {
-                firstUserDone = true;
-                var arr = current["content"]!.AsArray();
-                if (arr.Count > 0 && arr[^1] is JsonObject lastBlock)
-                {
-                    lastBlock["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
-                }
+                if (blockNode is not JsonObject block) continue;
+                if (block["type"]?.GetValue<string>() != "tool_result") continue;
+
+                var contentText = block["content"]?.ToString() ?? "";
+                candidates.Add((block, contentText.Length));
             }
         }
 
-        return result;
+        // Sort descending by content length and mark the top N
+        foreach (var (block, _) in candidates.OrderByDescending(c => c.Length).Take(maxBreakpoints))
+        {
+            block["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
+        }
     }
 
     private static (string role, List<JsonNode>) ConvertMessage(LLMMessage msg)
@@ -229,8 +256,6 @@ public class ClaudeClient(
                     ["type"] = "tool_result",
                     ["tool_use_id"] = msg.ToolCallId ?? "",
                     ["content"] = msg.Content ?? "",
-                    // Cache every tool result so each iteration reuses the full prior conversation.
-                    ["cache_control"] = new JsonObject { ["type"] = "ephemeral" },
                 });
                 return ("user", blocks);
 

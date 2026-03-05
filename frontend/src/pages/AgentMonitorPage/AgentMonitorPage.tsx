@@ -25,7 +25,7 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
-import { useExecutions, useLogs, useWorkItems, useStartExecution } from '../../proxies'
+import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution } from '../../proxies'
 import { useCurrentProject } from '../../hooks'
 
 const useStyles = makeStyles({
@@ -96,6 +96,8 @@ export function AgentMonitorPage() {
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
     const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
     const startExecution = useStartExecution(projectId)
+    const cancelExecution = useCancelExecution(projectId)
+    const pauseExecution = usePauseExecution(projectId)
     const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
@@ -138,6 +140,42 @@ export function AgentMonitorPage() {
             onError: () => {
                 dispatchToast(
                     <Toast><ToastTitle>Failed to start agent execution</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
+    const handleCancel = (executionId: string) => {
+        cancelExecution.mutate(executionId, {
+            onSuccess: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Agent execution stopped</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchExec()
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to stop execution</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
+    const handlePause = (executionId: string) => {
+        pauseExecution.mutate(executionId, {
+            onSuccess: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Agent execution paused</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchExec()
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to pause execution</ToastTitle></Toast>,
                     { intent: 'error' },
                 )
             },
@@ -220,7 +258,7 @@ export function AgentMonitorPage() {
                 <div className={styles.executionPanel}>
                     <div className={styles.executionList}>
                         {filteredExecutions.map((execution) => (
-                            <ExecutionCard key={execution.id} execution={execution} />
+                            <ExecutionCard key={execution.id} execution={execution} onPause={handlePause} onCancel={handleCancel} />
                         ))}
                     </div>
                 </div>

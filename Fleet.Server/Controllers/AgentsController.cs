@@ -51,4 +51,26 @@ public class AgentsController(
         if (status is null) return NotFound();
         return Ok(status);
     }
+
+    /// <summary>
+    /// Cancels (stops) a running execution.
+    /// </summary>
+    [HttpPost("executions/{executionId}/cancel")]
+    public async Task<IActionResult> CancelExecution(string projectId, string executionId)
+    {
+        var cancelled = await orchestrationService.CancelExecutionAsync(executionId);
+        if (!cancelled) return NotFound();
+        return Ok(new { executionId, status = "cancelled" });
+    }
+
+    /// <summary>
+    /// Pauses a running execution.
+    /// </summary>
+    [HttpPost("executions/{executionId}/pause")]
+    public async Task<IActionResult> PauseExecution(string projectId, string executionId)
+    {
+        var paused = await orchestrationService.PauseExecutionAsync(executionId);
+        if (!paused) return NotFound();
+        return Ok(new { executionId, status = "paused" });
+    }
 }

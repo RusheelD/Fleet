@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Fleet.Server.Connections;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
@@ -21,6 +22,12 @@ public class AgentOrchestrationService(
     ILogger<AgentOrchestrationService> logger,
     IModelCatalog modelCatalog) : IAgentOrchestrationService
 {
+    /// <summary>
+    /// Tracks CancellationTokenSources for active executions so they can be cancelled/paused externally.
+    /// Key = executionId, Value = (CTS, desired final status when cancelled).
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, (CancellationTokenSource Cts, string FinalStatus)> ActiveExecutions = new();
+
     /// <summary>
     /// The ordered pipeline phases. Implementation phases run sequentially within their group.
     /// </summary>
@@ -166,9 +173,11 @@ public class AgentOrchestrationService(
 
         // 8. Fire-and-forget the pipeline on a background thread
         //    We use IServiceScopeFactory (singleton) to create a new scope so the DbContext isn't shared.
+        var cts = new CancellationTokenSource();
+        ActiveExecutions[executionId] = (cts, "cancelled");
         _ = Task.Run(() => RunPipelineAsync(
             executionId, projectId, workItem, childWorkItems, repoFullName,
-            accessToken, branchName, userId, selectedModelKey, pipeline), CancellationToken.None);
+            accessToken, branchName, userId, selectedModelKey, pipeline, cts.Token), CancellationToken.None);
 
         return executionId;
     }
@@ -193,11 +202,41 @@ public class AgentOrchestrationService(
         );
     }
 
+    public Task<bool> CancelExecutionAsync(string executionId)
+    {
+        return StopExecutionAsync(executionId, "cancelled");
+    }
+
+    public Task<bool> PauseExecutionAsync(string executionId)
+    {
+        return StopExecutionAsync(executionId, "paused");
+    }
+
+    /// <summary>
+    /// Signals an active execution to stop by cancelling its CancellationTokenSource.
+    /// The pipeline loop will observe the token and finalize with the given status.
+    /// </summary>
+    private static Task<bool> StopExecutionAsync(string executionId, string finalStatus)
+    {
+        if (!ActiveExecutions.TryGetValue(executionId, out var entry))
+            return Task.FromResult(false);
+
+        // Update the desired final status before cancelling so the pipeline
+        // picks up the correct status string in its OperationCanceledException handler.
+        ActiveExecutions[executionId] = (entry.Cts, finalStatus);
+
+        if (!entry.Cts.IsCancellationRequested)
+            entry.Cts.Cancel();
+
+        return Task.FromResult(true);
+    }
+
     private async Task RunPipelineAsync(
         string executionId, string projectId, Models.WorkItemDto workItem,
         List<Models.WorkItemDto> childWorkItems,
         string repoFullName, string accessToken, string branchName,
-        int userId, string selectedModelKey, AgentRole[][] pipeline)
+        int userId, string selectedModelKey, AgentRole[][] pipeline,
+        CancellationToken externalCancellation)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
         // The HTTP request scope is disposed after the controller returns Accepted(),
@@ -237,6 +276,9 @@ public class AgentOrchestrationService(
             {
                 foreach (var role in group)
                 {
+                    // Check for external cancellation (stop/pause) before starting each phase
+                    externalCancellation.ThrowIfCancellationRequested();
+
                     // Update execution status
                     await UpdateExecutionAsync(scopedDb, executionId, role.ToString(),
                         (double)completedRoles / totalRoles);
@@ -279,7 +321,7 @@ public class AgentOrchestrationService(
 
                     var maxTokens = GetMaxTokensForRole(role);
                     var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress);
+                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress, externalCancellation);
                     var phaseEnd = DateTime.UtcNow;
 
                     // Persist the phase result
@@ -344,6 +386,23 @@ public class AgentOrchestrationService(
 
             logger.LogInformation("Execution {ExecutionId}: pipeline completed successfully", executionId);
         }
+        catch (OperationCanceledException)
+        {
+            // Execution was stopped or paused externally via CancelExecutionAsync / PauseExecutionAsync.
+            var finalStatus = ActiveExecutions.TryGetValue(executionId, out var entry) ? entry.FinalStatus : "cancelled";
+            logger.LogInformation("Execution {ExecutionId}: pipeline {Status} by user", executionId, finalStatus);
+
+            try
+            {
+                await FinalizeExecutionAsync(scopedDb, executionId, finalStatus);
+                await WriteLogEntryAsync(scopedDb, projectId, "System", "warn",
+                    $"Execution {executionId} was {finalStatus} by user");
+            }
+            catch (Exception dbEx)
+            {
+                logger.LogError(dbEx, "Execution {ExecutionId}: failed to persist {Status} status to DB", executionId, finalStatus);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Execution {ExecutionId}: pipeline failed with exception", executionId);
@@ -363,6 +422,10 @@ public class AgentOrchestrationService(
         }
         finally
         {
+            // Clean up the CTS tracking entry
+            if (ActiveExecutions.TryRemove(executionId, out var removed))
+                removed.Cts.Dispose();
+
             if (sandbox is not null)
                 await sandbox.DisposeAsync();
         }
@@ -613,7 +676,13 @@ public class AgentOrchestrationService(
         exec.Status = status;
         exec.CompletedAtUtc = DateTime.UtcNow;
         exec.Progress = status == "completed" ? 1.0 : exec.Progress;
-        exec.CurrentPhase = status == "completed" ? "Done" : "Failed";
+        exec.CurrentPhase = status switch
+        {
+            "completed" => "Done",
+            "cancelled" => "Cancelled",
+            "paused" => "Paused",
+            _ => "Failed",
+        };
         exec.PullRequestUrl = prUrl;
 
         if (exec.StartedAtUtc.HasValue)

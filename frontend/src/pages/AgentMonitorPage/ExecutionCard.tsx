@@ -34,6 +34,8 @@ const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informat
     running: 'warning',
     completed: 'success',
     failed: 'danger',
+    cancelled: 'danger',
+    paused: 'informative',
     queued: 'informative',
     idle: 'subtle',
 }
@@ -184,6 +186,8 @@ const useStyles = makeStyles({
 
 interface ExecutionCardProps {
     execution: AgentExecution
+    onPause?: (executionId: string) => void
+    onCancel?: (executionId: string) => void
 }
 
 function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
@@ -200,16 +204,30 @@ function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
     }
 }
 
-export function ExecutionCard({ execution }: ExecutionCardProps) {
+export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardProps) {
     const styles = useStyles()
     const toasterId = useId('exec-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
-    const notify = (msg: string) => {
+    const notify = (msg: string, intent: 'info' | 'success' | 'error' = 'info') => {
         dispatchToast(
             <Toast><ToastTitle>{msg}</ToastTitle></Toast>,
-            { intent: 'info' },
+            { intent },
         )
+    }
+
+    const handlePause = () => {
+        if (onPause) {
+            onPause(execution.id)
+            notify('Pausing agent execution...')
+        }
+    }
+
+    const handleCancel = () => {
+        if (onCancel) {
+            onCancel(execution.id)
+            notify('Stopping agent execution...')
+        }
     }
 
     const agents = execution.agents
@@ -236,8 +254,8 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
                 <div className={styles.executionActions}>
                     {execution.status === 'running' && (
                         <>
-                            <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={() => notify('Pausing agent execution...')} />
-                            <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={() => notify('Stopping agent execution...')} />
+                            <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={handlePause} />
+                            <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={handleCancel} />
                         </>
                     )}
                     {execution.status === 'failed' && (

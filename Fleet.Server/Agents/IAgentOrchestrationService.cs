@@ -21,4 +21,16 @@ public interface IAgentOrchestrationService
     /// Gets the current status of an execution.
     /// </summary>
     Task<AgentExecutionStatus?> GetExecutionStatusAsync(string executionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cancels an active execution. The pipeline stops and the execution status is set to "cancelled".
+    /// </summary>
+    /// <returns>True if the execution was found and cancellation was signalled; false if not found or already stopped.</returns>
+    Task<bool> CancelExecutionAsync(string executionId);
+
+    /// <summary>
+    /// Pauses an active execution. The pipeline stops and the execution status is set to "paused".
+    /// </summary>
+    /// <returns>True if the execution was found and pause was signalled; false if not found or already stopped.</returns>
+    Task<bool> PauseExecutionAsync(string executionId);
 }

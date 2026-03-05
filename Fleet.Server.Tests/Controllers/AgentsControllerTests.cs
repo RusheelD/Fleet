@@ -88,4 +88,52 @@ public class AgentsControllerTests
 
         Assert.IsInstanceOfType<NotFoundResult>(result);
     }
+
+    [TestMethod]
+    public async Task CancelExecution_Found_ReturnsOk()
+    {
+        _orchestrationService
+            .Setup(s => s.CancelExecutionAsync("exec-1"))
+            .ReturnsAsync(true);
+
+        var result = await _sut.CancelExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task CancelExecution_NotFound_Returns404()
+    {
+        _orchestrationService
+            .Setup(s => s.CancelExecutionAsync("missing"))
+            .ReturnsAsync(false);
+
+        var result = await _sut.CancelExecution(ProjectId, "missing");
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task PauseExecution_Found_ReturnsOk()
+    {
+        _orchestrationService
+            .Setup(s => s.PauseExecutionAsync("exec-1"))
+            .ReturnsAsync(true);
+
+        var result = await _sut.PauseExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task PauseExecution_NotFound_Returns404()
+    {
+        _orchestrationService
+            .Setup(s => s.PauseExecutionAsync("missing"))
+            .ReturnsAsync(false);
+
+        var result = await _sut.PauseExecution(ProjectId, "missing");
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
 }
