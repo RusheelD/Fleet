@@ -19,8 +19,17 @@ public class AgentPhaseRunner(
     /// <summary>Max tool-calling loops per phase.</summary>
     private const int MaxToolLoops = 50;
 
-    /// <summary>Max total tool calls per phase.</summary>
-    public const int MaxToolCallsTotal = 100;
+    /// <summary>Returns the max tool calls allowed for a given agent role.</summary>
+    public static int GetMaxToolCalls(AgentRole role) => role switch
+    {
+        AgentRole.Manager => 10,
+        AgentRole.Planner => 15,
+        AgentRole.Contracts => 30,
+        AgentRole.Review => 30,
+        AgentRole.Documentation => 20,
+        AgentRole.Consolidation => 50,
+        _ => 150,  // Backend, Frontend, Testing, Styling
+    };
 
     /// <summary>Timeout per phase (30 minutes).</summary>
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(30);
@@ -55,6 +64,7 @@ public class AgentPhaseRunner(
         };
 
         var totalToolCalls = 0;
+        var maxToolCalls = GetMaxToolCalls(role);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(PhaseTimeout);
@@ -116,7 +126,7 @@ public class AgentPhaseRunner(
                         foreach (var (toolCall, toolResult) in results)
                         {
                             totalToolCalls++;
-                            if (totalToolCalls > MaxToolCallsTotal) break;
+                            if (totalToolCalls > maxToolCalls) break;
 
                             messages.Add(new LLMMessage
                             {
@@ -156,10 +166,10 @@ public class AgentPhaseRunner(
                         foreach (var toolCall in response.ToolCalls)
                         {
                             totalToolCalls++;
-                            if (totalToolCalls > MaxToolCallsTotal)
+                            if (totalToolCalls > maxToolCalls)
                             {
                                 logger.LogWarning("Phase {Role}: exceeded max tool calls ({Max})",
-                                    role, MaxToolCallsTotal);
+                                    role, maxToolCalls);
                                 break;
                             }
 
@@ -191,7 +201,7 @@ public class AgentPhaseRunner(
                         }
                     }
 
-                    if (totalToolCalls > MaxToolCallsTotal)
+                    if (totalToolCalls > maxToolCalls)
                         break;
 
                     continue;
