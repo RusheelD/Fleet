@@ -133,7 +133,7 @@ builder.Services.AddScoped<IAgentTool, EditFileTool>();
 builder.Services.AddScoped<IAgentTool, DeleteFileTool>();
 builder.Services.AddScoped<IAgentTool, SearchFilesTool>();
 builder.Services.AddScoped<IAgentTool, RunCommandTool>();
-builder.Services.AddScoped<IAgentTool, CreatePullRequestTool>();
+builder.Services.AddScoped<IAgentTool, CommitAndPushTool>();
 builder.Services.AddScoped<IAgentTool, GetChangeSummaryTool>();
 builder.Services.AddScoped<AgentToolRegistry>();
 

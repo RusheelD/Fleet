@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using Fleet.Server.Connections;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
@@ -19,6 +22,7 @@ public class AgentOrchestrationService(
     IWorkItemRepository workItemRepository,
     IServiceScopeFactory serviceScopeFactory,
     ILLMClient llmClient,
+    IHttpClientFactory httpClientFactory,
     ILogger<AgentOrchestrationService> logger,
     IModelCatalog modelCatalog) : IAgentOrchestrationService
 {
@@ -46,33 +50,156 @@ public class AgentOrchestrationService(
     ];
 
     /// <summary>
-    /// Returns a reduced pipeline based on how hard the work is.
-    /// Difficulty 1-2: Planner → Backend → Frontend (lean)
-    /// Difficulty 3:   Planner → Backend → Frontend → Testing → Consolidation
-    /// Difficulty 4+:  Full pipeline
+    /// Uses a cheap LLM call to determine which agent roles are needed for the work item.
+    /// Returns a pipeline in the standard <c>AgentRole[][]</c> format, arranged in dependency order.
+    /// Falls back to the full pipeline on error.
     /// </summary>
-    private static AgentRole[][] BuildPipeline(int maxDifficulty)
+    private async Task<AgentRole[][]> SelectPipelineAsync(
+        string workItemContext, CancellationToken cancellationToken)
     {
-        if (maxDifficulty <= 2)
+        const string systemPrompt = """
+            You are a pipeline optimization assistant for a software development AI system.
+            Given a work item, determine which agent roles are needed to complete it.
+            
+            Available roles and when to include them:
+            - Planner: Creates the implementation plan. ALWAYS include this.
+            - Contracts: Defines shared interfaces and types. Include when multiple components interact or API contracts change.
+            - Backend: Implements server-side changes (APIs, services, database, .NET/C#). Include for any backend work.
+            - Frontend: Implements UI changes (React, TypeScript, components). Include for any frontend/UI work.
+            - Testing: Writes and runs tests. Include when new functionality is added.
+            - Styling: Applies CSS/styling polish. Include only when visual/UI styling changes are needed.
+            - Consolidation: Merges and integrates outputs. Include ONLY when BOTH Backend AND Frontend are selected.
+            - Review: Reviews code quality. Include for medium-to-large changes.
+            - Documentation: Generates documentation. Include only for significant new features.
+            
+            Rules:
+            1. Planner is ALWAYS included.
+            2. Include Consolidation ONLY if both Backend and Frontend are selected.
+            3. Never include Consolidation if only one of Backend/Frontend is selected.
+            4. Minimize the number of roles — fewer = faster and cheaper execution.
+            5. For backend-only tasks, you typically need: Planner, Backend, and optionally Testing/Review.
+            6. For frontend-only tasks, you typically need: Planner, Frontend, and optionally Styling/Review.
+            7. For full-stack tasks, you typically need: Planner, Contracts, Backend, Frontend, Consolidation, and optionally Testing/Review.
+            
+            Return ONLY a JSON array of role name strings like: ["Planner", "Backend", "Testing"]
+            No explanation, no markdown fences — just the raw JSON array.
+            """;
+
+        try
         {
-            return
-            [
-                [AgentRole.Planner],
-                [AgentRole.Backend, AgentRole.Frontend],
-            ];
+            var model = modelCatalog.Get(ModelKeys.Haiku);
+            var messages = new List<LLMMessage>
+            {
+                new() { Role = "user", Content = workItemContext }
+            };
+
+            var request = new LLMRequest(systemPrompt, messages, MaxTokens: 256, ModelOverride: model);
+            var response = await llmClient.CompleteAsync(request, cancellationToken);
+
+            var roles = ParseSelectedRoles(response.Content);
+            if (roles.Count == 0)
+            {
+                logger.LogWarning("AI pipeline selection returned no roles; falling back to full pipeline");
+                return FullPipeline;
+            }
+
+            var pipeline = ArrangePipeline(roles);
+            logger.LogInformation("AI selected pipeline: {Roles}",
+                string.Join(" → ", pipeline.SelectMany(g => g).Select(r => r.ToString())));
+            return pipeline;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "AI pipeline selection failed; falling back to full pipeline");
+            return FullPipeline;
+        }
+    }
+
+    /// <summary>
+    /// Parses a JSON array of role name strings into a list of <see cref="AgentRole"/> values.
+    /// </summary>
+    private static List<AgentRole> ParseSelectedRoles(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return [];
+
+        // Strip markdown code fences if present (e.g., ```json ... ```)
+        var trimmed = content.Trim();
+        if (trimmed.StartsWith("```"))
+        {
+            var firstNewline = trimmed.IndexOf('\n');
+            if (firstNewline >= 0)
+                trimmed = trimmed[(firstNewline + 1)..];
+            if (trimmed.EndsWith("```"))
+                trimmed = trimmed[..^3];
+            trimmed = trimmed.Trim();
         }
 
-        if (maxDifficulty <= 3)
+        try
         {
-            return
-            [
-                [AgentRole.Planner],
-                [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing],
-                [AgentRole.Consolidation],
-            ];
-        }
+            var arr = JsonSerializer.Deserialize<string[]>(trimmed);
+            if (arr is null) return [];
 
-        return FullPipeline;
+            var roles = new List<AgentRole>();
+            foreach (var name in arr)
+            {
+                if (Enum.TryParse<AgentRole>(name, ignoreCase: true, out var role))
+                    roles.Add(role);
+            }
+            return roles;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Arranges selected roles into the standard <c>AgentRole[][]</c> pipeline format,
+    /// preserving the canonical dependency order.
+    /// </summary>
+    private static AgentRole[][] ArrangePipeline(List<AgentRole> roles)
+    {
+        // Ensure Planner is always present
+        if (!roles.Contains(AgentRole.Planner))
+            roles.Insert(0, AgentRole.Planner);
+
+        // Canonical ordering: Planner → Contracts → [Backend, Frontend, Testing, Styling] → Consolidation → [Review, Documentation]
+        var pipeline = new List<AgentRole[]>();
+
+        // Group 1: Planner
+        pipeline.Add([AgentRole.Planner]);
+
+        // Group 2: Contracts (if selected)
+        if (roles.Contains(AgentRole.Contracts))
+            pipeline.Add([AgentRole.Contracts]);
+
+        // Group 3: Implementation agents (Backend, Frontend, Testing, Styling — in order, if selected)
+        var implGroup = new List<AgentRole>();
+        foreach (var role in new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling })
+        {
+            if (roles.Contains(role))
+                implGroup.Add(role);
+        }
+        if (implGroup.Count > 0)
+            pipeline.Add([.. implGroup]);
+
+        // Group 4: Consolidation (if selected and both Backend+Frontend are in the pipeline)
+        if (roles.Contains(AgentRole.Consolidation) &&
+            roles.Contains(AgentRole.Backend) && roles.Contains(AgentRole.Frontend))
+            pipeline.Add([AgentRole.Consolidation]);
+
+        // Group 5: Review and Documentation (if selected)
+        var reviewGroup = new List<AgentRole>();
+        foreach (var role in new[] { AgentRole.Review, AgentRole.Documentation })
+        {
+            if (roles.Contains(role))
+                reviewGroup.Add(role);
+        }
+        if (reviewGroup.Count > 0)
+            pipeline.Add([.. reviewGroup]);
+
+        return [.. pipeline];
     }
 
     /// <summary>
@@ -125,17 +252,14 @@ public class AgentOrchestrationService(
         var accessToken = linkedAccount.AccessToken;
         var repoFullName = project.Repo;
 
-        // 4. Determine difficulty and build the pipeline
+        // 4. Use AI to determine which agents are needed for this work item.
         //    Always use Haiku for cost savings.
-        var allDifficulties = new List<int> { workItem.Difficulty };
-        allDifficulties.AddRange(childWorkItems.Select(c => c.Difficulty));
-        var maxDifficulty = allDifficulties.Max();
         var selectedModelKey = ModelKeys.Haiku;
-
-        var pipeline = BuildPipeline(maxDifficulty);
+        var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
+        var pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
         logger.LogInformation(
-            "Execution: max difficulty={MaxDifficulty}, model={Model}, phases={PhaseCount}",
-            maxDifficulty, selectedModelKey, pipeline.SelectMany(g => g).Count());
+            "Execution: AI-selected pipeline with {PhaseCount} agents, model={Model}",
+            pipeline.SelectMany(g => g).Count(), selectedModelKey);
 
         // 5. Create the execution record
         var executionId = Guid.NewGuid().ToString("N")[..12];
@@ -264,6 +388,10 @@ public class AgentOrchestrationService(
             var toolContext = new AgentToolContext(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
 
+            // Open a draft PR immediately so agent commits are visible throughout development
+            var prUrl = await OpenDraftPullRequestAsync(
+                sandbox, accessToken, repoFullName, workItem, scopedDb, executionId, externalCancellation);
+
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
             var phaseOutputs = new List<(AgentRole Role, string Output)>();
@@ -368,8 +496,19 @@ public class AgentOrchestrationService(
                 }
             }
 
-            // Pipeline complete — check if any PR was created
-            var prUrl = await GetPullRequestUrlAsync(sandbox);
+            // Pipeline complete — final commit + push so the draft PR has all changes
+            try
+            {
+                await sandbox.CommitAndPushAsync(
+                    $"fleet: finalize changes for #{workItem.WorkItemNumber}",
+                    authorName: "Fleet Agent",
+                    authorEmail: "agent@fleet.dev",
+                    externalCancellation);
+            }
+            catch (Exception pushEx)
+            {
+                logger.LogWarning(pushEx, "Final push failed (changes may already be pushed)");
+            }
 
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
 
@@ -511,7 +650,9 @@ public class AgentOrchestrationService(
         sb.AppendLine($"You are the **{role}** agent. Execute your role as described in your system prompt.");
         sb.AppendLine("Use your tools to explore the repository, understand the codebase, and make the necessary changes.");
         sb.AppendLine();
-        sb.AppendLine("**IMPORTANT — Speed & Cost Constraints:**");
+        sb.AppendLine("**IMPORTANT — A draft PR is already open. Use `commit_and_push` frequently to save progress.**");
+        sb.AppendLine();
+        sb.AppendLine("**Speed & Cost Constraints:**");
         sb.AppendLine("- Be extremely concise in your reasoning and output. No filler, no restating the problem.");
         sb.AppendLine("- Return ONLY the essential information: files changed, key decisions, errors, and instructions for the next phase.");
         sb.AppendLine("- Do NOT echo file contents you read — summarize what you learned in 1-2 sentences.");
@@ -702,18 +843,101 @@ public class AgentOrchestrationService(
     }
 
     /// <summary>
-    /// Attempts to detect if a PR was created by checking git log for PR-related tool output.
-    /// The create_pull_request tool stores the URL in its output — look for it in the sandbox.
+    /// Opens a draft pull request on GitHub at the start of the pipeline.
+    /// Creates an initial marker commit and pushes the branch so the PR can be opened.
+    /// Agents push subsequent commits throughout development — the PR updates automatically.
     /// </summary>
-    private static Task<string?> GetPullRequestUrlAsync(IRepoSandbox sandbox)
+    private async Task<string?> OpenDraftPullRequestAsync(
+        IRepoSandbox sandbox, string accessToken, string repoFullName,
+        WorkItemDto workItem, FleetDbContext scopedDb, string executionId,
+        CancellationToken cancellationToken)
     {
-        // The CreatePullRequestTool returns the PR URL in its tool output,
-        // but we don't have direct access to it here. Instead, we could check
-        // if the branch was pushed (it has commits beyond origin/main).
-        // For now, the PR URL will be extracted from the Review/Documentation phase output.
-        // A future improvement: store PR URL directly on AgentToolContext.
-        _ = sandbox; // Suppress unused warning
-        return Task.FromResult<string?>(null);
+        try
+        {
+            // 1. Create an initial marker commit so the branch has something to push
+            sandbox.WriteFile(".fleet",
+                $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
+                $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n");
+
+            await sandbox.CommitAndPushAsync(
+                $"fleet: start work on #{workItem.WorkItemNumber} — {workItem.Title}",
+                authorName: "Fleet Agent",
+                authorEmail: "agent@fleet.dev",
+                cancellationToken);
+
+            // 2. Fetch the default branch name
+            var client = httpClientFactory.CreateClient("GitHub");
+            var repoJson = await GitHubGetAsync(client, accessToken,
+                $"https://api.github.com/repos/{repoFullName}", cancellationToken);
+            var baseBranch = repoJson?.TryGetProperty("default_branch", out var dbProp) == true
+                ? dbProp.GetString() ?? "main"
+                : "main";
+
+            // 3. Open a draft PR
+            var prPayload = JsonSerializer.Serialize(new
+            {
+                title = $"[Fleet] #{workItem.WorkItemNumber}: {workItem.Title}",
+                body = $"Resolves work item **#{workItem.WorkItemNumber}**: {workItem.Title}\n\n" +
+                       $"_This PR was opened automatically by Fleet. Agents are actively pushing changes._",
+                head = sandbox.BranchName,
+                @base = baseBranch,
+                draft = true,
+            });
+
+            using var prRequest = new HttpRequestMessage(HttpMethod.Post,
+                $"https://api.github.com/repos/{repoFullName}/pulls");
+            prRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            prRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+            prRequest.Content = new StringContent(prPayload, Encoding.UTF8, "application/json");
+
+            using var prResponse = await client.SendAsync(prRequest, cancellationToken);
+            var prResponseBody = await prResponse.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!prResponse.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Failed to open draft PR: {Status} — {Body}",
+                    prResponse.StatusCode, prResponseBody);
+                return null;
+            }
+
+            var prResult = JsonSerializer.Deserialize<JsonElement>(prResponseBody);
+            var prUrl = prResult.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() : null;
+            var prNumber = prResult.TryGetProperty("number", out var numProp) ? numProp.GetInt32() : 0;
+
+            logger.LogInformation("Opened draft PR #{PrNumber}: {PrUrl}", prNumber, prUrl);
+
+            // 4. Immediately store the PR URL in the execution record so it's visible in the UI
+            var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
+            if (exec is not null)
+            {
+                exec.PullRequestUrl = prUrl;
+                await scopedDb.SaveChangesAsync(cancellationToken);
+            }
+
+            return prUrl;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to open draft PR for branch {Branch}", sandbox.BranchName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Sends a GET request to the GitHub API and returns the parsed JSON response.
+    /// </summary>
+    private static async Task<JsonElement?> GitHubGetAsync(
+        HttpClient client, string token, string url, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode) return null;
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        return JsonSerializer.Deserialize<JsonElement>(body);
     }
 
     private static string Slugify(string title)
