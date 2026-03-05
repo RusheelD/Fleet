@@ -82,15 +82,26 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         }
     }, [activeSessionData?.isGenerating, activeSession]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // When polling picks up the assistant response, clear thinking/generating
+    // Track the message count when thinking started so we can detect *new* assistant replies
+    const messageCountAtThinkingStart = useRef(serverMessages.length)
+    useEffect(() => {
+        if (isThinking) {
+            messageCountAtThinkingStart.current = serverMessages.length
+        }
+    }, [isThinking]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // When polling picks up a NEW assistant response (added after thinking started), clear thinking
     useEffect(() => {
         if (!isThinking) return
+        // Only consider messages that arrived after thinking started
+        if (serverMessages.length <= messageCountAtThinkingStart.current) return
         const lastMsg = serverMessages[serverMessages.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
             setIsThinking(false)
             setIsGenerating(false)
-            setOptimisticMessages([])
-            // Refresh related data now that the generate is complete
+            // Don't clear optimistic here — the displayMessages dedup handles the
+            // transition seamlessly. Optimistic messages are cleaned up in doSend's
+            // .then() after queries are refreshed.
             void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
             if (isGenerating) {
                 void queryClient.invalidateQueries({ queryKey: ['work-items'] })
@@ -123,13 +134,6 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [displayMessages.length, isThinking])
 
-    // Clear optimistic messages when server messages update
-    useEffect(() => {
-        if (optimisticMessages.length > 0 && !isThinking) {
-            setOptimisticMessages([])
-        }
-    }, [serverMessages.length, isThinking, optimisticMessages.length])
-
     const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
         setMessage('')
 
@@ -156,13 +160,15 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
         sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
-            .then((response: SendMessageResponse) => {
+            .then(async (response: SendMessageResponse) => {
+                setLastSendResponse(response)
+                // Wait for server data to be fresh BEFORE clearing optimistic state
+                // so the user message never flashes away
+                await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
+                await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 setIsThinking(false)
                 setIsGenerating(false)
                 setOptimisticMessages([])
-                setLastSendResponse(response)
-                void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
-                void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 if (generateWorkItems) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
                 }
