@@ -223,17 +223,12 @@ public class AgentOrchestrationService(
     public async Task<string> StartExecutionAsync(
         string projectId, int workItemNumber, int userId, CancellationToken cancellationToken = default)
     {
-        // 1. Load the work item and ALL of its children
+        // 1. Load the work item and ALL of its descendants (recursively)
         var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, workItemNumber)
             ?? throw new InvalidOperationException($"Work item #{workItemNumber} not found in project {projectId}.");
 
         var childWorkItems = new List<Models.WorkItemDto>();
-        foreach (var childNumber in workItem.ChildWorkItemNumbers)
-        {
-            var child = await workItemRepository.GetByWorkItemNumberAsync(projectId, childNumber);
-            if (child is not null)
-                childWorkItems.Add(child);
-        }
+        await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
 
         // 2. Load the project to get the repo name
         var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
@@ -427,10 +422,9 @@ public class AgentOrchestrationService(
 
                     // Progress callback: flushes tool-call progress to the DB so the polling
                     // endpoint returns live data instead of waiting until the phase finishes.
-                    PhaseProgressCallback onProgress = async (toolCallsSoFar, lastToolName) =>
+                    PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
                     {
-                        var phaseProgress = (double)toolCallsSoFar / AgentPhaseRunner.MaxToolCallsTotal;
-                        var overallProgress = ((double)completedRoles + phaseProgress) / totalRoles;
+                        var overallProgress = ((double)completedRoles + estimatedProgress) / totalRoles;
 
                         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
                         if (exec is null) return;
@@ -440,8 +434,8 @@ public class AgentOrchestrationService(
                         var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
                         if (agent is not null)
                         {
-                            agent.CurrentTask = $"{GetPhaseTaskDescription(role)} ({toolCallsSoFar} tool calls — last: {lastToolName})";
-                            agent.Progress = Math.Clamp(phaseProgress, 0, 0.99);
+                            agent.CurrentTask = summary;
+                            agent.Progress = Math.Clamp(estimatedProgress, 0, 0.99);
                         }
 
                         await scopedDb.SaveChangesAsync();
@@ -571,10 +565,27 @@ public class AgentOrchestrationService(
     }
 
     /// <summary>
-    /// Builds the work item context string that serves as the base input for all phases.
-    /// Includes the parent work item and all its children with full details.
+    /// Recursively collects all descendants of a work item (children, grandchildren, etc.).
     /// </summary>
-    private static string BuildWorkItemContext(Models.WorkItemDto workItem, List<Models.WorkItemDto> children)
+    private async Task CollectDescendantsAsync(string projectId, int[] childNumbers, List<Models.WorkItemDto> results)
+    {
+        foreach (var childNumber in childNumbers)
+        {
+            var child = await workItemRepository.GetByWorkItemNumberAsync(projectId, childNumber);
+            if (child is null) continue;
+
+            results.Add(child);
+
+            if (child.ChildWorkItemNumbers.Length > 0)
+                await CollectDescendantsAsync(projectId, child.ChildWorkItemNumbers, results);
+        }
+    }
+
+    /// <summary>
+    /// Builds the work item context string that serves as the base input for all phases.
+    /// Includes the parent work item and all its descendants with full details.
+    /// </summary>
+    private static string BuildWorkItemContext(Models.WorkItemDto workItem, List<Models.WorkItemDto> allDescendants)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("# Work Item");
@@ -597,25 +608,48 @@ public class AgentOrchestrationService(
             sb.AppendLine();
         }
 
-        if (children.Count > 0)
+        if (allDescendants.Count > 0)
         {
+            // Build a lookup from parent number → children for hierarchical rendering
+            var childLookup = allDescendants
+                .Where(d => d.ParentWorkItemNumber is not null)
+                .GroupBy(d => d.ParentWorkItemNumber!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
             sb.AppendLine("## Sub-Items");
             sb.AppendLine();
-            foreach (var child in children)
-            {
-                sb.AppendLine($"### #{child.WorkItemNumber}: {child.Title}");
-                sb.AppendLine($"- **Priority**: {child.Priority} | **Difficulty**: {child.Difficulty} | **State**: {child.State}");
-                if (child.Tags.Length > 0)
-                    sb.AppendLine($"- **Tags**: {string.Join(", ", child.Tags)}");
-                if (!string.IsNullOrWhiteSpace(child.Description))
-                {
-                    sb.AppendLine($"- **Description**: {child.Description}");
-                }
-                sb.AppendLine();
-            }
+            AppendChildrenRecursive(sb, workItem.WorkItemNumber, childLookup, depth: 0);
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Recursively appends child work items with indentation to show hierarchy.
+    /// </summary>
+    private static void AppendChildrenRecursive(
+        System.Text.StringBuilder sb,
+        int parentNumber,
+        Dictionary<int, List<Models.WorkItemDto>> childLookup,
+        int depth)
+    {
+        if (!childLookup.TryGetValue(parentNumber, out var children))
+            return;
+
+        var indent = new string(' ', depth * 2);
+        foreach (var child in children)
+        {
+            sb.AppendLine($"{indent}### #{child.WorkItemNumber}: {child.Title}");
+            sb.AppendLine($"{indent}- **Priority**: {child.Priority} | **Difficulty**: {child.Difficulty} | **State**: {child.State}");
+            if (child.Tags.Length > 0)
+                sb.AppendLine($"{indent}- **Tags**: {string.Join(", ", child.Tags)}");
+            if (!string.IsNullOrWhiteSpace(child.Description))
+                sb.AppendLine($"{indent}- **Description**: {child.Description}");
+            sb.AppendLine();
+
+            // Recurse into this child's children
+            AppendChildrenRecursive(sb, child.WorkItemNumber, childLookup, depth + 1);
+        }
     }
 
     /// <summary>

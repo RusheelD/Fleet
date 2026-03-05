@@ -1,11 +1,11 @@
 namespace Fleet.Server.Agents;
 
 /// <summary>
-/// Callback invoked periodically during a phase to report progress.
+/// Callback invoked when an agent reports its estimated progress.
 /// </summary>
-/// <param name="toolCallsSoFar">Number of tool calls completed so far in this phase.</param>
-/// <param name="lastToolName">Name of the most recently executed tool.</param>
-public delegate Task PhaseProgressCallback(int toolCallsSoFar, string lastToolName);
+/// <param name="estimatedProgress">Agent's estimated completion as a fraction (0.0 – 1.0).</param>
+/// <param name="summary">Brief description of current activity.</param>
+public delegate Task PhaseProgressCallback(double estimatedProgress, string summary);
 
 /// <summary>
 /// Runs a single agent phase: loads the role prompt, builds the tool set,

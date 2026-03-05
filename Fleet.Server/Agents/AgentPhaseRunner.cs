@@ -25,9 +25,6 @@ public class AgentPhaseRunner(
     /// <summary>Timeout per phase (30 minutes).</summary>
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(30);
 
-    /// <summary>How often (in tool calls) to invoke the progress callback.</summary>
-    private const int ProgressReportInterval = 3;
-
     /// <summary>
     /// Max characters per tool result for agent phases. Lower than the interactive
     /// chat limit to keep context windows lean and inference fast.
@@ -130,15 +127,17 @@ public class AgentPhaseRunner(
                         }
 
                         // Report progress once for the whole parallel batch
-                        if (onProgress is not null && totalToolCalls % ProgressReportInterval < response.ToolCalls.Count)
+                        if (onProgress is not null)
                         {
-                            try
+                            foreach (var (toolCall, toolResult) in results)
                             {
-                                await onProgress(totalToolCalls, $"{response.ToolCalls.Count} parallel reads");
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
+                                if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var percent = ParseProgressPercent(toolCall.ArgumentsJson);
+                                    var summary = ParseProgressSummary(toolCall.ArgumentsJson);
+                                    try { await onProgress(percent / 100.0, summary); }
+                                    catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role); }
+                                }
                             }
                         }
                     }
@@ -165,16 +164,12 @@ public class AgentPhaseRunner(
                                 ToolName = toolCall.Name,
                             });
 
-                            if (onProgress is not null && totalToolCalls % ProgressReportInterval == 0)
+                            if (onProgress is not null && toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
                             {
-                                try
-                                {
-                                    await onProgress(totalToolCalls, toolCall.Name);
-                                }
-                                catch (Exception ex)
-                                {
-                                    logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
-                                }
+                                var percent = ParseProgressPercent(toolCall.ArgumentsJson);
+                                var summary = ParseProgressSummary(toolCall.ArgumentsJson);
+                                try { await onProgress(percent / 100.0, summary); }
+                                catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role); }
                             }
                         }
                     }
@@ -232,5 +227,25 @@ public class AgentPhaseRunner(
             logger.LogWarning(ex, "Agent tool {ToolName} failed", toolCall.Name);
             return $"Error executing tool '{toolCall.Name}': {ex.Message}";
         }
+    }
+
+    private static int ParseProgressPercent(string argumentsJson)
+    {
+        try
+        {
+            var args = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(argumentsJson);
+            return args.TryGetProperty("percent_complete", out var pct) ? Math.Clamp(pct.GetInt32(), 0, 100) : 0;
+        }
+        catch { return 0; }
+    }
+
+    private static string ParseProgressSummary(string argumentsJson)
+    {
+        try
+        {
+            var args = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(argumentsJson);
+            return args.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
+        }
+        catch { return ""; }
     }
 }
