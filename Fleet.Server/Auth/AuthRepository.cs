@@ -12,6 +12,12 @@ public class AuthRepository(FleetDbContext context) : IAuthRepository
             .FirstOrDefaultAsync(u => u.EntraObjectId == entraObjectId);
     }
 
+    public async Task<UserProfile?> GetByEmailAsync(string email)
+    {
+        return await context.UserProfiles
+            .FirstOrDefaultAsync(u => u.Email == email);
+    }
+
     public async Task<UserProfile?> GetByIdAsync(int id)
     {
         return await context.UserProfiles
@@ -33,5 +39,11 @@ public class AuthRepository(FleetDbContext context) : IAuthRepository
             context.Entry(user).State = EntityState.Detached;
             throw;
         }
+    }
+
+    public async Task UpdateUserAsync(UserProfile user)
+    {
+        context.UserProfiles.Update(user);
+        await context.SaveChangesAsync();
     }
 }

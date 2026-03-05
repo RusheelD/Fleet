@@ -80,10 +80,18 @@ public class AuthService(
         catch (DbUpdateException)
         {
             // A concurrent request already created this user (race condition on first login).
-            // Re-fetch the now-existing row instead of failing.
-            var concurrentlyCreated = await authRepository.GetByEntraObjectIdAsync(oid);
+            // Re-fetch by OID first, then fall back to email match.
+            var concurrentlyCreated = await authRepository.GetByEntraObjectIdAsync(oid)
+                ?? await authRepository.GetByEmailAsync(email);
             if (concurrentlyCreated is not null)
             {
+                // If found by email but OID differs, update OID so future lookups are fast
+                if (concurrentlyCreated.EntraObjectId != oid)
+                {
+                    concurrentlyCreated.EntraObjectId = oid;
+                    await authRepository.UpdateUserAsync(concurrentlyCreated);
+                }
+
                 logger.AuthResolvedUser(oid.SanitizeForLogging(), concurrentlyCreated.Id);
                 _resolvedUserId = concurrentlyCreated.Id;
                 return concurrentlyCreated;
