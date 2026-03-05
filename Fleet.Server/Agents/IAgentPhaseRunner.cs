@@ -8,6 +8,13 @@ namespace Fleet.Server.Agents;
 public delegate Task PhaseProgressCallback(double estimatedProgress, string summary);
 
 /// <summary>
+/// Callback invoked after each tool call to log it as a detailed log entry.
+/// </summary>
+/// <param name="toolName">Name of the tool that was called.</param>
+/// <param name="resultSnippet">A short snippet of the tool result for display.</param>
+public delegate Task PhaseToolCallLogger(string toolName, string resultSnippet);
+
+/// <summary>
 /// Runs a single agent phase: loads the role prompt, builds the tool set,
 /// and executes an LLM tool-calling loop until the agent produces final output.
 /// </summary>
@@ -22,6 +29,7 @@ public interface IAgentPhaseRunner
     /// <param name="modelOverride">Optional model override (e.g., opus for complex tasks). Uses GenerateModel if null.</param>
     /// <param name="maxTokens">Optional max output tokens. Uses the provider default (16384) if null.</param>
     /// <param name="onProgress">Optional callback invoked after every few tool calls to report live progress.</param>
+    /// <param name="onToolCall">Optional callback invoked after each tool call to log detailed entries.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The phase result including the final LLM output.</returns>
     Task<PhaseResult> RunPhaseAsync(
@@ -31,5 +39,6 @@ public interface IAgentPhaseRunner
         string? modelOverride = null,
         int? maxTokens = null,
         PhaseProgressCallback? onProgress = null,
+        PhaseToolCallLogger? onToolCall = null,
         CancellationToken cancellationToken = default);
 }

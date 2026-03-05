@@ -5,8 +5,10 @@ import {
     Button,
     Badge,
     mergeClasses,
+    ToggleButton,
 } from '@fluentui/react-components'
-import { ArrowClockwiseRegular } from '@fluentui/react-icons'
+import { ArrowClockwiseRegular, CodeRegular } from '@fluentui/react-icons'
+import { useState } from 'react'
 import type { LogEntry } from '../../models'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
@@ -159,21 +161,35 @@ interface LogPanelProps {
 
 export function LogPanel({ logs, onRefresh }: LogPanelProps) {
     const styles = useStyles()
+    const [showDetailed, setShowDetailed] = useState(false)
+
+    const visibleLogs = showDetailed ? logs : logs.filter(l => !l.isDetailed)
 
     return (
         <div className={styles.logPanel}>
             <div className={styles.logHeader}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Title3 className={styles.logTitle}>Live Logs</Title3>
-                    <Badge appearance="filled" color="informative" size="small">{logs.length}</Badge>
+                    <Badge appearance="filled" color="informative" size="small">{visibleLogs.length}</Badge>
                 </div>
-                <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" onClick={onRefresh} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <ToggleButton
+                        appearance="subtle"
+                        size="small"
+                        icon={<CodeRegular />}
+                        checked={showDetailed}
+                        onClick={() => setShowDetailed(prev => !prev)}
+                    >
+                        Detailed
+                    </ToggleButton>
+                    <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" onClick={onRefresh} />
+                </div>
             </div>
             <div className={styles.logList}>
-                {logs.length === 0 && (
+                {visibleLogs.length === 0 && (
                     <div className={styles.emptyState}>No log entries yet</div>
                 )}
-                {logs.map((log, i) => (
+                {visibleLogs.map((log, i) => (
                     <div key={i} className={styles.logEntry}>
                         <span className={styles.logTime}>{formatLogTime(log.time)}</span>
                         <span className={styles.logAgent}>{log.agent}</span>

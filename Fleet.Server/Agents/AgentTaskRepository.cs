@@ -27,7 +27,7 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
             .Where(l => l.ProjectId == projectId)
             .ToListAsync();
 
-        return entities.Select(l => new LogEntryDto(l.Time, l.Agent, l.Level, l.Message)).ToList();
+        return entities.Select(l => new LogEntryDto(l.Time, l.Agent, l.Level, l.Message, l.IsDetailed)).ToList();
     }
 
     public async Task<IReadOnlyList<DashboardAgentDto>> GetDashboardAgentsByProjectIdAsync(string projectId)

@@ -21,4 +21,5 @@ export interface LogEntry {
   agent: string
   level: 'info' | 'warn' | 'error' | 'success'
   message: string
+  isDetailed: boolean
 }

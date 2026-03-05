@@ -384,7 +384,7 @@ public class AgentOrchestrationService(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
 
             // Open a draft PR immediately so agent commits are visible throughout development
-            var prUrl = await OpenDraftPullRequestAsync(
+            var (prUrl, prNumber) = await OpenDraftPullRequestAsync(
                 sandbox, accessToken, repoFullName, workItem, scopedDb, executionId, externalCancellation);
 
             // Build the initial user message with work item context (includes children)
@@ -439,11 +439,25 @@ public class AgentOrchestrationService(
                         }
 
                         await scopedDb.SaveChangesAsync();
+
+                        // Write a log entry so progress reports appear in the execution logs
+                        var pct = (int)Math.Round(estimatedProgress * 100);
+                        var logMessage = string.IsNullOrWhiteSpace(summary)
+                            ? $"Progress: {pct}%"
+                            : $"Progress: {pct}% — {summary}";
+                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMessage);
+                    };
+
+                    // Tool-call logger: writes each tool invocation as a detailed log entry
+                    PhaseToolCallLogger onToolCall = async (toolName, resultSnippet) =>
+                    {
+                        var logMsg = $"Tool: {toolName} → {resultSnippet}";
+                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMsg, isDetailed: true);
                     };
 
                     var maxTokens = GetMaxTokensForRole(role);
                     var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress, externalCancellation);
+                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress, onToolCall, externalCancellation);
                     var phaseEnd = DateTime.UtcNow;
 
                     // Persist the phase result
@@ -502,6 +516,12 @@ public class AgentOrchestrationService(
             catch (Exception pushEx)
             {
                 logger.LogWarning(pushEx, "Final push failed (changes may already be pushed)");
+            }
+
+            // Mark the draft PR as ready for review
+            if (prNumber > 0)
+            {
+                await MarkPullRequestReadyAsync(accessToken, repoFullName, prNumber, externalCancellation);
             }
 
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
@@ -811,7 +831,7 @@ public class AgentOrchestrationService(
     /// Writes a log entry to the database for real-time pipeline observability.
     /// </summary>
     private static async Task WriteLogEntryAsync(
-        FleetDbContext scopedDb, string projectId, string agent, string level, string message)
+        FleetDbContext scopedDb, string projectId, string agent, string level, string message, bool isDetailed = false)
     {
         scopedDb.LogEntries.Add(new LogEntry
         {
@@ -819,6 +839,7 @@ public class AgentOrchestrationService(
             Agent = agent,
             Level = level,
             Message = message,
+            IsDetailed = isDetailed,
             ProjectId = projectId,
         });
         await scopedDb.SaveChangesAsync();
@@ -881,7 +902,7 @@ public class AgentOrchestrationService(
     /// Creates an initial marker commit and pushes the branch so the PR can be opened.
     /// Agents push subsequent commits throughout development — the PR updates automatically.
     /// </summary>
-    private async Task<string?> OpenDraftPullRequestAsync(
+    private async Task<(string? Url, int Number)> OpenDraftPullRequestAsync(
         IRepoSandbox sandbox, string accessToken, string repoFullName,
         WorkItemDto workItem, FleetDbContext scopedDb, string executionId,
         CancellationToken cancellationToken)
@@ -931,7 +952,7 @@ public class AgentOrchestrationService(
             {
                 logger.LogWarning("Failed to open draft PR: {Status} — {Body}",
                     prResponse.StatusCode, prResponseBody);
-                return null;
+                return (null, 0);
             }
 
             var prResult = JsonSerializer.Deserialize<JsonElement>(prResponseBody);
@@ -948,12 +969,43 @@ public class AgentOrchestrationService(
                 await scopedDb.SaveChangesAsync(cancellationToken);
             }
 
-            return prUrl;
+            return (prUrl, prNumber);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to open draft PR for branch {Branch}", sandbox.BranchName);
-            return null;
+            return (null, 0);
+        }
+    }
+
+    /// <summary>
+    /// Marks a draft pull request as ready for review.
+    /// </summary>
+    private async Task MarkPullRequestReadyAsync(
+        string accessToken, string repoFullName, int prNumber, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient("GitHub");
+            var payload = JsonSerializer.Serialize(new { draft = false });
+
+            using var request = new HttpRequestMessage(HttpMethod.Patch,
+                $"https://api.github.com/repos/{repoFullName}/pulls/{prNumber}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            using var response = await client.SendAsync(request, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+                logger.LogInformation("Marked PR #{PrNumber} as ready for review", prNumber);
+            else
+                logger.LogWarning("Failed to mark PR #{PrNumber} as ready: {Status}",
+                    prNumber, response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to mark PR #{PrNumber} as ready for review (non-fatal)", prNumber);
         }
     }
 

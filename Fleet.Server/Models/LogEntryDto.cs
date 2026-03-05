@@ -4,5 +4,6 @@ public record LogEntryDto(
     string Time,
     string Agent,
     string Level,
-    string Message
+    string Message,
+    bool IsDetailed = false
 );

@@ -38,6 +38,7 @@ public class AgentPhaseRunner(
         string? modelOverride = null,
         int? maxTokens = null,
         PhaseProgressCallback? onProgress = null,
+        PhaseToolCallLogger? onToolCall = null,
         CancellationToken cancellationToken = default)
     {
         var model = modelOverride ?? llmOptions.Value.GenerateModel;
@@ -124,6 +125,14 @@ public class AgentPhaseRunner(
                                 ToolCallId = toolCall.Id,
                                 ToolName = toolCall.Name,
                             });
+
+                            // Log tool call as detailed entry (skip report_progress — it has its own log)
+                            if (onToolCall is not null && !toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var snippet = toolResult.Length > 200 ? toolResult[..200] + "…" : toolResult;
+                                try { await onToolCall(toolCall.Name, snippet); }
+                                catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
+                            }
                         }
 
                         // Report progress once for the whole parallel batch
@@ -163,6 +172,14 @@ public class AgentPhaseRunner(
                                 ToolCallId = toolCall.Id,
                                 ToolName = toolCall.Name,
                             });
+
+                            // Log tool call as detailed entry (skip report_progress — it has its own log)
+                            if (onToolCall is not null && !toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var snippet = toolResult.Length > 200 ? toolResult[..200] + "…" : toolResult;
+                                try { await onToolCall(toolCall.Name, snippet); }
+                                catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
+                            }
 
                             if (onProgress is not null && toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
                             {
