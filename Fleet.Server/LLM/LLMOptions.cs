@@ -10,7 +10,7 @@ public class LLMOptions
     /// <summary>Default model used for normal chat (e.g., claude-haiku-4-20250514).</summary>
     public string Model { get; set; } = "claude-haiku-4-20250514";
     /// <summary>Stronger model used for work-item generation (e.g., claude-sonnet-4-20250514).</summary>
-    public string GenerateModel { get; set; } = "claude-sonnet-4-20250514";
+    public string GenerateModel { get; set; } = "claude-haiku-4-20250514";
     public int MaxToolLoops { get; set; } = 25;
     public int MaxToolCallsTotal { get; set; } = 50;
     public int TimeoutSeconds { get; set; } = 180;

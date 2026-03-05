@@ -19,7 +19,7 @@ import {
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useCurrentProject, usePreferences } from '../../hooks'
+import { useCurrentProject, usePreferences, ChatGeneratingProvider } from '../../hooks'
 
 import type { NavItemConfig } from '../../models'
 
@@ -295,39 +295,41 @@ export function Layout() {
                 </nav>
             }
             second={
-                <div className={styles.content}>
-                    <TopBar
-                        breadcrumbs={breadcrumbs}
-                        sidebarExpanded={sidebarExpanded}
-                        onExpandSidebar={() => setSidebarExpanded(true)}
-                        chatOpen={chatOpen}
-                        onToggleChat={() => setChatOpen((prev) => !prev)}
-                    />
+                <ChatGeneratingProvider>
+                    <div className={styles.content}>
+                        <TopBar
+                            breadcrumbs={breadcrumbs}
+                            sidebarExpanded={sidebarExpanded}
+                            onExpandSidebar={() => setSidebarExpanded(true)}
+                            chatOpen={chatOpen}
+                            onToggleChat={() => setChatOpen((prev) => !prev)}
+                        />
 
-                    <div className={chatOpen && projectId ? styles.contentWithChat : styles.mainContent}>
-                        <div className={styles.mainContent}>
-                            <Outlet />
-                        </div>
-                        {chatOpen && projectId && (
-                            <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
-                                <div
-                                    className={mergeClasses(
-                                        styles.resizeHandle,
-                                        isResizing.current ? styles.resizeHandleActive : undefined,
-                                    )}
-                                    onMouseDown={handleResizeStart}
-                                    role="separator"
-                                    aria-orientation="vertical"
-                                    aria-label="Resize chat pane"
-                                />
-                                <ChatDrawer
-                                    projectId={projectId}
-                                    onClose={() => setChatOpen(false)}
-                                />
+                        <div className={chatOpen && projectId ? styles.contentWithChat : styles.mainContent}>
+                            <div className={styles.mainContent}>
+                                <Outlet />
                             </div>
-                        )}
+                            {chatOpen && projectId && (
+                                <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
+                                    <div
+                                        className={mergeClasses(
+                                            styles.resizeHandle,
+                                            isResizing.current ? styles.resizeHandleActive : undefined,
+                                        )}
+                                        onMouseDown={handleResizeStart}
+                                        role="separator"
+                                        aria-orientation="vertical"
+                                        aria-label="Resize chat pane"
+                                    />
+                                    <ChatDrawer
+                                        projectId={projectId}
+                                        onClose={() => setChatOpen(false)}
+                                    />
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
+                </ChatGeneratingProvider>
             }
         />
     )

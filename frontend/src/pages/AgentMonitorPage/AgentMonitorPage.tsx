@@ -26,7 +26,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
 import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution } from '../../proxies'
-import { useCurrentProject } from '../../hooks'
+import { useCurrentProject, useChatGenerating } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -92,9 +92,10 @@ const useStyles = makeStyles({
 export function AgentMonitorPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
+    const { isGenerating } = useChatGenerating()
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
-    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
+    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
     const startExecution = useStartExecution(projectId)
     const cancelExecution = useCancelExecution(projectId)
     const pauseExecution = usePauseExecution(projectId)

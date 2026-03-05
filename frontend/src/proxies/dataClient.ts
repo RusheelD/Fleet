@@ -131,8 +131,10 @@ export function useDeleteProject() {
 
 // ── Work Items ────────────────────────────────────────────
 
-export function useWorkItems(projectId: string | undefined) {
-  return useDataQuery('work-items', () => getWorkItems(projectId!), [projectId])
+export function useWorkItems(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
+  return useDataQuery('work-items', () => getWorkItems(projectId!), [projectId], [], {
+    refetchInterval: options?.pollingInterval,
+  })
 }
 
 // ── Work Item Levels ──────────────────────────────────────

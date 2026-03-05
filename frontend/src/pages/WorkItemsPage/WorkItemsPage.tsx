@@ -29,7 +29,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
 import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
-import { useCurrentProject } from '../../hooks'
+import { useCurrentProject, useChatGenerating } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'Resolved', 'Closed']
@@ -127,7 +127,8 @@ function isFiltered(filters: WorkItemFilters): boolean {
 export function WorkItemsPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
-    const { data: workItems, isLoading } = useWorkItems(projectId)
+    const { isGenerating } = useChatGenerating()
+    const { data: workItems, isLoading } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
     const { data: levels } = useWorkItemLevels(projectId)
     const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)

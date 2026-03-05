@@ -10,6 +10,7 @@ import {
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession,
     sendChatMessage,
 } from '../../proxies'
+import { useChatGenerating } from '../../hooks'
 import type { ChatMessageData, SendMessageResponse } from '../../models'
 
 const useStyles = makeStyles({
@@ -49,7 +50,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [isThinking, setIsThinking] = useState(false)
-    const [isGenerating, setIsGenerating] = useState(false)
+    const { isGenerating, setIsGenerating } = useChatGenerating()
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -131,6 +132,9 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                 setLastSendResponse(response)
                 void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+                if (generateWorkItems) {
+                    void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+                }
             })
             .catch(() => {
                 setIsThinking(false)

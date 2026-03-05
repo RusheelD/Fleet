@@ -127,7 +127,13 @@ public class ChatService(
             includeWriteTools: generateWorkItems,
             bulkOnly: generateWorkItems);
 
-        // 4. Run the tool-calling loop with safety limits
+        // 4. Auto-name the session before generation starts (fast Haiku call)
+        if (generateWorkItems)
+        {
+            await GenerateSessionNameAsync(sessionId, llmMessages, config);
+        }
+
+        // 5. Run the tool-calling loop with safety limits
         var toolEvents = new List<ToolEventDto>();
         var userId = (await authService.GetCurrentUserIdAsync()).ToString();
         var toolContext = new ChatToolContext(projectId, userId);
@@ -238,6 +244,50 @@ public class ChatService(
     }
 
     // ── Helpers ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Calls Haiku to generate a concise name for the chat session based on conversation context,
+    /// then persists it. Failures are logged but do not propagate — naming is best-effort.
+    /// </summary>
+    private async Task GenerateSessionNameAsync(string sessionId, List<LLMMessage> conversationMessages, LLMOptions config)
+    {
+        try
+        {
+            var namingPrompt = "Based on the conversation so far, generate a short descriptive name (3-6 words) for this chat session. " +
+                "The name should capture the main topic or purpose. Respond with ONLY the name — no quotes, no punctuation, no explanation.";
+
+            // Use a small slice of the conversation for naming context (first few + last few messages)
+            var contextMessages = conversationMessages
+                .Where(m => m.Role is "user" or "assistant")
+                .Take(6)
+                .ToList();
+
+            contextMessages.Add(new LLMMessage { Role = "user", Content = namingPrompt });
+
+            var request = new LLMRequest(
+                "You are a helpful assistant that generates concise chat session names.",
+                contextMessages,
+                Tools: null,
+                ModelOverride: config.Model); // Use Haiku for speed
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var response = await llmClient.CompleteAsync(request, cts.Token);
+
+            var name = response.Content?.Trim();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                // Cap at 60 chars to keep UI tidy
+                if (name.Length > 60)
+                    name = name[..60];
+
+                await chatSessionRepository.RenameSessionAsync(sessionId, name);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to auto-name chat session {SessionId}", sessionId.SanitizeForLogging());
+        }
+    }
 
     private async Task<string> ExecuteToolAsync(
         LLMToolCall toolCall, ChatToolContext context, LLMOptions config,
