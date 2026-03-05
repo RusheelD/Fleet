@@ -46,6 +46,7 @@ interface ChatDrawerProps {
 
 export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const styles = useStyles()
+    const queryClient = useQueryClient()
     const [message, setMessage] = useState('')
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
@@ -55,7 +56,9 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
-    const { data: messages } = useChatMessages(projectId, activeSession)
+    const { data: messages } = useChatMessages(projectId, activeSession, {
+        pollingInterval: isThinking ? 3_000 : false,
+    })
     const createSessionMutation = useCreateChatSession(projectId)
     const deletSessionMutation = useDeleteSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
@@ -64,6 +67,36 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
 
     const sessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     const serverMessages = useMemo(() => messages ?? chatData?.messages ?? [], [messages, chatData?.messages])
+
+    // Detect if the active session has a pending generate on the server (e.g. after page refresh)
+    const activeSessionData = useMemo(
+        () => sessions.find(s => s.id === activeSession),
+        [sessions, activeSession]
+    )
+
+    // Restore thinking/generating state from the server flag on mount or session switch
+    useEffect(() => {
+        if (activeSessionData?.isGenerating && !isThinking) {
+            setIsThinking(true)
+            setIsGenerating(true)
+        }
+    }, [activeSessionData?.isGenerating, activeSession]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // When polling picks up the assistant response, clear thinking/generating
+    useEffect(() => {
+        if (!isThinking) return
+        const lastMsg = serverMessages[serverMessages.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+            setIsThinking(false)
+            setIsGenerating(false)
+            setOptimisticMessages([])
+            // Refresh related data now that the generate is complete
+            void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+            if (isGenerating) {
+                void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+            }
+        }
+    }, [serverMessages, isThinking]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Only show optimistic messages that haven't yet appeared in server data
     const displayMessages = useMemo(() => {
@@ -96,8 +129,6 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             setOptimisticMessages([])
         }
     }, [serverMessages.length, isThinking, optimisticMessages.length])
-
-    const queryClient = useQueryClient()
 
     const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
         setMessage('')

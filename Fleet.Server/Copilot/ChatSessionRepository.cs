@@ -22,7 +22,7 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
             .Where(s => s.ProjectId == projectId)
             .ToListAsync();
 
-        return entities.Select(s => new ChatSessionDto(s.Id, s.Title, s.LastMessage, s.Timestamp, s.IsActive)).ToList();
+        return entities.Select(s => new ChatSessionDto(s.Id, s.Title, s.LastMessage, s.Timestamp, s.IsActive, s.IsGenerating)).ToList();
     }
 
     public async Task<IReadOnlyList<ChatMessageDto>> GetMessagesBySessionIdAsync(string projectId, string sessionId)
@@ -62,7 +62,7 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         context.ChatSessions.Add(entity);
         await context.SaveChangesAsync();
 
-        return new ChatSessionDto(entity.Id, entity.Title, entity.LastMessage, entity.Timestamp, entity.IsActive);
+        return new ChatSessionDto(entity.Id, entity.Title, entity.LastMessage, entity.Timestamp, entity.IsActive, entity.IsGenerating);
     }
 
     public async Task<bool> RenameSessionAsync(string sessionId, string title)
@@ -110,6 +110,16 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         await context.SaveChangesAsync();
 
         return new ChatMessageDto(entity.Id, entity.Role, entity.Content, entity.Timestamp);
+    }
+
+    public async Task SetSessionGeneratingAsync(string sessionId, bool isGenerating)
+    {
+        var session = await context.ChatSessions.FindAsync(sessionId);
+        if (session is not null)
+        {
+            session.IsGenerating = isGenerating;
+            await context.SaveChangesAsync();
+        }
     }
 
     // ── Attachments ──────────────────────────────────────────

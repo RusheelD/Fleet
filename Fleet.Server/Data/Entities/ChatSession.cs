@@ -8,6 +8,9 @@ public class ChatSession
     public string Timestamp { get; set; } = string.Empty;
     public bool IsActive { get; set; }
 
+    /// <summary>True while a generate-work-items request is in-flight for this session.</summary>
+    public bool IsGenerating { get; set; }
+
     // Foreign key
     public string ProjectId { get; set; } = string.Empty;
     public Project Project { get; set; } = null!;

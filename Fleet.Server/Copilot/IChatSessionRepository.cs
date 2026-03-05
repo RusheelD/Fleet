@@ -11,6 +11,7 @@ public interface IChatSessionRepository
     Task<bool> RenameSessionAsync(string sessionId, string title);
     Task<bool> DeleteSessionAsync(string sessionId);
     Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content);
+    Task SetSessionGeneratingAsync(string sessionId, bool isGenerating);
 
     // Attachments
     Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content);

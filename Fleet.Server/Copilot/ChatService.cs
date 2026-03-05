@@ -103,6 +103,10 @@ public class ChatService(
         // 1. Persist the user message
         var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
 
+        // 1a. Mark session as generating so the UI shows a spinner on refresh
+        if (generateWorkItems)
+            await chatSessionRepository.SetSessionGeneratingAsync(sessionId, true);
+
         // 2. Load full session history for context
         var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
         var llmMessages = history.Select(ToLLMMessage).ToList();
@@ -159,6 +163,7 @@ public class ChatService(
                 logger.CopilotLlmTimeout(timeoutSeconds);
                 var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
+                await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
                 return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
             }
             catch (Exception ex)
@@ -167,6 +172,7 @@ public class ChatService(
                 var assistantError = BuildAssistantErrorMessage(ex);
                 var errorMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantError);
+                await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
                 return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
             }
 
@@ -232,6 +238,7 @@ public class ChatService(
 
             logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
+            await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
             return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
         }
 
@@ -240,10 +247,28 @@ public class ChatService(
         var fallbackMsg = await chatSessionRepository.AddMessageAsync(
             projectId, sessionId, "assistant",
             "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
+        await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
         return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
     }
 
     // ── Helpers ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Clears the IsGenerating flag on the session when a generate request completes.
+    /// Best-effort — failures are logged but do not propagate.
+    /// </summary>
+    private async Task ClearGeneratingFlagAsync(string sessionId, bool wasGenerating)
+    {
+        if (!wasGenerating) return;
+        try
+        {
+            await chatSessionRepository.SetSessionGeneratingAsync(sessionId, false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to clear IsGenerating flag for session {SessionId}", sessionId.SanitizeForLogging());
+        }
+    }
 
     /// <summary>
     /// Calls Haiku to generate a concise name for the chat session based on conversation context,

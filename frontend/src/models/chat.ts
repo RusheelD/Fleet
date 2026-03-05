@@ -11,6 +11,7 @@ export interface ChatSessionData {
   lastMessage: string
   timestamp: string
   isActive: boolean
+  isGenerating: boolean
 }
 
 export interface ChatData {

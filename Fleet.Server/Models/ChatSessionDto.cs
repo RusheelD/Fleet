@@ -5,5 +5,6 @@ public record ChatSessionDto(
     string Title,
     string LastMessage,
     string Timestamp,
-    bool IsActive
+    bool IsActive,
+    bool IsGenerating = false
 );

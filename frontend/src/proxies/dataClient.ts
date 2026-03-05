@@ -196,8 +196,10 @@ export function useChatData(projectId: string | undefined) {
   return useDataQuery('chat-data', () => getChatData(projectId!), [projectId])
 }
 
-export function useChatMessages(projectId: string | undefined, sessionId: string | undefined) {
-  return useDataQuery('chat-messages', () => getMessages(projectId!, sessionId!), [projectId, sessionId])
+export function useChatMessages(projectId: string | undefined, sessionId: string | undefined, options?: { pollingInterval?: number | false }) {
+  return useDataQuery('chat-messages', () => getMessages(projectId!, sessionId!), [projectId, sessionId], [], {
+    refetchInterval: options?.pollingInterval,
+  })
 }
 
 // ── Search ────────────────────────────────────────────────
