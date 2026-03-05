@@ -20,6 +20,7 @@ public interface IAgentPhaseRunner
     /// <param name="userMessage">The user-level instruction (work item context + previous phase outputs).</param>
     /// <param name="toolContext">Shared context with sandbox, credentials, etc.</param>
     /// <param name="modelOverride">Optional model override (e.g., opus for complex tasks). Uses GenerateModel if null.</param>
+    /// <param name="maxTokens">Optional max output tokens. Uses the provider default (16384) if null.</param>
     /// <param name="onProgress">Optional callback invoked after every few tool calls to report live progress.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The phase result including the final LLM output.</returns>
@@ -28,6 +29,7 @@ public interface IAgentPhaseRunner
         string userMessage,
         AgentToolContext toolContext,
         string? modelOverride = null,
+        int? maxTokens = null,
         PhaseProgressCallback? onProgress = null,
         CancellationToken cancellationToken = default);
 }

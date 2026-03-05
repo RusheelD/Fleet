@@ -17,13 +17,14 @@ public class AgentOrchestrationService(
     IConnectionRepository connectionRepository,
     IWorkItemRepository workItemRepository,
     IServiceScopeFactory serviceScopeFactory,
+    ILLMClient llmClient,
     ILogger<AgentOrchestrationService> logger,
     IModelCatalog modelCatalog) : IAgentOrchestrationService
 {
     /// <summary>
     /// The ordered pipeline phases. Implementation phases run sequentially within their group.
     /// </summary>
-    private static readonly AgentRole[][] Pipeline =
+    private static readonly AgentRole[][] FullPipeline =
     [
         // Phase 1 — Planning
         [AgentRole.Planner],
@@ -36,6 +37,54 @@ public class AgentOrchestrationService(
         // Phase 5 — Review & documentation
         [AgentRole.Review, AgentRole.Documentation],
     ];
+
+    /// <summary>
+    /// Returns a reduced pipeline based on how hard the work is.
+    /// Difficulty 1-2: Planner → Backend → Frontend (lean)
+    /// Difficulty 3:   Planner → Backend → Frontend → Testing → Consolidation
+    /// Difficulty 4+:  Full pipeline
+    /// </summary>
+    private static AgentRole[][] BuildPipeline(int maxDifficulty)
+    {
+        if (maxDifficulty <= 2)
+        {
+            return
+            [
+                [AgentRole.Planner],
+                [AgentRole.Backend, AgentRole.Frontend],
+            ];
+        }
+
+        if (maxDifficulty <= 3)
+        {
+            return
+            [
+                [AgentRole.Planner],
+                [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing],
+                [AgentRole.Consolidation],
+            ];
+        }
+
+        return FullPipeline;
+    }
+
+    /// <summary>
+    /// Max output tokens per agent role. Lightweight roles get fewer tokens;
+    /// implementation roles get more to accommodate code generation.
+    /// </summary>
+    private static int GetMaxTokensForRole(AgentRole role) => role switch
+    {
+        AgentRole.Planner => 4096,
+        AgentRole.Review => 4096,
+        AgentRole.Documentation => 4096,
+        AgentRole.Contracts => 8192,
+        AgentRole.Backend => 16384,
+        AgentRole.Frontend => 16384,
+        AgentRole.Testing => 8192,
+        AgentRole.Styling => 8192,
+        AgentRole.Consolidation => 8192,
+        _ => 8192,
+    };
 
     public async Task<string> StartExecutionAsync(
         string projectId, int workItemNumber, int userId, CancellationToken cancellationToken = default)
@@ -69,18 +118,17 @@ public class AgentOrchestrationService(
         var accessToken = linkedAccount.AccessToken;
         var repoFullName = project.Repo;
 
-        // 4. Determine model based on difficulty
-        //    Use opus when sum of difficulties > 15 or any individual difficulty is 5
+        // 4. Determine difficulty and build the pipeline
+        //    Always use Haiku for cost savings.
         var allDifficulties = new List<int> { workItem.Difficulty };
         allDifficulties.AddRange(childWorkItems.Select(c => c.Difficulty));
-        var totalDifficulty = allDifficulties.Sum();
         var maxDifficulty = allDifficulties.Max();
-        var useOpus = totalDifficulty > 15 || maxDifficulty >= 5;
-        var selectedModelKey = useOpus ? ModelKeys.Opus : ModelKeys.Sonnet;
+        var selectedModelKey = ModelKeys.Haiku;
 
+        var pipeline = BuildPipeline(maxDifficulty);
         logger.LogInformation(
-            "Execution model selection: total difficulty={TotalDifficulty}, max={MaxDifficulty}, useOpus={UseOpus}",
-            totalDifficulty, maxDifficulty, useOpus);
+            "Execution: max difficulty={MaxDifficulty}, model={Model}, phases={PhaseCount}",
+            maxDifficulty, selectedModelKey, pipeline.SelectMany(g => g).Count());
 
         // 5. Create the execution record
         var executionId = Guid.NewGuid().ToString("N")[..12];
@@ -99,7 +147,7 @@ public class AgentOrchestrationService(
             CurrentPhase = "Initializing",
             UserId = userId.ToString(),
             ProjectId = projectId,
-            Agents = BuildAgentInfoList(),
+            Agents = BuildAgentInfoList(pipeline),
         };
 
         db.AgentExecutions.Add(execution);
@@ -117,10 +165,10 @@ public class AgentOrchestrationService(
             $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}");
 
         // 8. Fire-and-forget the pipeline on a background thread
-        //    We use IServiceProvider to create a new scope so the DbContext isn't shared.
+        //    We use IServiceScopeFactory (singleton) to create a new scope so the DbContext isn't shared.
         _ = Task.Run(() => RunPipelineAsync(
             executionId, projectId, workItem, childWorkItems, repoFullName,
-            accessToken, branchName, userId, selectedModelKey), CancellationToken.None);
+            accessToken, branchName, userId, selectedModelKey, pipeline), CancellationToken.None);
 
         return executionId;
     }
@@ -149,7 +197,7 @@ public class AgentOrchestrationService(
         string executionId, string projectId, Models.WorkItemDto workItem,
         List<Models.WorkItemDto> childWorkItems,
         string repoFullName, string accessToken, string branchName,
-        int userId, string selectedModelKey)
+        int userId, string selectedModelKey, AgentRole[][] pipeline)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
         // The HTTP request scope is disposed after the controller returns Accepted(),
@@ -181,11 +229,11 @@ public class AgentOrchestrationService(
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
             var phaseOutputs = new List<(AgentRole Role, string Output)>();
 
-            var totalRoles = Pipeline.SelectMany(g => g).Count();
+            var totalRoles = pipeline.SelectMany(g => g).Count();
             var completedRoles = 0;
             var phaseOrder = 0;
 
-            foreach (var group in Pipeline)
+            foreach (var group in pipeline)
             {
                 foreach (var role in group)
                 {
@@ -229,8 +277,9 @@ public class AgentOrchestrationService(
                         await scopedDb.SaveChangesAsync();
                     };
 
+                    var maxTokens = GetMaxTokensForRole(role);
                     var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, onProgress);
+                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress);
                     var phaseEnd = DateTime.UtcNow;
 
                     // Persist the phase result
@@ -269,7 +318,10 @@ public class AgentOrchestrationService(
                         // Continue — downstream phases can still attempt recovery
                     }
 
-                    phaseOutputs.Add((role, result.Output));
+                    // Summarize the phase output before passing to downstream phases.
+                    // The full output is already saved to AgentPhaseResult above for debugging.
+                    var summarized = await SummarizePhaseOutputAsync(role, result.Output);
+                    phaseOutputs.Add((role, summarized));
                     completedRoles++;
                 }
             }
@@ -395,13 +447,20 @@ public class AgentOrchestrationService(
 
         sb.AppendLine($"You are the **{role}** agent. Execute your role as described in your system prompt.");
         sb.AppendLine("Use your tools to explore the repository, understand the codebase, and make the necessary changes.");
+        sb.AppendLine();
+        sb.AppendLine("**IMPORTANT — Cost Constraints:**");
+        sb.AppendLine("- Be extremely concise in your reasoning and output. No filler, no restating the problem.");
+        sb.AppendLine("- Return ONLY the essential information: files changed, key decisions, errors, and instructions for the next phase.");
+        sb.AppendLine("- Do NOT echo file contents you read — summarize what you learned in 1-2 sentences.");
+        sb.AppendLine("- When writing code, write only the changed/new code — do not repeat unchanged sections.");
+        sb.AppendLine("- Minimize tool calls: batch reads where possible, plan before acting.");
 
         return sb.ToString();
     }
 
-    private static List<AgentInfo> BuildAgentInfoList()
+    private static List<AgentInfo> BuildAgentInfoList(AgentRole[][] pipeline)
     {
-        return Pipeline.SelectMany(g => g).Select(role => new AgentInfo
+        return pipeline.SelectMany(g => g).Select(role => new AgentInfo
         {
             Role = role.ToString(),
             Status = "idle",
@@ -412,8 +471,50 @@ public class AgentOrchestrationService(
 
     private static class ModelKeys
     {
-        public const string Opus = "Opus";
+        public const string Haiku = "Haiku";
         public const string Sonnet = "Sonnet";
+        public const string Opus = "Opus";
+    }
+
+    /// <summary>
+    /// Summarizes a phase's output into a compact form using a cheap Haiku call.
+    /// This dramatically reduces the context window size for downstream phases,
+    /// cutting token costs proportionally to the number of phases.
+    /// </summary>
+    private async Task<string> SummarizePhaseOutputAsync(
+        AgentRole role, string fullOutput, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(fullOutput) || fullOutput.Length < 500)
+            return fullOutput; // Not worth summarizing tiny outputs
+
+        var summaryModel = modelCatalog.Get(ModelKeys.Haiku);
+        var systemPrompt =
+            "You are a concise technical summarizer. Summarize the given agent phase output into a compact form " +
+            "that preserves ALL actionable information: files changed, APIs added/modified, key decisions, " +
+            "errors encountered, and any instructions for subsequent phases. " +
+            "Omit verbose reasoning, repeated tool calls, and file contents that were only read (not written). " +
+            "Use bullet points. Be extremely concise — aim for under 500 words.";
+
+        var messages = new List<LLMMessage>
+        {
+            new()
+            {
+                Role = "user",
+                Content = $"Summarize this {role} phase output:\n\n{fullOutput}",
+            }
+        };
+
+        try
+        {
+            var request = new LLMRequest(systemPrompt, messages, MaxTokens: 1024, ModelOverride: summaryModel);
+            var response = await llmClient.CompleteAsync(request, cancellationToken);
+            return response.Content ?? fullOutput;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to summarize {Role} phase output; using full output", role);
+            return fullOutput;
+        }
     }
 
     private static async Task UpdateExecutionAsync(

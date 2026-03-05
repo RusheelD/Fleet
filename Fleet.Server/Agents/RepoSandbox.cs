@@ -404,16 +404,26 @@ public class RepoSandbox : IRepoSandbox
 
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)
     {
+        // Prepend flags that disable all credential helpers and interactive prompts.
+        // Without this, Git Credential Manager (GCM) on Windows opens a browser/dialog
+        // asking the user to pick an account — which blocks headless server execution.
+        var fullArgs = $"-c credential.helper= {arguments}";
+
         var psi = new ProcessStartInfo
         {
             FileName = "git",
-            Arguments = arguments,
+            Arguments = fullArgs,
             WorkingDirectory = workingDir ?? _repoRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        // Prevent any interactive credential prompt from GCM or git itself
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        psi.Environment["GCM_INTERACTIVE"] = "never";
+        psi.Environment["GIT_ASKPASS"] = "";
 
         using var process = new Process { StartInfo = psi };
         var stdout = new StringBuilder();

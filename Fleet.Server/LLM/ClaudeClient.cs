@@ -41,6 +41,8 @@ public class ClaudeClient(
         };
         httpRequest.Headers.Add("x-api-key", config.ApiKey);
         httpRequest.Headers.Add("anthropic-version", AnthropicVersion);
+        // Enable prompt caching — caches system prompt, tool schemas, and marked user content
+        httpRequest.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
 
         using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken);
         var responseBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
@@ -62,7 +64,7 @@ public class ClaudeClient(
         var body = new JsonObject
         {
             ["model"] = model,
-            ["max_tokens"] = MaxTokens,
+            ["max_tokens"] = request.MaxTokens ?? MaxTokens,
         };
 
         // System prompt — use structured format with cache_control for prompt caching
@@ -80,7 +82,7 @@ public class ClaudeClient(
         }
 
         // Messages
-        body["messages"] = BuildMessages(request.Messages);
+        body["messages"] = BuildMessages(request.Messages, request.CacheFirstUserMessage);
 
         // Tools
         if (request.Tools is { Count: > 0 })
@@ -106,6 +108,14 @@ public class ClaudeClient(
 
                 tools.Add(toolObj);
             }
+
+            // Mark the last tool definition with cache_control so the entire tool
+            // schema block is cached on subsequent calls within the TTL.
+            if (tools.Count > 0 && tools[^1] is JsonObject lastTool)
+            {
+                lastTool["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
+            }
+
             body["tools"] = tools;
         }
 
@@ -116,12 +126,15 @@ public class ClaudeClient(
     /// Converts normalized messages to Claude's message format.
     /// Claude requires strictly alternating user/assistant roles.
     /// Tool results are sent as user messages with tool_result content blocks.
+    /// When <paramref name="cacheFirstUser"/> is true, marks the last content block
+    /// of the first user message with cache_control so the provider caches it.
     /// </summary>
-    private static JsonArray BuildMessages(IReadOnlyList<LLMMessage> messages)
+    private static JsonArray BuildMessages(IReadOnlyList<LLMMessage> messages, bool cacheFirstUser = false)
     {
         var result = new JsonArray();
         JsonObject? current = null;
         string? currentRole = null;
+        var firstUserDone = false;
 
         foreach (var msg in messages)
         {
@@ -148,6 +161,18 @@ public class ClaudeClient(
                 };
                 currentRole = role;
                 result.Add(current);
+            }
+
+            // Mark the last content block of the first user message with cache_control
+            // so the stable work-item context is cached across tool-loop iterations.
+            if (cacheFirstUser && role == "user" && !firstUserDone && current is not null)
+            {
+                firstUserDone = true;
+                var arr = current["content"]!.AsArray();
+                if (arr.Count > 0 && arr[^1] is JsonObject lastBlock)
+                {
+                    lastBlock["cache_control"] = new JsonObject { ["type"] = "ephemeral" };
+                }
             }
         }
 
@@ -204,6 +229,8 @@ public class ClaudeClient(
                     ["type"] = "tool_result",
                     ["tool_use_id"] = msg.ToolCallId ?? "",
                     ["content"] = msg.Content ?? "",
+                    // Cache every tool result so each iteration reuses the full prior conversation.
+                    ["cache_control"] = new JsonObject { ["type"] = "ephemeral" },
                 });
                 return ("user", blocks);
 

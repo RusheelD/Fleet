@@ -94,3 +94,13 @@ For each file:
 - Do not remove or override existing styles for components outside your scope
 - Do not create styles that only work in one theme (e.g., light mode only)
 - Do not add decorative animations that serve no UX purpose
+
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful unit of progress (styled component, responsive layout fix, theme update), commit immediately.
+- Use short, descriptive commit messages: `Style ProjectCard with design tokens`, `Add responsive layout for work items page`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to a new sub-task.

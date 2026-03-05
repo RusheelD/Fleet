@@ -95,3 +95,13 @@ Any choices made that weren't specified in the plan:
 - Do not introduce new libraries or frameworks unless the plan explicitly calls for it
 - Do not make database schema changes that aren't covered by the plan
 - Do not hardcode secrets, credentials, or environment-specific values
+
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful unit of progress (new file, completed method, passing build), commit immediately.
+- Use short, descriptive commit messages: `Add ProjectService with CRUD methods`, `Wire DI registrations in Program.cs`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to a new sub-task.

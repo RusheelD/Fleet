@@ -96,3 +96,13 @@ Which plan sub-tasks and acceptance criteria each test covers:
 - Do not write tests that are tightly coupled to implementation details (mocking internal methods, asserting on private state)
 - Do not leave failing tests without documenting why they fail
 - Do not modify existing tests unless the plan explicitly changes the tested behavior
+
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful unit of progress (new test file, completed test suite for a service), commit immediately.
+- Use short, descriptive commit messages: `Add ProjectService unit tests`, `Add API integration tests for work items`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to a new sub-task.

@@ -9,6 +9,7 @@ import {
     Badge,
     Divider,
     ProgressBar,
+    Spinner,
     Toast,
     ToastTitle,
     useToastController,
@@ -16,7 +17,6 @@ import {
     Toaster,
 } from '@fluentui/react-components'
 import {
-    BotRegular,
     PauseRegular,
     StopRegular,
     ArrowClockwiseRegular,
@@ -24,8 +24,11 @@ import {
     CodeRegular,
     DocumentRegular,
     BranchRegular,
+    CheckmarkCircleFilled,
+    DismissCircleFilled,
+    CircleRegular,
 } from '@fluentui/react-icons'
-import type { AgentExecution } from '../../models'
+import type { AgentExecution, AgentInfo } from '../../models'
 
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informative' | 'subtle'> = {
     running: 'warning',
@@ -35,12 +38,32 @@ const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informat
     idle: 'subtle',
 }
 
+/** Format an ISO timestamp into a friendly relative or short string. */
+function formatTimestamp(iso: string): string {
+    try {
+        const date = new Date(iso)
+        const now = new Date()
+        const diffMs = now.getTime() - date.getTime()
+        const diffMin = Math.floor(diffMs / 60_000)
+        if (diffMin < 1) return 'just now'
+        if (diffMin < 60) return `${diffMin}m ago`
+        const diffHr = Math.floor(diffMin / 60)
+        if (diffHr < 24) return `${diffHr}h ago`
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    } catch {
+        return iso
+    }
+}
+
 const useStyles = makeStyles({
     executionCard: {
-        padding: '1rem',
+        paddingTop: tokens.spacingVerticalM,
+        paddingBottom: tokens.spacingVerticalM,
+        paddingLeft: tokens.spacingHorizontalL,
+        paddingRight: tokens.spacingHorizontalL,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.75rem',
+        gap: tokens.spacingVerticalM,
     },
     executionHeader: {
         display: 'flex',
@@ -50,53 +73,131 @@ const useStyles = makeStyles({
     executionTitle: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.125rem',
+        gap: tokens.spacingVerticalXXS,
     },
     flexRowGap: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: tokens.spacingHorizontalS,
     },
-    clockSmallIcon: {
-        fontSize: '10px',
-        marginRight: '0.25rem',
+    metaRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalXS,
+        color: tokens.colorNeutralForeground3,
+    },
+    metaIcon: {
+        fontSize: '12px',
     },
     executionActions: {
         display: 'flex',
-        gap: '0.25rem',
+        gap: tokens.spacingHorizontalXXS,
     },
-    agentsContainer: {
+
+    /* --- Pipeline / agent list --- */
+    pipeline: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: '0px', /* controlled by individual rows */
     },
-    agentRow: {
+    agentStep: {
+        display: 'grid',
+        gridTemplateColumns: '20px 1fr auto',
+        gap: tokens.spacingHorizontalS,
+        alignItems: 'start',
+        paddingTop: tokens.spacingVerticalXS,
+        paddingBottom: tokens.spacingVerticalXS,
+    },
+
+    /* Left gutter: icon + connector line */
+    stepGutter: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '0px',
+        position: 'relative',
+    },
+    stepIcon: {
+        fontSize: '16px',
+        zIndex: 1,
+    },
+    stepIconCompleted: {
+        color: tokens.colorPaletteGreenForeground1,
+    },
+    stepIconRunning: {
+        /* Spinner replaces the icon — no extra colour needed */
+    },
+    stepIconFailed: {
+        color: tokens.colorPaletteRedForeground1,
+    },
+    stepIconIdle: {
+        color: tokens.colorNeutralForeground4,
+    },
+    connector: {
+        width: '2px',
+        flex: 1,
+        minHeight: '8px',
+        backgroundColor: tokens.colorNeutralStroke2,
+        marginTop: '2px',
+    },
+    connectorCompleted: {
+        backgroundColor: tokens.colorPaletteGreenBorder1,
+    },
+
+    /* Center: role + task info */
+    stepBody: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalXXS,
+    },
+    roleName: {
+        lineHeight: '20px',
+    },
+    taskCaption: {
+        color: tokens.colorNeutralForeground3,
+    },
+    taskCaptionRunning: {
+        color: tokens.colorNeutralForeground2,
+    },
+    stepProgress: {
+        maxWidth: '120px',
+        marginTop: tokens.spacingVerticalXXS,
+    },
+
+    /* Right: percentage or badge */
+    stepTrailing: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
-    },
-    agentBotSmall: {
-        fontSize: '16px',
-        color: tokens.colorBrandForeground1,
-    },
-    agentInfo: {
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.25rem',
+        minHeight: '20px',
     },
     progressPercent: {
         fontSize: '11px',
+        fontVariantNumeric: 'tabular-nums',
         color: tokens.colorNeutralForeground3,
     },
+
     completedActions: {
         display: 'flex',
-        gap: '0.5rem',
+        gap: tokens.spacingHorizontalS,
     },
 })
 
 interface ExecutionCardProps {
     execution: AgentExecution
+}
+
+function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
+    const styles = useStyles()
+    switch (status) {
+        case 'completed':
+            return <CheckmarkCircleFilled className={`${styles.stepIcon} ${styles.stepIconCompleted}`} />
+        case 'running':
+            return <Spinner size="extra-tiny" />
+        case 'failed':
+            return <DismissCircleFilled className={`${styles.stepIcon} ${styles.stepIconFailed}`} />
+        default:
+            return <CircleRegular className={`${styles.stepIcon} ${styles.stepIconIdle}`} />
+    }
 }
 
 export function ExecutionCard({ execution }: ExecutionCardProps) {
@@ -111,9 +212,13 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
         )
     }
 
+    const agents = execution.agents
+
     return (
         <Card className={styles.executionCard}>
             <Toaster toasterId={toasterId} />
+
+            {/* ── Header ── */}
             <div className={styles.executionHeader}>
                 <div className={styles.executionTitle}>
                     <div className={styles.flexRowGap}>
@@ -122,11 +227,11 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
                             {execution.status}
                         </Badge>
                     </div>
-                    <Body1>{execution.workItemTitle}</Body1>
-                    <Caption1>
-                        <ClockRegular className={styles.clockSmallIcon} />
-                        Started {execution.startedAt} · {execution.duration}
-                    </Caption1>
+                    <Body1 weight="semibold">{execution.workItemTitle}</Body1>
+                    <div className={styles.metaRow}>
+                        <ClockRegular className={styles.metaIcon} />
+                        <Caption1>Started {formatTimestamp(execution.startedAt)} · {execution.duration}</Caption1>
+                    </div>
                 </div>
                 <div className={styles.executionActions}>
                     {execution.status === 'running' && (
@@ -149,26 +254,52 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
 
             <Divider />
 
-            <div className={styles.agentsContainer}>
-                {execution.agents.map((agent, i) => (
-                    <div key={i} className={styles.agentRow}>
-                        <BotRegular className={styles.agentBotSmall} />
-                        <div className={styles.agentInfo}>
-                            <div className={styles.flexRowGap}>
-                                <Text size={200} weight="semibold">{agent.role}</Text>
-                                <Badge appearance="outline" color={STATUS_COLORS[agent.status]} size="tiny">
-                                    {agent.status}
-                                </Badge>
+            {/* ── Pipeline steps ── */}
+            <div className={styles.pipeline}>
+                {agents.map((agent, i) => {
+                    const isLast = i === agents.length - 1
+                    const isRunning = agent.status === 'running'
+                    const isCompleted = agent.status === 'completed'
+
+                    return (
+                        <div key={agent.role} className={styles.agentStep}>
+                            {/* Gutter: icon + vertical connector */}
+                            <div className={styles.stepGutter}>
+                                <AgentStepIcon status={agent.status} />
+                                {!isLast && (
+                                    <div className={`${styles.connector} ${isCompleted ? styles.connectorCompleted : ''}`} />
+                                )}
                             </div>
-                            <Caption1>{agent.currentTask}</Caption1>
+
+                            {/* Body: role name + current task */}
+                            <div className={styles.stepBody}>
+                                <Text size={200} weight="semibold" className={styles.roleName}>
+                                    {agent.role}
+                                </Text>
+                                <Caption1 className={isRunning ? styles.taskCaptionRunning : styles.taskCaption}>
+                                    {agent.currentTask}
+                                </Caption1>
+                                {isRunning && agent.progress > 0 && (
+                                    <ProgressBar
+                                        className={styles.stepProgress}
+                                        value={agent.progress}
+                                        thickness="medium"
+                                        color="brand"
+                                    />
+                                )}
+                            </div>
+
+                            {/* Trailing: percentage */}
+                            <div className={styles.stepTrailing}>
+                                {isRunning && agent.progress > 0 && agent.progress < 1 && (
+                                    <Text className={styles.progressPercent}>
+                                        {Math.round(agent.progress * 100)}%
+                                    </Text>
+                                )}
+                            </div>
                         </div>
-                        {agent.progress > 0 && agent.progress < 1 && (
-                            <Text className={styles.progressPercent}>
-                                {Math.round(agent.progress * 100)}%
-                            </Text>
-                        )}
-                    </div>
-                ))}
+                    )
+                })}
             </div>
 
             {execution.status === 'completed' && (

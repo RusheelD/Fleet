@@ -103,6 +103,16 @@ Any problems that couldn't be resolved:
 4. **Preserve intent** — Each agent's changes exist for a reason. Do not discard changes unless they're clearly wrong or contradictory.
 5. **Document everything** — Every conflict resolution and integration fix must be documented so Review can evaluate your decisions.
 
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful fix (resolved conflict, build fix, integration patch), commit immediately.
+- Use short, descriptive commit messages: `Fix type mismatch between backend and frontend DTOs`, `Resolve merge conflict in ProjectService`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to the next integration issue.
+
 ## What You Must NOT Do
 
 - Do not add new features or functionality — your job is to merge and integrate

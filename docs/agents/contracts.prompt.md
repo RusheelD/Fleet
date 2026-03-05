@@ -78,3 +78,13 @@ If changes affect existing types:
 - Do not invent API patterns that differ from the project's conventions
 - Do not leave ambiguous types that could be interpreted differently by Backend and Frontend
 - Do not modify unrelated existing contracts outside the scope of the work item
+
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful unit of progress (new interface, completed DTO set, shared types file), commit immediately.
+- Use short, descriptive commit messages: `Add IProjectService interface`, `Define WorkItemDto and CreateWorkItemRequest`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to a new sub-task.

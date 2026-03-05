@@ -17,10 +17,10 @@ public class AgentPhaseRunner(
     ILogger<AgentPhaseRunner> logger) : IAgentPhaseRunner
 {
     /// <summary>Max tool-calling loops per phase.</summary>
-    private const int MaxToolLoops = 200;
+    private const int MaxToolLoops = 50;
 
-    /// <summary>Max total non-write tool calls per phase.</summary>
-    public const int MaxToolCallsTotal = 500;
+    /// <summary>Max total tool calls per phase.</summary>
+    public const int MaxToolCallsTotal = 100;
 
     /// <summary>Timeout per phase (30 minutes).</summary>
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(30);
@@ -33,6 +33,7 @@ public class AgentPhaseRunner(
         string userMessage,
         AgentToolContext toolContext,
         string? modelOverride = null,
+        int? maxTokens = null,
         PhaseProgressCallback? onProgress = null,
         CancellationToken cancellationToken = default)
     {
@@ -59,7 +60,8 @@ public class AgentPhaseRunner(
             for (var loop = 0; loop < MaxToolLoops; loop++)
             {
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
-                var request = new LLMRequest(systemPrompt, messages, toolDefs, model);
+                var request = new LLMRequest(systemPrompt, messages, toolDefs, model, maxTokens,
+                    CacheFirstUserMessage: true);
                 LLMResponse response;
 
                 try

@@ -97,3 +97,13 @@ For each file:
 - Do not change API contracts — implement against what Contracts defined
 - Do not introduce new UI libraries or state management solutions unless the plan explicitly calls for it
 - Do not use inline styles when the project has an established styling system
+
+## Commit Discipline
+
+**Commit early and often.** Your session may be interrupted at any time — uncommitted work is lost work.
+
+- After every meaningful unit of progress (new component, completed page, working integration), commit immediately.
+- Use short, descriptive commit messages: `Add ProjectCard component`, `Wire up work items API call`.
+- Do NOT batch all changes into a single commit at the end — if the session ends early, nothing is saved.
+- A good rhythm: **one commit every 1-3 tool calls** that modify files.
+- Always commit before moving on to a new sub-task.

@@ -135,7 +135,6 @@ builder.Services.AddScoped<IAgentTool, SearchFilesTool>();
 builder.Services.AddScoped<IAgentTool, RunCommandTool>();
 builder.Services.AddScoped<IAgentTool, CreatePullRequestTool>();
 builder.Services.AddScoped<IAgentTool, GetChangeSummaryTool>();
-builder.Services.AddScoped<IAgentTool, FetchWebPageTool>();
 builder.Services.AddScoped<AgentToolRegistry>();
 
 // Agent infrastructure

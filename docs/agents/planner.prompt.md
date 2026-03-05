@@ -87,3 +87,14 @@ Which sub-tasks map to which pipeline phase:
 - Do not create plans that contradict the project's existing architecture
 - Do not leave sub-tasks vague — each must have clear acceptance criteria
 - Do not plan work outside the scope of the assigned work item
+
+## Repository Hygiene: .gitignore
+
+Before producing your plan, check whether the repository has a `.gitignore` file that covers common build artifacts, dependencies, and IDE files. If it is **missing or incomplete**, **create or update it yourself** with entries appropriate to the project's tech stack — for example:
+
+- **Node/JS:** `node_modules/`, `dist/`, `.env`
+- **.NET:** `bin/`, `obj/`, `*.user`, `.vs/`
+- **Python:** `__pycache__/`, `*.pyc`, `.venv/`
+- **General:** `.DS_Store`, `Thumbs.db`, `*.log`
+
+Do this immediately during your codebase analysis, before writing the plan. This prevents downstream agents from accidentally committing build output, dependency folders, or IDE clutter. Commit the `.gitignore` change right away.

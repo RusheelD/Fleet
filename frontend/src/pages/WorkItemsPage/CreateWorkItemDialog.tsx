@@ -26,6 +26,14 @@ const PRIORITY_MAP: Record<string, number> = {
     'P4 — Low': 4,
 }
 
+const DIFFICULTY_MAP: Record<string, number> = {
+    '1 — Trivial': 1,
+    '2 — Easy': 2,
+    '3 — Moderate': 3,
+    '4 — Hard': 4,
+    '5 — Complex': 5,
+}
+
 const AGENT_MAP: Record<string, boolean> = {
     'Auto-detect': true,
     '1 agent': true,
@@ -65,6 +73,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
     const [priorityLabel, setPriorityLabel] = useState('P2 — High')
+    const [difficultyLabel, setDifficultyLabel] = useState('3 — Moderate')
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [agentLabel, setAgentLabel] = useState('Auto-detect')
@@ -78,6 +87,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
         setTitle('')
         setDescription('')
         setPriorityLabel('P2 — High')
+        setDifficultyLabel('3 — Moderate')
         setState('New')
         setTags('')
         setAgentLabel('Auto-detect')
@@ -94,7 +104,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                 title: title.trim(),
                 description: description.trim(),
                 priority: PRIORITY_MAP[priorityLabel] ?? 2,
-                difficulty: 3,
+                difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                 state,
                 assignedTo: agentLabel === 'Manual assignment' ? 'Unassigned' : 'Fleet AI',
                 tags: tags
@@ -165,6 +175,19 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                         <Option>P2 — High</Option>
                                         <Option>P3 — Medium</Option>
                                         <Option>P4 — Low</Option>
+                                    </Dropdown>
+                                </Field>
+                                <Field label="Difficulty">
+                                    <Dropdown
+                                        placeholder="Select difficulty"
+                                        value={difficultyLabel}
+                                        onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? '3 — Moderate')}
+                                    >
+                                        <Option>1 — Trivial</Option>
+                                        <Option>2 — Easy</Option>
+                                        <Option>3 — Moderate</Option>
+                                        <Option>4 — Hard</Option>
+                                        <Option>5 — Complex</Option>
                                     </Dropdown>
                                 </Field>
                                 <Field label="State">
