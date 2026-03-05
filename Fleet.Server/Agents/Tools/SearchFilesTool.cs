@@ -8,6 +8,7 @@ namespace Fleet.Server.Agents.Tools;
 public class SearchFilesTool : IAgentTool
 {
     public string Name => "search_files";
+    public bool IsReadOnly => true;
 
     public string Description =>
         "Search the repository for files containing a text pattern or regex. " +

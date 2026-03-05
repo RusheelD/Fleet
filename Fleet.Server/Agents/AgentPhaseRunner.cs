@@ -28,6 +28,12 @@ public class AgentPhaseRunner(
     /// <summary>How often (in tool calls) to invoke the progress callback.</summary>
     private const int ProgressReportInterval = 3;
 
+    /// <summary>
+    /// Max characters per tool result for agent phases. Lower than the interactive
+    /// chat limit to keep context windows lean and inference fast.
+    /// </summary>
+    private const int AgentMaxToolOutputLength = 12_000;
+
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
         string userMessage,
@@ -89,37 +95,86 @@ public class AgentPhaseRunner(
                         ToolCalls = response.ToolCalls,
                     });
 
-                    foreach (var toolCall in response.ToolCalls)
+                    // Determine if ALL tool calls in this batch are read-only.
+                    // If so, execute them all in parallel for maximum speed.
+                    // Otherwise, fall back to sequential execution to preserve ordering.
+                    var allReadOnly = response.ToolCalls.All(tc =>
                     {
-                        totalToolCalls++;
-                        if (totalToolCalls > MaxToolCallsTotal)
+                        var tool = toolRegistry.Get(tc.Name);
+                        return tool is { IsReadOnly: true };
+                    });
+
+                    if (allReadOnly && response.ToolCalls.Count > 1)
+                    {
+                        // ── Parallel execution for read-only batches ──
+                        var tasks = response.ToolCalls.Select(async toolCall =>
                         {
-                            logger.LogWarning("Phase {Role}: exceeded max tool calls ({Max})",
-                                role, MaxToolCallsTotal);
-                            break;
+                            var result = await ExecuteToolAsync(toolCall, toolContext, cts.Token);
+                            return (toolCall, result);
+                        }).ToList();
+
+                        var results = await Task.WhenAll(tasks);
+
+                        foreach (var (toolCall, toolResult) in results)
+                        {
+                            totalToolCalls++;
+                            if (totalToolCalls > MaxToolCallsTotal) break;
+
+                            messages.Add(new LLMMessage
+                            {
+                                Role = "tool",
+                                Content = toolResult,
+                                ToolCallId = toolCall.Id,
+                                ToolName = toolCall.Name,
+                            });
                         }
 
-                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, cts.Token);
-
-                        // Add tool result to context
-                        messages.Add(new LLMMessage
-                        {
-                            Role = "tool",
-                            Content = toolResult,
-                            ToolCallId = toolCall.Id,
-                            ToolName = toolCall.Name,
-                        });
-
-                        // Report progress periodically so the DB/UI stays up-to-date
-                        if (onProgress is not null && totalToolCalls % ProgressReportInterval == 0)
+                        // Report progress once for the whole parallel batch
+                        if (onProgress is not null && totalToolCalls % ProgressReportInterval < response.ToolCalls.Count)
                         {
                             try
                             {
-                                await onProgress(totalToolCalls, toolCall.Name);
+                                await onProgress(totalToolCalls, $"{response.ToolCalls.Count} parallel reads");
                             }
                             catch (Exception ex)
                             {
                                 logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // ── Sequential execution for write operations ──
+                        foreach (var toolCall in response.ToolCalls)
+                        {
+                            totalToolCalls++;
+                            if (totalToolCalls > MaxToolCallsTotal)
+                            {
+                                logger.LogWarning("Phase {Role}: exceeded max tool calls ({Max})",
+                                    role, MaxToolCallsTotal);
+                                break;
+                            }
+
+                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, cts.Token);
+
+                            messages.Add(new LLMMessage
+                            {
+                                Role = "tool",
+                                Content = toolResult,
+                                ToolCallId = toolCall.Id,
+                                ToolName = toolCall.Name,
+                            });
+
+                            if (onProgress is not null && totalToolCalls % ProgressReportInterval == 0)
+                            {
+                                try
+                                {
+                                    await onProgress(totalToolCalls, toolCall.Name);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
+                                }
                             }
                         }
                     }
@@ -164,11 +219,10 @@ public class AgentPhaseRunner(
         {
             var result = await tool.ExecuteAsync(toolCall.ArgumentsJson, context, ct);
 
-            // Truncate very large results
-            var maxLen = llmOptions.Value.MaxToolOutputLength;
-            if (result.Length > maxLen)
+            // Truncate large results using the tighter agent-specific limit
+            if (result.Length > AgentMaxToolOutputLength)
             {
-                result = result[..maxLen] + $"\n\n[Output truncated at {maxLen:N0} characters]";
+                result = result[..AgentMaxToolOutputLength] + $"\n\n[Output truncated at {AgentMaxToolOutputLength:N0} characters]";
             }
 
             return result;

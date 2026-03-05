@@ -16,6 +16,12 @@ public interface IAgentTool
     /// <summary>JSON Schema (type: object) describing the tool's input parameters.</summary>
     string ParametersJsonSchema { get; }
 
+    /// <summary>
+    /// Whether this tool is safe to run concurrently with other tools.
+    /// Read-only tools should return true; tools that mutate files/state should return false.
+    /// </summary>
+    bool IsReadOnly => false;
+
     /// <summary>Execute the tool and return a text result for the LLM to consume.</summary>
     Task<string> ExecuteAsync(string argumentsJson, AgentToolContext context, CancellationToken cancellationToken = default);
 }

@@ -448,12 +448,14 @@ public class AgentOrchestrationService(
         sb.AppendLine($"You are the **{role}** agent. Execute your role as described in your system prompt.");
         sb.AppendLine("Use your tools to explore the repository, understand the codebase, and make the necessary changes.");
         sb.AppendLine();
-        sb.AppendLine("**IMPORTANT — Cost Constraints:**");
+        sb.AppendLine("**IMPORTANT — Speed & Cost Constraints:**");
         sb.AppendLine("- Be extremely concise in your reasoning and output. No filler, no restating the problem.");
         sb.AppendLine("- Return ONLY the essential information: files changed, key decisions, errors, and instructions for the next phase.");
         sb.AppendLine("- Do NOT echo file contents you read — summarize what you learned in 1-2 sentences.");
         sb.AppendLine("- When writing code, write only the changed/new code — do not repeat unchanged sections.");
-        sb.AppendLine("- Minimize tool calls: batch reads where possible, plan before acting.");
+        sb.AppendLine("- **Call multiple tools at once** whenever possible. For example, read 3-5 files in a single response instead of one at a time. This runs them in parallel and is MUCH faster.");
+        sb.AppendLine("- Plan your exploration: list the directory first, then read all relevant files in one batch.");
+        sb.AppendLine("- Prefer search_files over reading entire files when you only need to find specific patterns.");
 
         return sb.ToString();
     }

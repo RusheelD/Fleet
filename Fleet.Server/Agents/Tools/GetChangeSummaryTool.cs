@@ -8,6 +8,7 @@ namespace Fleet.Server.Agents.Tools;
 public class GetChangeSummaryTool : IAgentTool
 {
     public string Name => "get_change_summary";
+    public bool IsReadOnly => true;
 
     public string Description =>
         "Get a summary of all file changes made so far in this execution. " +

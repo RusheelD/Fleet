@@ -8,6 +8,7 @@ namespace Fleet.Server.Agents.Tools;
 public class ListDirectoryTool : IAgentTool
 {
     public string Name => "list_directory";
+    public bool IsReadOnly => true;
 
     public string Description =>
         "List files and directories at a given path in the repository. " +

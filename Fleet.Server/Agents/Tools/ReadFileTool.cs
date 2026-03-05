@@ -8,6 +8,7 @@ namespace Fleet.Server.Agents.Tools;
 public class ReadFileTool : IAgentTool
 {
     public string Name => "read_file";
+    public bool IsReadOnly => true;
 
     public string Description =>
         "Read the content of a file from the repository. " +
