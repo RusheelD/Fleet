@@ -1,4 +1,5 @@
 using Fleet.Server.Data.Entities;
+using Fleet.Server.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Data;
@@ -18,6 +19,8 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<AgentPhaseResult> AgentPhaseResults => Set<AgentPhaseResult>();
+    public DbSet<NotificationEvent> NotificationEvents => Set<NotificationEvent>();
+    public DbSet<MonthlyUsageLedger> MonthlyUsageLedgers => Set<MonthlyUsageLedger>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,8 +31,8 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         {
             builder.HasKey(p => p.Id);
 
-            // Slugs are globally unique so seed data is accessible to all users
-            builder.HasIndex(p => p.Slug).IsUnique();
+            // Slugs are unique per owner, not globally.
+            builder.HasIndex(p => new { p.OwnerId, p.Slug }).IsUnique();
 
             // JSON columns for summary objects (PostgreSQL jsonb)
             builder.OwnsOne(p => p.WorkItemSummary, b => b.ToJson());
@@ -158,6 +161,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         {
             builder.HasKey(u => u.Id);
             builder.Property(u => u.Id).ValueGeneratedOnAdd();
+            builder.Property(u => u.Role).HasDefaultValue(UserRoles.Free);
 
             builder.HasIndex(u => u.EntraObjectId).IsUnique();
             builder.HasIndex(u => u.Email).IsUnique();
@@ -191,6 +195,26 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 b.ToJson();
                 // Features is a primitive collection within JSON — supported in EF Core 8+
             });
+        });
+
+        modelBuilder.Entity<NotificationEvent>(builder =>
+        {
+            builder.HasKey(n => n.Id);
+            builder.Property(n => n.Id).ValueGeneratedOnAdd();
+
+            builder.HasOne(n => n.Project)
+                .WithMany()
+                .HasForeignKey(n => n.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(n => new { n.UserProfileId, n.IsRead, n.CreatedAtUtc });
+        });
+
+        modelBuilder.Entity<MonthlyUsageLedger>(builder =>
+        {
+            builder.HasKey(l => l.Id);
+            builder.Property(l => l.Id).ValueGeneratedOnAdd();
+            builder.HasIndex(l => new { l.UserProfileId, l.UtcMonth }).IsUnique();
         });
     }
 }

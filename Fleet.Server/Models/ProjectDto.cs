@@ -9,5 +9,9 @@ public record ProjectDto(
     string Repo,
     WorkItemSummaryDto WorkItems,
     AgentSummaryDto Agents,
-    string LastActivity
+    string LastActivity,
+    string BranchPattern = "fleet/{workItemNumber}-{slug}",
+    string CommitAuthorMode = "fleet",
+    string? CommitAuthorName = null,
+    string? CommitAuthorEmail = null
 );

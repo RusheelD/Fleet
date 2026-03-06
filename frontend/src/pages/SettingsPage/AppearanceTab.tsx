@@ -39,13 +39,13 @@ export function AppearanceTab() {
             />
             <SettingRow
                 label="Compact Mode"
-                description="Reduce spacing in lists and boards"
+                description="Reduce spacing and control density across the entire app"
                 switchChecked={preferences.compactMode}
                 onSwitchChange={toggle('compactMode')}
             />
             <SettingRow
-                label="Sidebar Collapsed by Default"
-                description="Start with collapsed sidebar on page load"
+                label="Sidebar Collapsed"
+                description="Collapse or expand the sidebar across the app"
                 switchChecked={preferences.sidebarCollapsed}
                 onSwitchChange={toggle('sidebarCollapsed')}
             />

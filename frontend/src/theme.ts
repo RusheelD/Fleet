@@ -40,3 +40,34 @@ export const warmDarkTheme: Theme = {
     colorNeutralBackground3: '#272018',
     colorNeutralBackground4: '#2D261D',
 }
+
+function withCompactDensity(theme: Theme): Theme {
+    return {
+        ...theme,
+        spacingHorizontalXXS: '2px',
+        spacingHorizontalXS: '4px',
+        spacingHorizontalS: '6px',
+        spacingHorizontalM: '8px',
+        spacingHorizontalL: '10px',
+        spacingHorizontalXL: '14px',
+        spacingHorizontalXXL: '18px',
+        spacingVerticalXXS: '2px',
+        spacingVerticalXS: '4px',
+        spacingVerticalS: '6px',
+        spacingVerticalM: '8px',
+        spacingVerticalL: '10px',
+        spacingVerticalXL: '14px',
+        spacingVerticalXXL: '18px',
+        fontSizeBase100: '11px',
+        fontSizeBase200: '12px',
+        fontSizeBase300: '13px',
+        fontSizeBase400: '14px',
+        lineHeightBase100: '14px',
+        lineHeightBase200: '16px',
+        lineHeightBase300: '18px',
+        lineHeightBase400: '20px',
+    }
+}
+
+export const warmLightCompactTheme: Theme = withCompactDensity(warmLightTheme)
+export const warmDarkCompactTheme: Theme = withCompactDensity(warmDarkTheme)

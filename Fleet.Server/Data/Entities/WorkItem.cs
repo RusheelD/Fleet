@@ -14,6 +14,10 @@ public class WorkItem
     public string AssignedTo { get; set; } = string.Empty;
     public bool IsAI { get; set; }
     public string Description { get; set; } = string.Empty;
+    public string AssignmentMode { get; set; } = "auto";
+    public int? AssignedAgentCount { get; set; }
+    public string AcceptanceCriteria { get; set; } = string.Empty;
+    public string? LinkedPullRequestUrl { get; set; }
 
     // Stored as PostgreSQL text[] array — native array support
     public List<string> Tags { get; set; } = [];

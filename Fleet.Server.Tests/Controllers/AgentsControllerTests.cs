@@ -69,7 +69,7 @@ public class AgentsControllerTests
     {
         var status = new AgentExecutionStatus("exec-1", "Running", "Backend", 0.5, null, null, null);
         _orchestrationService
-            .Setup(s => s.GetExecutionStatusAsync("exec-1", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(status);
 
         var result = await _sut.GetExecutionStatus(ProjectId, "exec-1");
@@ -81,7 +81,7 @@ public class AgentsControllerTests
     public async Task GetExecutionStatus_NotFound_Returns404()
     {
         _orchestrationService
-            .Setup(s => s.GetExecutionStatusAsync("missing", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "missing", It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentExecutionStatus?)null);
 
         var result = await _sut.GetExecutionStatus(ProjectId, "missing");
@@ -93,7 +93,7 @@ public class AgentsControllerTests
     public async Task CancelExecution_Found_ReturnsOk()
     {
         _orchestrationService
-            .Setup(s => s.CancelExecutionAsync("exec-1"))
+            .Setup(s => s.CancelExecutionAsync(ProjectId, "exec-1"))
             .ReturnsAsync(true);
 
         var result = await _sut.CancelExecution(ProjectId, "exec-1");
@@ -105,7 +105,7 @@ public class AgentsControllerTests
     public async Task CancelExecution_NotFound_Returns404()
     {
         _orchestrationService
-            .Setup(s => s.CancelExecutionAsync("missing"))
+            .Setup(s => s.CancelExecutionAsync(ProjectId, "missing"))
             .ReturnsAsync(false);
 
         var result = await _sut.CancelExecution(ProjectId, "missing");
@@ -117,7 +117,7 @@ public class AgentsControllerTests
     public async Task PauseExecution_Found_ReturnsOk()
     {
         _orchestrationService
-            .Setup(s => s.PauseExecutionAsync("exec-1"))
+            .Setup(s => s.PauseExecutionAsync(ProjectId, "exec-1"))
             .ReturnsAsync(true);
 
         var result = await _sut.PauseExecution(ProjectId, "exec-1");
@@ -129,10 +129,67 @@ public class AgentsControllerTests
     public async Task PauseExecution_NotFound_Returns404()
     {
         _orchestrationService
-            .Setup(s => s.PauseExecutionAsync("missing"))
+            .Setup(s => s.PauseExecutionAsync(ProjectId, "missing"))
             .ReturnsAsync(false);
 
         var result = await _sut.PauseExecution(ProjectId, "missing");
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RetryExecution_WhenStopped_ReturnsAccepted()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionStatus("exec-1", "failed", "Done", 1.0, null, null, null));
+        _orchestrationService
+            .Setup(s => s.RetryExecutionAsync(ProjectId, "exec-1", UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-2");
+
+        var result = await _sut.RetryExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RetryExecution_WhenRunning_ReturnsConflict()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionStatus("exec-1", "running", "Backend", 0.5, null, null, null));
+
+        var result = await _sut.RetryExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<ConflictObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task GetExecutionDocumentation_Found_ReturnsOk()
+    {
+        var docs = new ExecutionDocumentationDto(
+            ExecutionId: "exec-1",
+            Title: "fleet-execution-1-exec-1.md",
+            Markdown: "# Docs",
+            PullRequestUrl: "https://github.com/org/repo/pull/1",
+            DiffUrl: "https://github.com/org/repo/pull/1/files");
+        _orchestrationService
+            .Setup(s => s.GetExecutionDocumentationAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(docs);
+
+        var result = await _sut.GetExecutionDocumentation(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task GetExecutionDocumentation_NotFound_Returns404()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionDocumentationAsync(ProjectId, "missing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ExecutionDocumentationDto?)null);
+
+        var result = await _sut.GetExecutionDocumentation(ProjectId, "missing");
 
         Assert.IsInstanceOfType<NotFoundResult>(result);
     }

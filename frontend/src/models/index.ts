@@ -9,4 +9,5 @@ export type { DashboardActivity, DashboardMetric, DashboardAgent, ProjectDashboa
 export type { CurrentPlan, UsageMeter, Plan, SubscriptionData } from './subscription'
 export type { UserProfile, LinkedAccount, UserPreferences, UserSettings } from './user'
 export type { GitHubRepo } from './github'
+export type { NotificationEvent } from './notification'
 

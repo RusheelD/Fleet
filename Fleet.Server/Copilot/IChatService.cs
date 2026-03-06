@@ -13,5 +13,7 @@ public interface IChatService
     // Attachments
     Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string sessionId);
+    Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string projectId, string sessionId);
     Task<bool> DeleteAttachmentAsync(string attachmentId);
+    Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId);
 }

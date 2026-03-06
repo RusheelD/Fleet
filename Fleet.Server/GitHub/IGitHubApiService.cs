@@ -6,4 +6,5 @@ namespace Fleet.Server.GitHub;
 public interface IGitHubApiService
 {
     Task<GitHubRepoStats> GetRepoStatsAsync(int userId, string repoFullName);
+    Task<IReadOnlyList<GitHubWorkItemReference>> GetWorkItemReferencesAsync(int userId, string repoFullName);
 }

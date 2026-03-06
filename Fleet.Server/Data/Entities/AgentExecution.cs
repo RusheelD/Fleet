@@ -16,6 +16,9 @@ public class AgentExecution
     /// <summary>URL of the pull request created by the agents, if any.</summary>
     public string? PullRequestUrl { get; set; }
 
+    /// <summary>Title of the pull request created by the agents, after collision resolution.</summary>
+    public string? PullRequestTitle { get; set; }
+
     /// <summary>The current phase being executed (e.g., "Planner", "Backend").</summary>
     public string? CurrentPhase { get; set; }
 

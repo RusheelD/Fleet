@@ -3,6 +3,7 @@ using Fleet.Server.Copilot;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Models;
+using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -15,6 +16,7 @@ public class ChatServiceTests
     private Mock<IChatSessionRepository> _chatRepo = null!;
     private Mock<ILLMClient> _llmClient = null!;
     private Mock<IAuthService> _authService = null!;
+    private Mock<IUsageLedgerService> _usageLedgerService = null!;
     private Mock<ILogger<ChatService>> _logger = null!;
     private ChatToolRegistry _toolRegistry = null!;
     private IOptions<LLMOptions> _llmOptions = null!;
@@ -30,6 +32,7 @@ public class ChatServiceTests
         _chatRepo = new Mock<IChatSessionRepository>();
         _llmClient = new Mock<ILLMClient>();
         _authService = new Mock<IAuthService>();
+        _usageLedgerService = new Mock<IUsageLedgerService>();
         _logger = new Mock<ILogger<ChatService>>();
 
         // Empty tool registry (no tools registered)
@@ -46,6 +49,10 @@ public class ChatServiceTests
         });
 
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(UserId);
+        _usageLedgerService.Setup(s => s.ChargeRunAsync(It.IsAny<int>(), It.IsAny<MonthlyRunType>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _usageLedgerService.Setup(s => s.RefundRunAsync(It.IsAny<int>(), It.IsAny<MonthlyRunType>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _sut = new ChatService(
             _chatRepo.Object,
@@ -53,7 +60,8 @@ public class ChatServiceTests
             _toolRegistry,
             _authService.Object,
             _llmOptions,
-            _logger.Object);
+            _logger.Object,
+            _usageLedgerService.Object);
     }
 
     // ── GetChatDataAsync ─────────────────────────────────────
@@ -148,7 +156,7 @@ public class ChatServiceTests
     [TestMethod]
     public async Task DeleteSessionAsync_Found_ReturnsTrue()
     {
-        _chatRepo.Setup(r => r.DeleteSessionAsync(SessionId)).ReturnsAsync(true);
+        _chatRepo.Setup(r => r.DeleteSessionAsync(ProjectId, SessionId)).ReturnsAsync(true);
 
         var result = await _sut.DeleteSessionAsync(ProjectId, SessionId);
 
@@ -158,7 +166,7 @@ public class ChatServiceTests
     [TestMethod]
     public async Task DeleteSessionAsync_NotFound_ReturnsFalse()
     {
-        _chatRepo.Setup(r => r.DeleteSessionAsync("missing")).ReturnsAsync(false);
+        _chatRepo.Setup(r => r.DeleteSessionAsync(ProjectId, "missing")).ReturnsAsync(false);
 
         var result = await _sut.DeleteSessionAsync(ProjectId, "missing");
 
@@ -177,7 +185,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Hi there!"))
             .ReturnsAsync(assistantMsg);
@@ -203,7 +211,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant",
             "I wasn't able to generate a response.")).ReturnsAsync(defaultMsg);
@@ -226,7 +234,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant",
             It.IsAny<string>())).ReturnsAsync(errorMsg);
@@ -249,7 +257,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", It.IsAny<string>()))
             .ReturnsAsync((string _, string _, string _, string content) =>
@@ -287,7 +295,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Here's what I found"))
             .ReturnsAsync(assistantMsg);
@@ -323,7 +331,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items"))
             .ReturnsAsync(assistantMsg);
@@ -339,6 +347,32 @@ public class ChatServiceTests
         // The generate mode should add an extra message about generating work items
         Assert.IsTrue(capturedRequest.Messages.Any(m =>
             m.Content != null && m.Content.Contains("Generate work-items")));
+        _usageLedgerService.Verify(s => s.ChargeRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateModeFailure_RefundsQuota()
+    {
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "error", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", It.IsAny<string>()))
+            .ReturnsAsync(assistantMsg);
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("LLM failed"));
+
+        await _sut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+
+        _usageLedgerService.Verify(s => s.RefundRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Attachment methods ───────────────────────────────────
@@ -347,7 +381,7 @@ public class ChatServiceTests
     public async Task UploadAttachmentAsync_DelegatesToRepo()
     {
         var expected = new ChatAttachmentDto("att-1", "doc.md", 100, "2024-01-01");
-        _chatRepo.Setup(r => r.AddAttachmentAsync(SessionId, "doc.md", "# Content"))
+        _chatRepo.Setup(r => r.AddAttachmentAsync(ProjectId, SessionId, "doc.md", "# Content"))
             .ReturnsAsync(expected);
 
         var result = await _sut.UploadAttachmentAsync(ProjectId, SessionId, "doc.md", "# Content");
@@ -363,9 +397,9 @@ public class ChatServiceTests
         {
             new("att-1", "doc.md", 100, "2024-01-01"),
         };
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId)).ReturnsAsync(attachments);
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId)).ReturnsAsync(attachments);
 
-        var result = await _sut.GetAttachmentsAsync(SessionId);
+        var result = await _sut.GetAttachmentsAsync(ProjectId, SessionId);
 
         Assert.AreEqual(1, result.Count);
     }
@@ -373,9 +407,9 @@ public class ChatServiceTests
     [TestMethod]
     public async Task DeleteAttachmentAsync_Found_ReturnsTrue()
     {
-        _chatRepo.Setup(r => r.DeleteAttachmentAsync("att-1")).ReturnsAsync(true);
+        _chatRepo.Setup(r => r.DeleteAttachmentAsync(ProjectId, SessionId, "att-1")).ReturnsAsync(true);
 
-        var result = await _sut.DeleteAttachmentAsync("att-1");
+        var result = await _sut.DeleteAttachmentAsync(ProjectId, SessionId, "att-1");
 
         Assert.IsTrue(result);
     }
@@ -383,9 +417,9 @@ public class ChatServiceTests
     [TestMethod]
     public async Task DeleteAttachmentAsync_NotFound_ReturnsFalse()
     {
-        _chatRepo.Setup(r => r.DeleteAttachmentAsync("missing")).ReturnsAsync(false);
+        _chatRepo.Setup(r => r.DeleteAttachmentAsync(ProjectId, SessionId, "missing")).ReturnsAsync(false);
 
-        var result = await _sut.DeleteAttachmentAsync("missing");
+        var result = await _sut.DeleteAttachmentAsync(ProjectId, SessionId, "missing");
 
         Assert.IsFalse(result);
     }
@@ -402,12 +436,12 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(SessionId))
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>
             {
                 new("att-1", "spec.md", 50, "2024-01-01"),
             });
-        _chatRepo.Setup(r => r.GetAttachmentContentAsync("att-1"))
+        _chatRepo.Setup(r => r.GetAttachmentContentAsync(ProjectId, "att-1"))
             .ReturnsAsync("# Specification\nBuild authentication module.");
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Response"))
             .ReturnsAsync(assistantMsg);
@@ -424,3 +458,4 @@ public class ChatServiceTests
         Assert.IsTrue(capturedRequest.SystemPrompt.Contains("Build authentication module."));
     }
 }
+

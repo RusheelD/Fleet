@@ -41,7 +41,13 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
     public async Task<IActionResult> CheckSlug([FromQuery] string name)
     {
         if (string.IsNullOrWhiteSpace(name))
-            return BadRequest(new { error = "Name is required." });
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = "Name is required.",
+                Status = StatusCodes.Status400BadRequest,
+                Instance = HttpContext?.Request?.Path.ToString() ?? "/api/projects/check-slug",
+            });
 
         var result = await projectService.CheckSlugAsync(name);
         return Ok(result);
@@ -52,12 +58,25 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
     {
         try
         {
-            var project = await projectService.CreateProjectAsync(request.Title, request.Description, request.Repo);
+            var project = await projectService.CreateProjectAsync(
+                request.Title,
+                request.Description,
+                request.Repo,
+                request.BranchPattern,
+                request.CommitAuthorMode,
+                request.CommitAuthorName,
+                request.CommitAuthorEmail);
             return Created($"/api/projects/{project.Id}", project);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new { error = ex.Message });
+            return Conflict(new ProblemDetails
+            {
+                Title = "Conflict",
+                Detail = ex.Message,
+                Status = StatusCodes.Status409Conflict,
+                Instance = HttpContext?.Request?.Path.ToString() ?? "/api/projects",
+            });
         }
     }
 
@@ -66,13 +85,27 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
     {
         try
         {
-            var project = await projectService.UpdateProjectAsync(projectId, request.Title, request.Description, request.Repo);
+            var project = await projectService.UpdateProjectAsync(
+                projectId,
+                request.Title,
+                request.Description,
+                request.Repo,
+                request.BranchPattern,
+                request.CommitAuthorMode,
+                request.CommitAuthorName,
+                request.CommitAuthorEmail);
             if (project is null) return NotFound();
             return Ok(project);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new { error = ex.Message });
+            return Conflict(new ProblemDetails
+            {
+                Title = "Conflict",
+                Detail = ex.Message,
+                Status = StatusCodes.Status409Conflict,
+                Instance = HttpContext?.Request?.Path.ToString() ?? $"/api/projects/{projectId}",
+            });
         }
     }
 

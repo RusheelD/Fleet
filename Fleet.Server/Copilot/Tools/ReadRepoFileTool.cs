@@ -13,6 +13,7 @@ namespace Fleet.Server.Copilot.Tools;
 public class ReadRepoFileTool(
     IProjectService projectService,
     IConnectionRepository connectionRepository,
+    IGitHubTokenProtector tokenProtector,
     IHttpClientFactory httpClientFactory) : IChatTool
 {
     /// <summary>Max file size we'll fetch (100 KB). Larger files are rejected to protect context.</summary>
@@ -56,7 +57,8 @@ public class ReadRepoFileTool(
             return "Error: invalid user ID.";
 
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        if (account is null || string.IsNullOrEmpty(account.AccessToken))
+        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
+        if (account is null || string.IsNullOrEmpty(accessToken))
             return "No GitHub account is linked. Please connect GitHub in Settings first.";
 
         var client = httpClientFactory.CreateClient("GitHub");
@@ -64,7 +66,7 @@ public class ReadRepoFileTool(
         try
         {
             var url = $"https://api.github.com/repos/{repoFullName}/contents/{filePath}";
-            var fileInfo = await FetchJsonAsync<ContentsResponse>(client, account.AccessToken, url, cancellationToken);
+            var fileInfo = await FetchJsonAsync<ContentsResponse>(client, accessToken, url, cancellationToken);
 
             if (fileInfo is null)
                 return $"File not found: {filePath}";

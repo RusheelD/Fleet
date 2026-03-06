@@ -4,6 +4,7 @@ export interface UserProfile {
   bio: string
   location: string
   avatarUrl: string
+  role?: 'free' | 'basic' | 'pro' | 'unlimited' | string
 }
 
 export interface LinkedAccount {

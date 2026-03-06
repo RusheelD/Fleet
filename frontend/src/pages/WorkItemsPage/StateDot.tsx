@@ -8,6 +8,8 @@ const STATE_DOT_COLORS: Record<string, string> = {
     'Active': tokens.colorCompoundBrandForeground1,
     'In Progress': tokens.colorPaletteMarigoldForeground1,
     'In Progress (AI)': tokens.colorPaletteMarigoldForeground1,
+    'In-PR': tokens.colorPaletteBerryForeground2,
+    'In-PR (AI)': tokens.colorPaletteBerryForeground2,
     'Resolved': tokens.colorPaletteGreenForeground1,
     'Resolved (AI)': tokens.colorPaletteGreenForeground1,
     'Closed': tokens.colorPaletteGreenForeground1,

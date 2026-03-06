@@ -22,9 +22,9 @@ public class ModelCatalogTests
     {
         var catalog = new ModelCatalog(CreateOptions());
 
-        Assert.AreEqual("claude-haiku-4-5-20251001", catalog.Get("Haiku"));
-        Assert.AreEqual("claude-sonnet-4-6", catalog.Get("Sonnet"));
-        Assert.AreEqual("claude-opus-4-6", catalog.Get("Opus"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Haiku"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Sonnet"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Opus"));
     }
 
     [TestMethod]
@@ -32,8 +32,8 @@ public class ModelCatalogTests
     {
         var catalog = new ModelCatalog(CreateOptions());
 
-        Assert.AreEqual("claude-sonnet-4-6", catalog.Get("sonnet"));
-        Assert.AreEqual("claude-sonnet-4-6", catalog.Get("SONNET"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("sonnet"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("SONNET"));
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public class ModelCatalogTests
 
         Assert.AreEqual("my-custom-sonnet", catalog.Get("Sonnet"));
         // Other defaults still present
-        Assert.AreEqual("claude-haiku-4-5-20251001", catalog.Get("Haiku"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Haiku"));
     }
 
     [TestMethod]
@@ -82,3 +82,4 @@ public class ModelCatalogTests
         Assert.AreEqual(4, models.Count);
     }
 }
+

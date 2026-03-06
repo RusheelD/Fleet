@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Caption1,
     Button,
@@ -16,6 +17,7 @@ import {
     ChevronDownRegular,
     TaskListAddRegular,
 } from '@fluentui/react-icons'
+import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     inputArea: {
@@ -26,10 +28,20 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         flexShrink: 0,
     },
+    inputAreaCompact: {
+        paddingTop: '0.375rem',
+        paddingBottom: '0.375rem',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.25rem',
+    },
     inputRow: {
         display: 'flex',
         gap: '0.5rem',
         alignItems: 'flex-end',
+    },
+    inputRowCompact: {
+        gap: '0.375rem',
     },
     inputTextarea: {
         flex: 1,
@@ -70,6 +82,15 @@ const useStyles = makeStyles({
             color: tokens.colorNeutralForeground4,
         },
     },
+    inputTextareaCompact: {
+        fontSize: tokens.fontSizeBase200,
+        lineHeight: tokens.lineHeightBase200,
+        paddingTop: '4px',
+        paddingBottom: '4px',
+        paddingLeft: '8px',
+        paddingRight: '8px',
+        minHeight: '44px',
+    },
     sendGroup: {
         display: 'flex',
         alignSelf: 'flex-end',
@@ -98,6 +119,10 @@ const useStyles = makeStyles({
     inputHint: {
         color: tokens.colorNeutralForeground4,
     },
+    inputHintCompact: {
+        fontSize: '10px',
+        lineHeight: '12px',
+    },
     hiddenInput: {
         display: 'none',
     },
@@ -115,6 +140,8 @@ interface ChatInputProps {
 
 export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, disabled, uploading }: ChatInputProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -145,15 +172,15 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
     }
 
     return (
-        <div className={styles.inputArea}>
-            <div className={styles.inputRow}>
+        <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact)}>
+            <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact)}>
                 <textarea
                     ref={textareaRef}
                     placeholder="Describe what you want to build..."
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
                     rows={2}
-                    className={styles.inputTextarea}
+                    className={mergeClasses(styles.inputTextarea, isCompact && styles.inputTextareaCompact)}
                     disabled={disabled}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
@@ -168,6 +195,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
                         icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
                         disabled={(!hasText && !onGenerate) || disabled}
                         className={styles.sendButton}
+                        size={isCompact ? 'small' : 'medium'}
                         onClick={hasText ? onSend : onGenerate}
                     >
                         {hasText ? 'Send' : 'Generate'}
@@ -179,7 +207,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
                                 icon={<ChevronDownRegular />}
                                 disabled={disabled}
                                 className={styles.menuButton}
-                                size="medium"
+                                size={isCompact ? 'small' : 'medium'}
                             />
                         </MenuTrigger>
                         <MenuPopover>
@@ -221,7 +249,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
                         {uploading ? 'Uploading...' : 'Attach .md'}
                     </Button>
                 </div>
-                <Caption1 className={styles.inputHint}>
+                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact)}>
                     Attach .md files for AI context
                 </Caption1>
             </div>

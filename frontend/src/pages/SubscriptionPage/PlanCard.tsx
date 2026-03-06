@@ -18,6 +18,7 @@ import {
 import { CheckmarkCircleRegular } from '@fluentui/react-icons'
 import type { PlanData } from '../../models'
 import { resolveIcon } from '../../proxies'
+import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     planCard: {
@@ -27,6 +28,13 @@ const useStyles = makeStyles({
         gap: '1rem',
         position: 'relative',
         overflow: 'visible',
+    },
+    planCardCompact: {
+        paddingTop: '0.75rem',
+        paddingBottom: '0.75rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
+        gap: '0.5rem',
     },
     planCardCurrent: {
         borderTopWidth: '2px',
@@ -47,6 +55,9 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.5rem',
     },
+    planNameCompact: {
+        gap: '0.375rem',
+    },
     planPrice: {
         display: 'flex',
         alignItems: 'baseline',
@@ -55,6 +66,10 @@ const useStyles = makeStyles({
     priceAmount: {
         fontSize: '32px',
         fontWeight: 700,
+    },
+    priceAmountCompact: {
+        fontSize: '20px',
+        lineHeight: '24px',
     },
     priceUnit: {
         color: tokens.colorNeutralForeground3,
@@ -65,11 +80,19 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         flex: 1,
     },
+    planFeaturesCompact: {
+        gap: '0.25rem',
+    },
     featureRow: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
         fontSize: '13px',
+    },
+    featureRowCompact: {
+        gap: '0.375rem',
+        fontSize: '12px',
+        lineHeight: '16px',
     },
     featureIcon: {
         color: tokens.colorPaletteGreenForeground1,
@@ -83,6 +106,10 @@ const useStyles = makeStyles({
     fullWidthButton: {
         width: '100%',
     },
+    compactDescription: {
+        fontSize: '12px',
+        lineHeight: '16px',
+    },
 })
 
 interface PlanCardProps {
@@ -91,6 +118,8 @@ interface PlanCardProps {
 
 export function PlanCard({ plan }: PlanCardProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const toasterId = useId('plan-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
@@ -103,7 +132,11 @@ export function PlanCard({ plan }: PlanCardProps) {
 
     return (
         <Card
-            className={mergeClasses(styles.planCard, plan.isCurrent ? styles.planCardCurrent : undefined)}
+            className={mergeClasses(
+                styles.planCard,
+                isCompact && styles.planCardCompact,
+                plan.isCurrent ? styles.planCardCurrent : undefined,
+            )}
         >
             <Toaster toasterId={toasterId} />
             {plan.isCurrent && (
@@ -115,19 +148,19 @@ export function PlanCard({ plan }: PlanCardProps) {
                     Current
                 </Badge>
             )}
-            <div className={styles.planName}>
+            <div className={mergeClasses(styles.planName, isCompact && styles.planNameCompact)}>
                 {resolveIcon(plan.icon)}
                 <Title3>{plan.name}</Title3>
             </div>
             <div className={styles.planPrice}>
-                <Text className={styles.priceAmount}>{plan.price}</Text>
+                <Text className={mergeClasses(styles.priceAmount, isCompact && styles.priceAmountCompact)}>{plan.price}</Text>
                 <Text className={styles.priceUnit}>{plan.period}</Text>
             </div>
-            <Caption1>{plan.description}</Caption1>
+            <Caption1 className={isCompact ? styles.compactDescription : undefined}>{plan.description}</Caption1>
             <Divider />
-            <div className={styles.planFeatures}>
+            <div className={mergeClasses(styles.planFeatures, isCompact && styles.planFeaturesCompact)}>
                 {plan.features.map((feature) => (
-                    <div key={feature} className={styles.featureRow}>
+                    <div key={feature} className={mergeClasses(styles.featureRow, isCompact && styles.featureRowCompact)}>
                         <CheckmarkCircleRegular className={styles.featureIcon} />
                         <Text>{feature}</Text>
                     </div>
@@ -137,6 +170,7 @@ export function PlanCard({ plan }: PlanCardProps) {
                 appearance={plan.buttonAppearance}
                 disabled={plan.isCurrent}
                 className={styles.fullWidthButton}
+                size={isCompact ? 'small' : 'medium'}
                 onClick={handlePlanAction}
             >
                 {plan.buttonLabel}

@@ -2,6 +2,7 @@ using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
+using Fleet.Server.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Users;
@@ -12,7 +13,13 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
     {
         var user = await context.UserProfiles.FindAsync(userId);
         if (user is null) return null;
-        return new UserProfileDto(user.DisplayName, user.Email, user.Bio, user.Location, user.AvatarUrl);
+        return new UserProfileDto(
+            user.DisplayName,
+            user.Email,
+            user.Bio,
+            user.Location,
+            user.AvatarUrl,
+            UserRoles.Normalize(user.Role));
     }
 
     public async Task<UserProfileDto> UpdateProfileAsync(int userId, UpdateProfileRequest request)
@@ -24,7 +31,13 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
         user.Bio = request.Bio;
         user.Location = request.Location;
         await context.SaveChangesAsync();
-        return new UserProfileDto(user.DisplayName, user.Email, user.Bio, user.Location, user.AvatarUrl);
+        return new UserProfileDto(
+            user.DisplayName,
+            user.Email,
+            user.Bio,
+            user.Location,
+            user.AvatarUrl,
+            UserRoles.Normalize(user.Role));
     }
 
     public async Task<IReadOnlyList<LinkedAccountDto>> GetConnectionsAsync(int userId)

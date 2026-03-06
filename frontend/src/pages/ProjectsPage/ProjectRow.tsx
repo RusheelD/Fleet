@@ -1,5 +1,6 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Caption1,
     Text,
@@ -10,6 +11,7 @@ import {
     BotRegular,
     ClockRegular,
 } from '@fluentui/react-icons'
+import { usePreferences } from '../../hooks'
 import type { ProjectData } from '../../models'
 
 const useStyles = makeStyles({
@@ -25,6 +27,14 @@ const useStyles = makeStyles({
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
     },
+    rowCompact: {
+        gridTemplateColumns: '2fr 1.2fr 56px 56px 64px 72px 120px',
+        paddingTop: '0.375rem',
+        paddingBottom: '0.375rem',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.5rem',
+    },
     nameCell: {
         display: 'flex',
         flexDirection: 'column',
@@ -38,11 +48,19 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
     },
+    titleCompact: {
+        fontSize: '12px',
+        lineHeight: '16px',
+    },
     description: {
         color: tokens.colorNeutralForeground3,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    descriptionCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
     },
     repoCell: {
         display: 'flex',
@@ -85,12 +103,16 @@ interface ProjectRowProps {
 
 export function ProjectRow({ project, onClick }: ProjectRowProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
 
     return (
-        <div className={styles.row} onClick={onClick}>
+        <div className={mergeClasses(styles.row, isCompact && styles.rowCompact)} onClick={onClick}>
             <div className={styles.nameCell}>
-                <Text className={styles.title}>{project.title}</Text>
-                <Caption1 className={styles.description}>{project.description}</Caption1>
+                <Text className={mergeClasses(styles.title, isCompact && styles.titleCompact)}>{project.title}</Text>
+                <Caption1 className={mergeClasses(styles.description, isCompact && styles.descriptionCompact)}>
+                    {project.description}
+                </Caption1>
             </div>
             <div className={styles.repoCell}>
                 <FolderRegular />

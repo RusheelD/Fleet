@@ -5,12 +5,20 @@ export interface CreateProjectRequest {
   title: string
   description: string
   repo: string
+  branchPattern?: string
+  commitAuthorMode?: string
+  commitAuthorName?: string
+  commitAuthorEmail?: string
 }
 
 export interface UpdateProjectRequest {
   title?: string
   description?: string
   repo?: string
+  branchPattern?: string
+  commitAuthorMode?: string
+  commitAuthorName?: string
+  commitAuthorEmail?: string
 }
 
 export function getProjects(): Promise<ProjectData[]> {

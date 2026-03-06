@@ -8,5 +8,8 @@ public record AgentExecutionDto(
     AgentInfoDto[] Agents,
     string StartedAt,
     string Duration,
-    double Progress
+    double Progress,
+    string? BranchName = null,
+    string? PullRequestUrl = null,
+    string? CurrentPhase = null
 );

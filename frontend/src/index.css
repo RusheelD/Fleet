@@ -21,6 +21,28 @@ body {
   height: 100%;
 }
 
+html[data-density='compact'] {
+  font-size: 14px;
+}
+
+html[data-density='compact'] .fui-Card {
+  border-radius: 8px;
+}
+
+html[data-density='compact'] .fui-Button {
+  min-height: 30px;
+}
+
+html[data-density='compact'] .fui-Input input,
+html[data-density='compact'] .fui-Textarea textarea {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+html[data-density='compact'] .fui-Tab {
+  min-height: 30px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -12,7 +12,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
     public string Description =>
         "Update an existing work item by its project-scoped number. Only supply fields you want to change. " +
-        "Valid states: New, Active, In Progress, Resolved, Closed. Priority: 1 (critical) to 4 (low). " +
+        "Valid states: New, Active, Planning (AI), In Progress, In Progress (AI), In-PR, In-PR (AI), Resolved, Resolved (AI), Closed. Priority: 1 (critical) to 4 (low). " +
         "Valid levels (types): Domain, Module, Feature, Component, Bug, Task. " +
         "Set parent_id to 0 to clear the parent.";
 
@@ -39,7 +39,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                 "state": {
                     "type": "string",
                     "description": "New state.",
-                    "enum": ["New", "Active", "In Progress", "Resolved", "Closed"]
+                    "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"]
                 },
                 "level": {
                     "type": "string",

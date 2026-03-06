@@ -1,5 +1,6 @@
 import {
     makeStyles,
+    mergeClasses,
     Title3,
     Divider,
     Spinner,
@@ -8,6 +9,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
 import { useSubscription } from '../../proxies'
+import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -16,8 +18,18 @@ const useStyles = makeStyles({
         margin: '0 auto',
         width: '100%',
     },
+    pageCompact: {
+        paddingTop: '1rem',
+        paddingBottom: '1rem',
+        paddingLeft: '1rem',
+        paddingRight: '1rem',
+        maxWidth: '980px',
+    },
     usageSection: {
         marginBottom: '1.5rem',
+    },
+    usageSectionCompact: {
+        marginBottom: '1rem',
     },
     usageGrid: {
         display: 'grid',
@@ -25,8 +37,16 @@ const useStyles = makeStyles({
         gap: '1rem',
         marginTop: '1rem',
     },
+    usageGridCompact: {
+        gridTemplateColumns: '1fr 1fr',
+        gap: '0.5rem',
+        marginTop: '0.5rem',
+    },
     dividerSpacing: {
         marginBottom: '1.5rem',
+    },
+    dividerSpacingCompact: {
+        marginBottom: '1rem',
     },
     plansGrid: {
         display: 'grid',
@@ -34,22 +54,35 @@ const useStyles = makeStyles({
         gap: '1rem',
         marginTop: '1rem',
     },
+    plansGridCompact: {
+        gridTemplateColumns: '1fr',
+        gap: '0.5rem',
+        marginTop: '0.5rem',
+    },
+    planSectionCompact: {
+        marginBottom: '1rem',
+    },
+    planSectionSubtextCompact: {
+        marginTop: '0.125rem',
+    },
 })
 
 export function SubscriptionPage() {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const { data: subscription, isLoading } = useSubscription()
 
     if (isLoading || !subscription) {
         return (
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
                 <Spinner label="Loading subscription..." />
             </div>
         )
     }
 
     return (
-        <div className={styles.page}>
+        <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
             <PageHeader
                 title="Subscription"
                 subtitle="Manage your plan, usage, and billing"
@@ -57,9 +90,9 @@ export function SubscriptionPage() {
 
             <CurrentPlanBanner currentPlan={subscription.currentPlan} />
 
-            <div className={styles.usageSection}>
+            <div className={mergeClasses(styles.usageSection, isCompact && styles.usageSectionCompact)}>
                 <Title3>This Month&apos;s Usage</Title3>
-                <div className={styles.usageGrid}>
+                <div className={mergeClasses(styles.usageGrid, isCompact && styles.usageGridCompact)}>
                     {subscription.usage.map((meter) => (
                         <UsageMeter
                             key={meter.label}
@@ -73,18 +106,18 @@ export function SubscriptionPage() {
                 </div>
             </div>
 
-            <Divider className={styles.dividerSpacing} />
+            <Divider className={mergeClasses(styles.dividerSpacing, isCompact && styles.dividerSpacingCompact)} />
 
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div className={isCompact ? styles.planSectionCompact : undefined}>
                 <Title3>Available Plans</Title3>
-                <div style={{ marginTop: '0.25rem' }}>
+                <div className={isCompact ? styles.planSectionSubtextCompact : undefined} style={!isCompact ? { marginTop: '0.25rem' } : undefined}>
                     <Text>
                         Pricing scales based on agents and simultaneous agents purchased. All plans include the same core features.
                     </Text>
                 </div>
             </div>
 
-            <div className={styles.plansGrid}>
+            <div className={mergeClasses(styles.plansGrid, isCompact && styles.plansGridCompact)}>
                 {subscription.plans.map((plan) => (
                     <PlanCard key={plan.name} plan={plan} />
                 ))}

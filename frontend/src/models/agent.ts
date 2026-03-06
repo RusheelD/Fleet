@@ -7,6 +7,9 @@ export interface AgentExecution {
   startedAt: string
   duration: string
   progress: number
+  branchName?: string | null
+  pullRequestUrl?: string | null
+  currentPhase?: string | null
 }
 
 export interface AgentInfo {

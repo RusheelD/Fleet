@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Title3,
     Card,
@@ -20,7 +21,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
 import { useProjectDashboardBySlug, resolveIcon } from '../../proxies'
-import { useCurrentProject } from '../../hooks'
+import { useCurrentProject, usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -53,6 +54,11 @@ const useStyles = makeStyles({
         gap: '1rem',
         marginBottom: '1.5rem',
     },
+    metricsGridCompact: {
+        gridTemplateColumns: '1fr 1fr',
+        gap: '0.5rem',
+        marginBottom: '1rem',
+    },
     twoColumns: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
@@ -62,11 +68,23 @@ const useStyles = makeStyles({
             gridTemplateColumns: '1fr',
         },
     },
+    twoColumnsCompact: {
+        gap: '0.75rem',
+        marginBottom: '1rem',
+        gridTemplateColumns: '1fr',
+    },
     sectionCard: {
         padding: '1.25rem',
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
+    },
+    sectionCardCompact: {
+        paddingTop: '0.625rem',
+        paddingBottom: '0.625rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
+        gap: '0.5rem',
     },
     sectionHeader: {
         display: 'flex',
@@ -89,11 +107,18 @@ const useStyles = makeStyles({
         gap: '0.75rem',
         marginBottom: '1.5rem',
     },
+    quickActionsCompact: {
+        gridTemplateColumns: '1fr 1fr',
+        gap: '0.5rem',
+        marginBottom: '1rem',
+    },
 })
 
 export function ProjectDashboardPage() {
     const styles = useStyles()
     const { slug } = useCurrentProject()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
 
@@ -129,7 +154,7 @@ export function ProjectDashboardPage() {
             </span>
 
             {/* Quick Actions */}
-            <div className={styles.quickActions}>
+            <div className={mergeClasses(styles.quickActions, isCompact && styles.quickActionsCompact)}>
                 <QuickActionCard
                     icon={<ChatRegular />}
                     title="AI Chat"
@@ -157,7 +182,7 @@ export function ProjectDashboardPage() {
             </div>
 
             {/* Metrics */}
-            <div className={styles.metricsGrid}>
+            <div className={mergeClasses(styles.metricsGrid, isCompact && styles.metricsGridCompact)}>
                 {dashboard.metrics.map((metric) => (
                     <MetricCard
                         key={metric.label}
@@ -171,9 +196,9 @@ export function ProjectDashboardPage() {
             </div>
 
             {/* Two column layout */}
-            <div className={styles.twoColumns}>
+            <div className={mergeClasses(styles.twoColumns, isCompact && styles.twoColumnsCompact)}>
                 {/* Recent Activity */}
-                <Card className={styles.sectionCard}>
+                <Card className={mergeClasses(styles.sectionCard, isCompact && styles.sectionCardCompact)}>
                     <div className={styles.sectionHeader}>
                         <Title3>Recent Activity</Title3>
                         <Button appearance="transparent" size="small" onClick={() => navigate(`/projects/${slug}/agents`)}>View all</Button>
@@ -187,7 +212,7 @@ export function ProjectDashboardPage() {
                 </Card>
 
                 {/* Agent Status */}
-                <Card className={styles.sectionCard}>
+                <Card className={mergeClasses(styles.sectionCard, isCompact && styles.sectionCardCompact)}>
                     <div className={styles.sectionHeader}>
                         <Title3>Agent Status</Title3>
                         <Button

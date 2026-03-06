@@ -5,5 +5,6 @@ public record UserProfileDto(
     string Email,
     string Bio,
     string Location,
-    string AvatarUrl
+    string AvatarUrl,
+    string Role = Auth.UserRoles.Free
 );

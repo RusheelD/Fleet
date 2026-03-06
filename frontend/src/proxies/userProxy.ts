@@ -13,8 +13,12 @@ export function updatePreferences(preferences: UserPreferences): Promise<UserPre
   return put<UserPreferences>('/api/user/preferences', preferences)
 }
 
-export function linkGitHub(code: string, redirectUri: string): Promise<LinkedAccount> {
-  return post<LinkedAccount>('/api/connections/github', { code, redirectUri })
+export function getGitHubOAuthState(): Promise<{ state: string }> {
+  return get<{ state: string }>('/api/connections/github/state')
+}
+
+export function linkGitHub(code: string, redirectUri: string, state: string): Promise<LinkedAccount> {
+  return post<LinkedAccount>('/api/connections/github', { code, redirectUri, state })
 }
 
 export function unlinkGitHub(): Promise<void> {

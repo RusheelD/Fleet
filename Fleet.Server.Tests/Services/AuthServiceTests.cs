@@ -3,6 +3,7 @@ using Fleet.Server.Auth;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -14,6 +15,7 @@ public class AuthServiceTests
     private Mock<IAuthRepository> _authRepo = null!;
     private Mock<IHttpContextAccessor> _httpContextAccessor = null!;
     private Mock<ILogger<AuthService>> _logger = null!;
+    private IConfiguration _configuration = null!;
     private AuthService _sut = null!;
 
     [TestInitialize]
@@ -22,7 +24,10 @@ public class AuthServiceTests
         _authRepo = new Mock<IAuthRepository>();
         _httpContextAccessor = new Mock<IHttpContextAccessor>();
         _logger = new Mock<ILogger<AuthService>>();
-        _sut = new AuthService(_authRepo.Object, _httpContextAccessor.Object, _logger.Object);
+        _configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+        _sut = new AuthService(_authRepo.Object, _httpContextAccessor.Object, _configuration, _logger.Object);
     }
 
     private void SetupHttpContext(string? oid = null, string? name = null, string? email = null)
@@ -84,6 +89,70 @@ public class AuthServiceTests
             u.EntraObjectId == "oid-new" &&
             u.Username == "jane" &&
             u.DisplayName == "Jane Smith")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetOrCreateCurrentUserAsync_NewUnlimitedUser_AssignsUnlimitedRole()
+    {
+        _configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["UserRoles:UnlimitedEntraObjectIds:0"] = "unlimited-oid",
+            })
+            .Build();
+        _sut = new AuthService(_authRepo.Object, _httpContextAccessor.Object, _configuration, _logger.Object);
+
+        SetupHttpContext(oid: "unlimited-oid", name: "Unlimited User", email: "user@test.com");
+
+        _authRepo.Setup(r => r.GetByEntraObjectIdAsync("unlimited-oid")).ReturnsAsync((UserProfile?)null);
+        _authRepo.Setup(r => r.CreateUserAsync(It.IsAny<UserProfile>()))
+            .ReturnsAsync((UserProfile u) => { u.Id = 100; return u; });
+
+        await _sut.GetOrCreateCurrentUserAsync();
+
+        _authRepo.Verify(r => r.CreateUserAsync(It.Is<UserProfile>(u =>
+            u.EntraObjectId == "unlimited-oid" &&
+            u.Role == UserRoles.Unlimited)), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetOrCreateCurrentUserAsync_AdminEmail_AssignsUnlimitedRole()
+    {
+        _configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Admin:AllowedEmails:0"] = "admin@test.com",
+            })
+            .Build();
+        _sut = new AuthService(_authRepo.Object, _httpContextAccessor.Object, _configuration, _logger.Object);
+
+        SetupHttpContext(oid: "oid-admin", name: "Admin User", email: "admin@test.com");
+
+        _authRepo.Setup(r => r.GetByEntraObjectIdAsync("oid-admin")).ReturnsAsync((UserProfile?)null);
+        _authRepo.Setup(r => r.CreateUserAsync(It.IsAny<UserProfile>()))
+            .ReturnsAsync((UserProfile u) => { u.Id = 101; return u; });
+
+        await _sut.GetOrCreateCurrentUserAsync();
+
+        _authRepo.Verify(r => r.CreateUserAsync(It.Is<UserProfile>(u =>
+            u.Email == "admin@test.com" &&
+            u.Role == UserRoles.Unlimited)), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetOrCreateCurrentUserAsync_RusheelEmail_AssignsUnlimitedRole()
+    {
+        SetupHttpContext(oid: "oid-rusheel", name: "Rusheel", email: "rusheel@live.com");
+
+        _authRepo.Setup(r => r.GetByEntraObjectIdAsync("oid-rusheel")).ReturnsAsync((UserProfile?)null);
+        _authRepo.Setup(r => r.CreateUserAsync(It.IsAny<UserProfile>()))
+            .ReturnsAsync((UserProfile u) => { u.Id = 200; return u; });
+
+        await _sut.GetOrCreateCurrentUserAsync();
+
+        _authRepo.Verify(r => r.CreateUserAsync(It.Is<UserProfile>(u =>
+            u.Email == "rusheel@live.com" &&
+            u.Role == UserRoles.Unlimited)), Times.Once);
     }
 
     [TestMethod]

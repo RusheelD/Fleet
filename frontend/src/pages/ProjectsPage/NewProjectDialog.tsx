@@ -20,6 +20,7 @@ import {
 } from '@fluentui/react-components'
 import { CheckmarkCircle16Filled, DismissCircle16Filled, LockClosedRegular } from '@fluentui/react-icons'
 import { useCreateProject, useCheckSlug, useGitHubRepos, useUserSettings } from '../../proxies'
+import { canCreateProject } from './projectCreationGate'
 
 function generateSlugPreview(name: string): string {
     return name
@@ -32,10 +33,13 @@ function generateSlugPreview(name: string): string {
 }
 
 const useStyles = makeStyles({
+    dialogSurface: {
+        width: 'min(680px, calc(100vw - 2rem))',
+    },
     dialogForm: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: '1.125rem',
     },
     repoHint: {
         color: tokens.colorNeutralForeground3,
@@ -46,6 +50,13 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: tokens.spacingHorizontalXS,
         marginTop: tokens.spacingVerticalXS,
+        backgroundColor: tokens.colorNeutralBackground2,
+        borderRadius: tokens.borderRadiusMedium,
+        paddingTop: '2px',
+        paddingBottom: '2px',
+        paddingLeft: '6px',
+        paddingRight: '6px',
+        width: 'fit-content',
     },
     slugText: {
         color: tokens.colorNeutralForeground3,
@@ -119,7 +130,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                 const descIdx = desc.indexOf(q)
                 if (nameIdx === -1 && descIdx === -1) return null
                 // Lower score = higher priority.
-                // Name matches score 0–999, desc matches score 1000+.
+                // Name matches score 0-999, desc matches score 1000+.
                 // Earlier position in the string = lower score within each tier.
                 const score = nameIdx !== -1 ? nameIdx : 1000 + descIdx
                 return { repo: r, score }
@@ -135,11 +146,16 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
     const slugAvailable = slugCheck.data?.available === true
     const slugUnavailable = slugCheck.data?.available === false && slugPreview.length > 0
     const isCheckingSlug = slugCheck.isLoading && slugPreview.length > 0
+    const hasSelectedRepo = repos?.some(r => r.fullName === repo.trim()) ?? false
 
-    const canCreate = title.trim().length > 0
-        && slugPreview.length > 0
-        && slugAvailable
-        && !createMutation.isPending
+    const canCreate = canCreateProject({
+        title,
+        slugPreview,
+        slugAvailable,
+        hasGitHub,
+        hasSelectedRepo,
+        isPending: createMutation.isPending,
+    })
 
     const resetForm = () => {
         setTitle('')
@@ -168,7 +184,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => { onOpenChange(data.open); if (!data.open) resetForm() }}>
-            <DialogSurface>
+            <DialogSurface className={styles.dialogSurface}>
                 <DialogBody>
                     <DialogTitle>Create New Project</DialogTitle>
                     <DialogContent>
@@ -210,10 +226,13 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                             </Field>
                             <Field
                                 label="GitHub Repository"
+                                required
+                                validationState={repo.trim().length > 0 && !hasSelectedRepo ? 'error' : undefined}
+                                validationMessage={repo.trim().length > 0 && !hasSelectedRepo ? 'Select a repository from your linked GitHub list.' : undefined}
                                 hint={
                                     hasGitHub ? undefined : (
                                         <Text className={styles.repoHint}>
-                                            Link your GitHub account in Settings → Connections to browse repos
+                                            Link your GitHub account in Settings {'>'} Connections to create a project
                                         </Text>
                                     )
                                 }
@@ -270,13 +289,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                             </Option>
                                         )}
                                     </Combobox>
-                                ) : (
-                                    <Input
-                                        placeholder="owner/repo"
-                                        value={repo}
-                                        onChange={(_e, data) => setRepo(data.value)}
-                                    />
-                                )}
+                                ) : null}
                             </Field>
                         </div>
                     </DialogContent>
@@ -289,7 +302,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                             onClick={handleCreate}
                             disabled={!canCreate}
                         >
-                            {createMutation.isPending ? 'Creating…' : 'Create Project'}
+                            {createMutation.isPending ? 'Creating...' : 'Create Project'}
                         </Button>
                     </DialogActions>
                 </DialogBody>
@@ -297,3 +310,4 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         </Dialog>
     )
 }
+

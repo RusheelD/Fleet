@@ -9,6 +9,7 @@ namespace Fleet.Server.Auth;
 public class AuthService(
     IAuthRepository authRepository,
     IHttpContextAccessor httpContextAccessor,
+    IConfiguration configuration,
     ILogger<AuthService> logger) : IAuthService
 {
     private int? _resolvedUserId;
@@ -40,9 +41,31 @@ public class AuthService(
         if (string.IsNullOrEmpty(oid))
             throw new UnauthorizedAccessException("No object identifier claim found in token.");
 
+        var email = principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal.FindFirst("preferred_username")?.Value
+            ?? "";
+        var isUnlimitedTierUser = IsUnlimitedTierUser(oid, email);
+
         var existing = await authRepository.GetByEntraObjectIdAsync(oid);
         if (existing is not null)
         {
+            var needsUpdate = false;
+            var normalizedRole = UserRoles.Normalize(existing.Role);
+            if (!string.Equals(existing.Role, normalizedRole, StringComparison.Ordinal))
+            {
+                existing.Role = normalizedRole;
+                needsUpdate = true;
+            }
+
+            if (isUnlimitedTierUser && !UserRoles.IsUnlimited(normalizedRole))
+            {
+                existing.Role = UserRoles.Unlimited;
+                needsUpdate = true;
+            }
+
+            if (needsUpdate)
+                await authRepository.UpdateUserAsync(existing);
+
             logger.AuthResolvedUser(oid.SanitizeForLogging(), existing.Id);
             _resolvedUserId = existing.Id;
             return existing;
@@ -53,10 +76,6 @@ public class AuthService(
             ?? principal.Identity?.Name
             ?? "User";
 
-        var email = principal.FindFirst(ClaimTypes.Email)?.Value
-            ?? principal.FindFirst("preferred_username")?.Value
-            ?? "";
-
         var user = new UserProfile
         {
             EntraObjectId = oid,
@@ -66,6 +85,7 @@ public class AuthService(
             Bio = string.Empty,
             Location = string.Empty,
             AvatarUrl = string.Empty,
+            Role = isUnlimitedTierUser ? UserRoles.Unlimited : UserRoles.Free,
             CreatedAt = DateTime.UtcNow,
             Preferences = new UserPreferences()
         };
@@ -89,8 +109,19 @@ public class AuthService(
                 if (concurrentlyCreated.EntraObjectId != oid)
                 {
                     concurrentlyCreated.EntraObjectId = oid;
-                    await authRepository.UpdateUserAsync(concurrentlyCreated);
                 }
+
+                if (string.IsNullOrWhiteSpace(concurrentlyCreated.Role))
+                    concurrentlyCreated.Role = UserRoles.Free;
+
+                concurrentlyCreated.Role = UserRoles.Normalize(concurrentlyCreated.Role);
+
+                if (isUnlimitedTierUser && !UserRoles.IsUnlimited(concurrentlyCreated.Role))
+                {
+                    concurrentlyCreated.Role = UserRoles.Unlimited;
+                }
+
+                await authRepository.UpdateUserAsync(concurrentlyCreated);
 
                 logger.AuthResolvedUser(oid.SanitizeForLogging(), concurrentlyCreated.Id);
                 _resolvedUserId = concurrentlyCreated.Id;
@@ -111,5 +142,47 @@ public class AuthService(
     }
 
     private static UserProfileDto ToProfileDto(UserProfile user) =>
-        new(user.DisplayName, user.Email, user.Bio, user.Location, user.AvatarUrl);
+        new(
+            user.DisplayName,
+            user.Email,
+            user.Bio,
+            user.Location,
+            user.AvatarUrl,
+            UserRoles.Normalize(user.Role));
+
+    private bool IsUnlimitedTierUser(string oid, string email)
+    {
+        if (IsAdminIdentity(oid, email))
+            return true;
+
+        var unlimitedObjectIds = configuration.GetSection("UserRoles:UnlimitedEntraObjectIds").Get<string[]>() ?? [];
+        if (unlimitedObjectIds.Contains(oid, StringComparer.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+
+        // Requested hard override: this identity always receives unlimited tier.
+        if (string.Equals(email, "rusheel@live.com", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var unlimitedEmails = configuration.GetSection("UserRoles:UnlimitedEmails").Get<string[]>() ?? [];
+        return unlimitedEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool IsAdminIdentity(string oid, string email)
+    {
+        var adminObjectIds = configuration.GetSection("Admin:AllowedEntraObjectIds").Get<string[]>() ?? [];
+        if (!string.IsNullOrWhiteSpace(oid) && adminObjectIds.Contains(oid, StringComparer.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+
+        if (string.Equals(email, "rusheel@live.com", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var adminEmails = configuration.GetSection("Admin:AllowedEmails").Get<string[]>() ?? [];
+        return adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
+    }
 }

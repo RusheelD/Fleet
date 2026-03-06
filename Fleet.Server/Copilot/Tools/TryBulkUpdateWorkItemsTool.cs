@@ -33,7 +33,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                             "description": { "type": "string" },
                             "priority": { "type": "string", "enum": ["1", "2", "3", "4"] },
                             "difficulty": { "type": "string", "enum": ["1", "2", "3", "4", "5"] },
-                            "state": { "type": "string", "enum": ["New", "Active", "In Progress", "Resolved", "Closed"] },
+                            "state": { "type": "string", "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"] },
                             "level": { "type": "string", "enum": ["Domain", "Module", "Feature", "Component", "Bug", "Task"] },
                             "parent_id": { "type": ["integer", "string"], "description": "Parent work-item number (integer), or batch index ref like '@2'. Set to 0 to clear." },
                             "tags": { "type": "array", "items": { "type": "string" } }

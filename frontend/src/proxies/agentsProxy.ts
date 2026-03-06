@@ -34,3 +34,23 @@ export function cancelExecution(projectId: string, executionId: string): Promise
 export function pauseExecution(projectId: string, executionId: string): Promise<{ executionId: string; status: string }> {
   return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/pause`, {})
 }
+
+export function steerExecution(projectId: string, executionId: string, note: string): Promise<{ executionId: string; status: string }> {
+  return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/steer`, { note })
+}
+
+export function retryExecution(projectId: string, executionId: string): Promise<{ executionId: string }> {
+  return post<{ executionId: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/retry`, {})
+}
+
+export interface ExecutionDocumentation {
+  executionId: string
+  title: string
+  markdown: string
+  pullRequestUrl: string | null
+  diffUrl: string | null
+}
+
+export function getExecutionDocumentation(projectId: string, executionId: string): Promise<ExecutionDocumentation> {
+  return get<ExecutionDocumentation>(`/api/projects/${projectId}/agents/executions/${executionId}/docs`)
+}

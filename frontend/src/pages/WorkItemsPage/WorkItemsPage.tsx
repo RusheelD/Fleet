@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Button,
     Input,
@@ -29,16 +30,19 @@ import {
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
 import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
-import { useCurrentProject, useChatGenerating } from '../../hooks'
+import { useCurrentProject, useChatGenerating, usePreferences } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 
-const BOARD_STATES = ['New', 'Active', 'In Progress', 'Resolved', 'Closed']
+const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
 
 function getBoardColumns(items: WorkItem[]) {
     return BOARD_STATES.map((state) => ({
         state,
         items: items.filter((item) => {
-            if (state === 'In Progress') return item.state === 'In Progress' || item.state === 'In Progress (AI)'
+            if (state === 'In Progress') {
+                return item.state === 'Planning (AI)' || item.state === 'In Progress' || item.state === 'In Progress (AI)'
+            }
+            if (state === 'In PR') return item.state === 'In-PR' || item.state === 'In-PR (AI)'
             if (state === 'Resolved') return item.state === 'Resolved' || item.state === 'Resolved (AI)'
             return item.state === state
         }),
@@ -58,6 +62,7 @@ const useStyles = makeStyles({
         flex: 1,
         overflow: 'hidden',
         minWidth: 0,
+        backgroundColor: tokens.colorNeutralBackground3,
     },
     headerActions: {
         display: 'flex',
@@ -71,6 +76,24 @@ const useStyles = makeStyles({
         marginBottom: tokens.spacingVerticalM,
         gap: tokens.spacingHorizontalM,
         flexWrap: 'wrap',
+        paddingTop: tokens.spacingVerticalXS,
+        paddingBottom: tokens.spacingVerticalXS,
+        paddingLeft: tokens.spacingHorizontalS,
+        paddingRight: tokens.spacingHorizontalS,
+        borderRadius: tokens.borderRadiusLarge,
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
+        backgroundColor: tokens.colorNeutralBackground1,
     },
     toolbarLeft: {
         display: 'flex',
@@ -78,9 +101,11 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalS,
         flex: 1,
         minWidth: '200px',
+        flexWrap: 'wrap',
     },
     searchInput: {
         maxWidth: '280px',
+        minWidth: '210px',
         flex: 1,
     },
     boardContainer: {
@@ -88,14 +113,21 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: tokens.spacingHorizontalM,
         overflow: 'auto',
+        paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalM,
     },
+    boardContainerCompact: {
+        gap: tokens.spacingHorizontalS,
+        paddingTop: 0,
+        paddingBottom: tokens.spacingVerticalS,
+    },
     filterSurface: {
-        padding: '0.75rem',
+        padding: '0.875rem',
         display: 'flex',
         flexDirection: 'column' as const,
         gap: '0.5rem',
         minWidth: '200px',
+        borderRadius: tokens.borderRadiusLarge,
     },
     filterSection: {
         display: 'flex',
@@ -109,7 +141,7 @@ const useStyles = makeStyles({
     },
 })
 
-const ALL_STATES: WorkItemState[] = ['New', 'Active', 'In Progress', 'In Progress (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
+const ALL_STATES: WorkItemState[] = ['New', 'Active', 'Planning (AI)', 'In Progress', 'In Progress (AI)', 'In-PR', 'In-PR (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
 const ALL_PRIORITIES = [1, 2, 3, 4] as const
 
 interface WorkItemFilters {
@@ -128,6 +160,8 @@ export function WorkItemsPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
     const { isGenerating } = useChatGenerating()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const { data: workItems, isLoading } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
     const { data: levels } = useWorkItemLevels(projectId)
     const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
@@ -342,7 +376,7 @@ export function WorkItemsPage() {
                     />
                 )}
                 {viewMode === 'board' && (
-                    <div className={styles.boardContainer}>
+                    <div className={mergeClasses(styles.boardContainer, isCompact && styles.boardContainerCompact)}>
                         {boardColumns.map((col) => (
                             <KanbanColumn key={col.state} state={col.state} items={col.items} levelMap={levelMap} onItemClick={setSelectedItem} />
                         ))}

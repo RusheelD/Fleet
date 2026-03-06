@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { makeStyles, tokens, Spinner } from '@fluentui/react-components'
+import { makeStyles, mergeClasses, tokens, Spinner } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatSuggestions, ChatInput, AttachedFiles } from './'
@@ -10,8 +10,9 @@ import {
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession,
     sendChatMessage,
 } from '../../proxies'
-import { useChatGenerating } from '../../hooks'
+import { useChatGenerating, useAuth, usePreferences } from '../../hooks'
 import type { ChatMessageData, SendMessageResponse } from '../../models'
+import { resolveChatUserIdentity } from './initials'
 
 const useStyles = makeStyles({
     drawer: {
@@ -23,19 +24,39 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         width: '100%',
     },
+    drawerCompact: {
+        fontSize: '12px',
+    },
     messagesContainer: {
         flex: 1,
         overflow: 'auto',
-        padding: '1rem',
+        paddingTop: '1rem',
+        paddingBottom: '1rem',
+        paddingLeft: '0.875rem',
+        paddingRight: '0.875rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: '0.75rem',
+        backgroundColor: tokens.colorNeutralBackground2,
+    },
+    messagesContainerCompact: {
+        paddingTop: '0.5rem',
+        paddingBottom: '0.5rem',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.5rem',
     },
     thinkingRow: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        padding: '0.5rem 0',
+        padding: '0.5rem 0.25rem',
+    },
+    thinkingRowCompact: {
+        paddingTop: '0.25rem',
+        paddingBottom: '0.25rem',
+        paddingLeft: '0.125rem',
+        paddingRight: '0.125rem',
     },
 })
 
@@ -52,6 +73,9 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [isThinking, setIsThinking] = useState(false)
     const { isGenerating, setIsGenerating } = useChatGenerating()
+    const { user } = useAuth()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -60,7 +84,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         pollingInterval: isThinking ? 3_000 : false,
     })
     const createSessionMutation = useCreateChatSession(projectId)
-    const deletSessionMutation = useDeleteSession(projectId)
+    const deleteSessionMutation = useDeleteSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId, activeSession)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
@@ -99,7 +123,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         if (lastMsg && lastMsg.role === 'assistant') {
             setIsThinking(false)
             setIsGenerating(false)
-            // Don't clear optimistic here — the displayMessages dedup handles the
+            // Don't clear optimistic here - the displayMessages dedup handles the
             // transition seamlessly. Optimistic messages are cleaned up in doSend's
             // .then() after queries are refreshed.
             void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
@@ -113,7 +137,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const displayMessages = useMemo(() => {
         const serverIds = new Set(serverMessages.map(m => m.id))
         const pending = optimisticMessages.filter(m => !serverIds.has(m.id))
-        // Also deduplicate by content — if the server already has the user message, skip
+        // Also deduplicate by content - if the server already has the user message, skip
         const serverUserContents = new Set(
             serverMessages.filter(m => m.role === 'user').map(m => m.content)
         )
@@ -121,6 +145,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         return [...serverMessages, ...unique]
     }, [serverMessages, optimisticMessages])
     const suggestions = chatData?.suggestions ?? []
+    const currentUserIdentity = resolveChatUserIdentity(user?.displayName, user?.email)
 
     // Auto-select first session when chat data loads
     useEffect(() => {
@@ -146,7 +171,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
 
         // Optimistic: show user message immediately
         const displayContent = generateWorkItems && !userContent
-            ? '📋 Generate work items'
+            ? 'Generate work items'
             : userContent
         setOptimisticMessages([{
             id: `optimistic-${Date.now()}`,
@@ -209,7 +234,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     }
 
     const handleDeleteSession = (sessionId: string) => {
-        deletSessionMutation.mutate(sessionId, {
+        deleteSessionMutation.mutate(sessionId, {
             onSuccess: () => {
                 // If deleted session was active, switch to first remaining session or clear
                 if (activeSession === sessionId) {
@@ -230,7 +255,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     }
 
     return (
-        <div className={styles.drawer}>
+        <div className={mergeClasses(styles.drawer, isCompact && styles.drawerCompact)}>
             <ChatDrawerHeader onClose={onClose} />
 
             <ChatSessionBar
@@ -242,24 +267,24 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             />
 
             {loadingChat ? (
-                <div className={styles.messagesContainer}>
+                <div className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}>
                     <Spinner label="Loading chat..." />
                 </div>
             ) : (
-                <div className={styles.messagesContainer}>
+                <div className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}>
                     {displayMessages.map((msg) => (
-                        <ChatMessage key={msg.id} message={msg} />
+                        <ChatMessage key={msg.id} message={msg} currentUserIdentity={currentUserIdentity} />
                     ))}
                     {toolEvents.length > 0 && toolEvents.map((evt, i) => (
                         <ToolEventMessage key={`tool-${i}`} event={evt} />
                     ))}
                     {isThinking && (
-                        <div className={styles.thinkingRow}>
+                        <div className={mergeClasses(styles.thinkingRow, isCompact && styles.thinkingRowCompact)}>
                             <Spinner
                                 size="tiny"
                                 label={isGenerating
-                                    ? 'Fleet AI is generating work items — this may take a while…'
-                                    : 'Fleet AI is thinking…'}
+                                    ? 'Fleet AI is generating work items - this may take a while...'
+                                    : 'Fleet AI is thinking...'}
                                 labelPosition="after"
                             />
                         </div>
@@ -288,3 +313,4 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         </div>
     )
 }
+

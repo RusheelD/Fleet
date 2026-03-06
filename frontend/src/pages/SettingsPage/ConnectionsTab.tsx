@@ -18,7 +18,7 @@ import {
 } from '@fluentui/react-components'
 import { PlugConnectedRegular } from '@fluentui/react-icons'
 import { AccountRow } from './'
-import { useUnlinkGitHub } from '../../proxies'
+import { getGitHubOAuthState, useUnlinkGitHub } from '../../proxies'
 import type { LinkedAccount } from '../../models'
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined
@@ -58,13 +58,14 @@ function getNormalizedRedirectUri(): string {
     return origin
 }
 
-function buildGitHubAuthUrl(): string {
+function buildGitHubAuthUrl(state: string): string {
     const baseUri = getNormalizedRedirectUri()
     const redirectUri = `${baseUri}/auth/github/callback`
     const params = new URLSearchParams({
         client_id: GITHUB_CLIENT_ID ?? '',
         redirect_uri: redirectUri,
         scope: 'read:user user:email repo',
+        state,
     })
     return `https://github.com/login/oauth/authorize?${params.toString()}`
 }
@@ -77,12 +78,19 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
     const styles = useStyles()
     const unlinkGitHub = useUnlinkGitHub()
     const [disconnectOpen, setDisconnectOpen] = useState(false)
+    const [isConnecting, setIsConnecting] = useState(false)
 
     const gitHubConnection = connections.find(c => c.provider === 'GitHub')
     const isGitHubConnected = !!gitHubConnection?.connectedAs
 
-    const handleConnectGitHub = useCallback(() => {
-        window.location.href = buildGitHubAuthUrl()
+    const handleConnectGitHub = useCallback(async () => {
+        try {
+            setIsConnecting(true)
+            const { state } = await getGitHubOAuthState()
+            window.location.href = buildGitHubAuthUrl(state)
+        } finally {
+            setIsConnecting(false)
+        }
     }, [])
 
     const handleDisconnectGitHub = useCallback(() => {
@@ -146,9 +154,9 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
                             appearance="primary"
                             size="small"
                             onClick={handleConnectGitHub}
-                            disabled={!GITHUB_CLIENT_ID}
+                            disabled={!GITHUB_CLIENT_ID || isConnecting}
                         >
-                            Connect GitHub
+                            {isConnecting ? 'Connecting...' : 'Connect GitHub'}
                         </Button>
                     )
                 }

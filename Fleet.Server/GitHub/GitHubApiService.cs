@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Fleet.Server.Connections;
 using Fleet.Server.Logging;
 
@@ -8,15 +9,26 @@ namespace Fleet.Server.GitHub;
 
 public class GitHubApiService(
     IConnectionRepository connectionRepository,
+    IGitHubTokenProtector tokenProtector,
     IHttpClientFactory httpClientFactory,
     ILogger<GitHubApiService> logger) : IGitHubApiService
 {
     private const string GitHubApiBase = "https://api.github.com";
+    private static readonly Regex WorkItemReferenceRegex = new(@"F#(?<number>\d+)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex WordRegex = new(@"[A-Za-z]+", RegexOptions.Compiled);
+    private static readonly HashSet<string> FixKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fix",
+        "fixes",
+        "fixed",
+    };
 
     public async Task<GitHubRepoStats> GetRepoStatsAsync(int userId, string repoFullName)
     {
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        if (account is null || string.IsNullOrEmpty(account.AccessToken))
+        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
+        if (account is null || string.IsNullOrEmpty(accessToken))
         {
             logger.GitHubNoToken(userId);
             return new GitHubRepoStats(0, 0, 0, []);
@@ -26,9 +38,9 @@ public class GitHubApiService(
 
         try
         {
-            var (openPrs, mergedPrs) = await FetchPullRequestStatsAsync(client, account.AccessToken, repoFullName);
-            var recentCommits = await FetchRecentCommitCountAsync(client, account.AccessToken, repoFullName);
-            var events = await FetchRecentEventsAsync(client, account.AccessToken, repoFullName);
+            var (openPrs, mergedPrs) = await FetchPullRequestStatsAsync(client, accessToken, repoFullName);
+            var recentCommits = await FetchRecentCommitCountAsync(client, accessToken, repoFullName);
+            var events = await FetchRecentEventsAsync(client, accessToken, repoFullName);
 
             return new GitHubRepoStats(openPrs, mergedPrs, recentCommits, events);
         }
@@ -36,6 +48,38 @@ public class GitHubApiService(
         {
             logger.GitHubApiFailed(ex, repoFullName.SanitizeForLogging());
             return new GitHubRepoStats(0, 0, 0, []);
+        }
+    }
+
+    public async Task<IReadOnlyList<GitHubWorkItemReference>> GetWorkItemReferencesAsync(int userId, string repoFullName)
+    {
+        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
+        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
+        if (account is null || string.IsNullOrEmpty(accessToken))
+        {
+            logger.GitHubNoToken(userId);
+            return [];
+        }
+
+        var client = httpClientFactory.CreateClient("GitHub");
+
+        try
+        {
+            var openPrs = await FetchPullRequestsAsync(client, accessToken, repoFullName, "open");
+            var closedPrs = await FetchPullRequestsAsync(client, accessToken, repoFullName, "closed");
+
+            var allRefs = new List<GitHubWorkItemReference>();
+            foreach (var pr in openPrs.Concat(closedPrs))
+            {
+                allRefs.AddRange(ParseWorkItemReferences(pr));
+            }
+
+            return MergeDuplicateReferences(allRefs);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.GitHubApiFailed(ex, repoFullName.SanitizeForLogging());
+            return [];
         }
     }
 
@@ -162,6 +206,75 @@ public class GitHubApiService(
         };
     }
 
+    private static IReadOnlyList<GitHubWorkItemReference> ParseWorkItemReferences(GitHubPullRequest pr)
+    {
+        var text = $"{pr.Title}\n{pr.Body}";
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        var refs = new List<GitHubWorkItemReference>();
+
+        foreach (Match match in WorkItemReferenceRegex.Matches(text))
+        {
+            if (!int.TryParse(match.Groups["number"].Value, out var workItemNumber))
+                continue;
+
+            var previousWord = GetPreviousWord(text, match.Index);
+            var isFixReference = previousWord is not null && FixKeywords.Contains(previousWord);
+            var url = string.IsNullOrWhiteSpace(pr.HtmlUrl) ? string.Empty : pr.HtmlUrl;
+
+            refs.Add(new GitHubWorkItemReference(
+                workItemNumber,
+                url,
+                pr.Title,
+                isFixReference,
+                pr.MergedAt is not null,
+                pr.UpdatedAt));
+        }
+
+        return refs;
+    }
+
+    private static IReadOnlyList<GitHubWorkItemReference> MergeDuplicateReferences(
+        IReadOnlyList<GitHubWorkItemReference> references)
+    {
+        if (references.Count == 0)
+            return [];
+
+        var merged = new Dictionary<(int WorkItemNumber, string PullRequestUrl), GitHubWorkItemReference>();
+        foreach (var reference in references)
+        {
+            var key = (reference.WorkItemNumber, reference.PullRequestUrl);
+            if (!merged.TryGetValue(key, out var existing))
+            {
+                merged[key] = reference;
+                continue;
+            }
+
+            merged[key] = existing with
+            {
+                IsFixReference = existing.IsFixReference || reference.IsFixReference,
+                IsMerged = existing.IsMerged || reference.IsMerged,
+                UpdatedAt = existing.UpdatedAt >= reference.UpdatedAt ? existing.UpdatedAt : reference.UpdatedAt,
+            };
+        }
+
+        return [.. merged.Values];
+    }
+
+    private static string? GetPreviousWord(string text, int index)
+    {
+        if (index <= 0)
+            return null;
+
+        var prefix = text[..index];
+        var matches = WordRegex.Matches(prefix);
+        if (matches.Count == 0)
+            return null;
+
+        return matches[matches.Count - 1].Value;
+    }
+
     // ── GitHub API response models ────────────────────────────
 
     private sealed class GitHubPullRequest
@@ -172,11 +285,20 @@ public class GitHubApiService(
         [JsonPropertyName("title")]
         public string Title { get; set; } = string.Empty;
 
+        [JsonPropertyName("body")]
+        public string Body { get; set; } = string.Empty;
+
+        [JsonPropertyName("html_url")]
+        public string HtmlUrl { get; set; } = string.Empty;
+
         [JsonPropertyName("state")]
         public string State { get; set; } = string.Empty;
 
         [JsonPropertyName("merged_at")]
         public DateTimeOffset? MergedAt { get; set; }
+
+        [JsonPropertyName("updated_at")]
+        public DateTimeOffset UpdatedAt { get; set; }
     }
 
     private sealed class GitHubEvent

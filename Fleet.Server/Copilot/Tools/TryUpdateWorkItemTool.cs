@@ -38,7 +38,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                 "state": {
                     "type": "string",
                     "description": "State.",
-                    "enum": ["New", "Active", "In Progress", "Resolved", "Closed"]
+                    "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"]
                 },
                 "level": {
                     "type": "string",

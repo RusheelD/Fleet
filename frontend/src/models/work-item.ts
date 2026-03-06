@@ -1,4 +1,14 @@
-export type WorkItemState = 'New' | 'Active' | 'In Progress' | 'In Progress (AI)' | 'Resolved' | 'Resolved (AI)' | 'Closed'
+export type WorkItemState =
+  'New'
+  | 'Active'
+  | 'Planning (AI)'
+  | 'In Progress'
+  | 'In Progress (AI)'
+  | 'In-PR'
+  | 'In-PR (AI)'
+  | 'Resolved'
+  | 'Resolved (AI)'
+  | 'Closed'
 
 export interface WorkItem {
   workItemNumber: number
@@ -13,6 +23,10 @@ export interface WorkItem {
   parentWorkItemNumber: number | null
   childWorkItemNumbers: number[]
   levelId: number | null
+  assignmentMode: 'auto' | 'manual'
+  assignedAgentCount: number | null
+  acceptanceCriteria: string
+  linkedPullRequestUrl?: string | null
 }
 
 export interface WorkItemLevel {

@@ -1,39 +1,54 @@
 using Fleet.Server.Models;
 using Fleet.Server.Subscriptions;
+using Fleet.Server.Data;
+using Fleet.Server.Data.Entities;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using Moq;
+using System.Linq;
 
 namespace Fleet.Server.Tests.Services;
 
 [TestClass]
 public class SubscriptionServiceTests
 {
-    private Mock<ISubscriptionRepository> _repo = null!;
     private Mock<ILogger<SubscriptionService>> _logger = null!;
+    private FleetDbContext _dbContext = null!;
+    private IUsageLedgerService _usageLedgerService = null!;
     private SubscriptionService _sut = null!;
+    private const int UserId = 42;
 
     [TestInitialize]
     public void Setup()
     {
-        _repo = new Mock<ISubscriptionRepository>();
         _logger = new Mock<ILogger<SubscriptionService>>();
-        _sut = new SubscriptionService(_repo.Object, _logger.Object);
+
+        var options = new DbContextOptionsBuilder<FleetDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString("N"))
+            .Options;
+        _dbContext = new FleetDbContext(options);
+        _dbContext.UserProfiles.Add(new UserProfile
+        {
+            Id = UserId,
+            EntraObjectId = "oid-42",
+            Username = "user42",
+            Email = "user42@fleet.dev",
+            DisplayName = "User 42",
+            Role = Fleet.Server.Auth.UserRoles.Free,
+        });
+        _dbContext.SaveChanges();
+
+        _usageLedgerService = new UsageLedgerService(_dbContext);
+        _sut = new SubscriptionService(_usageLedgerService, _dbContext, _logger.Object);
     }
 
     [TestMethod]
-    public async Task GetSubscriptionDataAsync_DelegatesToRepo()
+    public async Task GetSubscriptionDataAsync_ReturnsTierAndUsage()
     {
-        var expected = new SubscriptionDataDto(
-            new CurrentPlanDto("Free", "Free tier"),
-            [new UsageMeterDto("API Calls", "100/1000", 0.1, "green", "900 remaining")],
-            [new PlanDto("Free", "rocket", "$0", "/month", "Free tier", ["Feature 1"], "Current", true, "subtle")]);
+        var result = await _sut.GetSubscriptionDataAsync(UserId);
 
-        _repo.Setup(r => r.GetSubscriptionDataAsync()).ReturnsAsync(expected);
-
-        var result = await _sut.GetSubscriptionDataAsync();
-
-        Assert.AreEqual("Free", result.CurrentPlan.Name);
-        Assert.AreEqual(1, result.Usage.Length);
-        Assert.AreEqual(1, result.Plans.Length);
+        Assert.AreEqual("Free Tier", result.CurrentPlan.Name);
+        Assert.IsTrue(result.Usage.Length >= 2);
+        Assert.IsTrue(result.Plans.Any(p => p.IsCurrent && p.Name == "Free"));
     }
 }

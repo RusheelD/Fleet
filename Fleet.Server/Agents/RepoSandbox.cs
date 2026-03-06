@@ -18,6 +18,7 @@ public class RepoSandbox : IRepoSandbox
     private string _branchName = string.Empty;
     private string _accessToken = string.Empty;
     private bool _disposed;
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     /// <summary>Max output length from a command (256 KB).</summary>
     private const int MaxOutputLength = 256 * 1024;
@@ -114,25 +115,41 @@ public class RepoSandbox : IRepoSandbox
     public void WriteFile(string relativePath, string content)
     {
         EnsureInitialized();
-        var fullPath = ResolveSafePath(relativePath);
+        _writeLock.Wait();
+        try
+        {
+            var fullPath = ResolveSafePath(relativePath);
 
-        var dir = Path.GetDirectoryName(fullPath);
-        if (dir is not null && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
+            var dir = Path.GetDirectoryName(fullPath);
+            if (dir is not null && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
 
-        File.WriteAllText(fullPath, content);
+            File.WriteAllText(fullPath, content);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public bool DeleteFile(string relativePath)
     {
         EnsureInitialized();
-        var fullPath = ResolveSafePath(relativePath);
+        _writeLock.Wait();
+        try
+        {
+            var fullPath = ResolveSafePath(relativePath);
 
-        if (!File.Exists(fullPath))
-            return false;
+            if (!File.Exists(fullPath))
+                return false;
 
-        File.Delete(fullPath);
-        return true;
+            File.Delete(fullPath);
+            return true;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public IReadOnlyList<SearchResult> SearchFiles(string pattern, bool isRegex = false, string? fileGlob = null, int maxResults = 50)
@@ -206,95 +223,110 @@ public class RepoSandbox : IRepoSandbox
         // Validate the command doesn't try to escape the sandbox
         ValidateCommand(command, arguments);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = command,
-            Arguments = arguments,
-            WorkingDirectory = _repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        // Restrict environment to prevent leaks
-        psi.Environment["HOME"] = _repoRoot;
-        psi.Environment["USERPROFILE"] = _repoRoot;
-
-        using var process = new Process { StartInfo = psi };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-        var timedOut = false;
-
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null && stdout.Length < MaxOutputLength)
-                stdout.AppendLine(e.Data);
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null && stderr.Length < MaxOutputLength)
-                stderr.AppendLine(e.Data);
-        };
-
+        await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-            await process.WaitForExitAsync(cts.Token);
+            var psi = new ProcessStartInfo
+            {
+                FileName = command,
+                Arguments = arguments,
+                WorkingDirectory = _repoRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            // Restrict environment to prevent leaks
+            psi.Environment["HOME"] = _repoRoot;
+            psi.Environment["USERPROFILE"] = _repoRoot;
+
+            using var process = new Process { StartInfo = psi };
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            var timedOut = false;
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null && stdout.Length < MaxOutputLength)
+                    stdout.AppendLine(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null && stderr.Length < MaxOutputLength)
+                    stderr.AppendLine(e.Data);
+            };
+
+            try
+            {
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                timedOut = true;
+                try { process.Kill(entireProcessTree: true); }
+                catch { /* best effort */ }
+            }
+
+            _logger.LogInformation("Command finished: exit={ExitCode} timedOut={TimedOut}", process.ExitCode, timedOut);
+
+            return new CommandResult(
+                timedOut ? -1 : process.ExitCode,
+                stdout.ToString().TrimEnd(),
+                stderr.ToString().TrimEnd(),
+                timedOut
+            );
         }
-        catch (OperationCanceledException)
+        finally
         {
-            timedOut = true;
-            try { process.Kill(entireProcessTree: true); }
-            catch { /* best effort */ }
+            _writeLock.Release();
         }
-
-        _logger.LogInformation("Command finished: exit={ExitCode} timedOut={TimedOut}", process.ExitCode, timedOut);
-
-        return new CommandResult(
-            timedOut ? -1 : process.ExitCode,
-            stdout.ToString().TrimEnd(),
-            stderr.ToString().TrimEnd(),
-            timedOut
-        );
     }
 
     public async Task CommitAndPushAsync(string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken)
     {
         EnsureInitialized();
-
-        // Stage all changes
-        var result = await RunGitAsync("add -A", cancellationToken: cancellationToken);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"Git add failed: {result.Stderr}");
-
-        // Check if there are changes to commit
-        var status = await RunGitAsync("status --porcelain", cancellationToken: cancellationToken);
-        if (string.IsNullOrWhiteSpace(status.Stdout))
+        await _writeLock.WaitAsync(cancellationToken);
+        try
         {
-            _logger.LogInformation("No changes to commit");
-            return;
+            // Stage all changes
+            var result = await RunGitAsync("add -A", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git add failed: {result.Stderr}");
+
+            // Check if there are changes to commit
+            var status = await RunGitAsync("status --porcelain", cancellationToken: cancellationToken);
+            if (string.IsNullOrWhiteSpace(status.Stdout))
+            {
+                _logger.LogInformation("No changes to commit");
+                return;
+            }
+
+            // Commit
+            result = await RunGitAsync(
+                $"commit -m \"{commitMessage.Replace("\"", "\\\"")}\" --author=\"{authorName} <{authorEmail}>\"",
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
+
+            // Push to remote
+            result = await RunGitAsync($"push -u origin {_branchName}", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git push failed: {result.Stderr}");
+
+            _logger.LogInformation("Committed and pushed to {Branch}", _branchName);
         }
-
-        // Commit
-        result = await RunGitAsync(
-            $"commit -m \"{commitMessage.Replace("\"", "\\\"")}\" --author=\"{authorName} <{authorEmail}>\"",
-            cancellationToken: cancellationToken);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
-
-        // Push to remote
-        result = await RunGitAsync($"push -u origin {_branchName}", cancellationToken: cancellationToken);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"Git push failed: {result.Stderr}");
-
-        _logger.LogInformation("Committed and pushed to {Branch}", _branchName);
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public async Task<IReadOnlyList<FileChange>> GetChangeSummaryAsync(CancellationToken cancellationToken)
@@ -391,15 +423,58 @@ public class RepoSandbox : IRepoSandbox
     /// </summary>
     private void ValidateCommand(string command, string arguments)
     {
-        var combined = $"{command} {arguments}".ToLowerInvariant();
+        var commandName = Path.GetFileName(command).ToLowerInvariant();
+        var combined = $"{commandName} {arguments}".ToLowerInvariant();
 
         // Block commands that could escape the sandbox
-        string[] blocked = ["rm -rf /", "format ", "shutdown", "reboot", "mkfs", "dd if=", ":(){ :|:& };:"];
+        string[] blocked =
+        [
+            "rm -rf /",
+            "rm -rf ..",
+            "format ",
+            "shutdown",
+            "reboot",
+            "mkfs",
+            "dd if=",
+            ":(){ :|:& };:",
+            "git push --force",
+            "git push -f",
+            "git push origin :",
+            "git push --delete",
+            "git branch -d",
+            "git branch -D",
+        ];
         foreach (var b in blocked)
         {
             if (combined.Contains(b))
                 throw new UnauthorizedAccessException($"Blocked command: {command} {arguments}");
         }
+
+        if (IsProtectedBranchPush(combined))
+            throw new UnauthorizedAccessException($"Blocked push to protected branch: {command} {arguments}");
+    }
+
+    private static bool IsProtectedBranchPush(string combinedCommand)
+    {
+        if (!combinedCommand.Contains("git push", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string[] protectedBranchMarkers =
+        [
+            " origin main",
+            " origin master",
+            " origin develop",
+            " origin development",
+            " origin release",
+            " refs/heads/main",
+            " refs/heads/master",
+            " refs/heads/develop",
+            " refs/heads/development",
+            " refs/heads/release",
+        ];
+
+        return protectedBranchMarkers.Any(marker =>
+            combinedCommand.Contains(marker, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)

@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.DataProtection;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
@@ -9,17 +11,50 @@ namespace Fleet.Server.Connections;
 
 public class ConnectionService(
     IConnectionRepository connectionRepository,
+    IGitHubTokenProtector? tokenProtector,
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
+    IDataProtectionProvider? dataProtectionProvider,
     ILogger<ConnectionService> logger) : IConnectionService
 {
-    public async Task<LinkedAccountDto> LinkGitHubAsync(int userId, string code, string redirectUri)
+    private static readonly TimeSpan OAuthStateLifetime = TimeSpan.FromMinutes(10);
+    private readonly IGitHubTokenProtector _tokenProtector = tokenProtector ?? new NoOpTokenProtector();
+    private readonly IDataProtector _stateProtector =
+        (dataProtectionProvider ?? DataProtectionProvider.Create("Fleet.ConnectionService"))
+            .CreateProtector("Fleet.GitHub.OAuthState.v1");
+
+    // Backward-compatible constructor for existing tests/callers.
+    public ConnectionService(
+        IConnectionRepository connectionRepository,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<ConnectionService> logger)
+        : this(connectionRepository, null, httpClientFactory, configuration, null, logger)
+    {
+    }
+
+    public Task<GitHubOAuthStateDto> CreateGitHubOAuthStateAsync(int userId)
+    {
+        var payload = new OAuthStatePayload(
+            userId,
+            DateTimeOffset.UtcNow.Add(OAuthStateLifetime).ToUnixTimeSeconds(),
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(16)));
+
+        var json = JsonSerializer.Serialize(payload);
+        var state = _stateProtector.Protect(json);
+        return Task.FromResult(new GitHubOAuthStateDto(state));
+    }
+
+    public async Task<LinkedAccountDto> LinkGitHubAsync(int userId, string code, string redirectUri, string state)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["UserId"] = userId,
             ["Provider"] = "GitHub"
         });
+
+        if (!ValidateState(userId, state))
+            throw new UnauthorizedAccessException("Invalid or expired GitHub OAuth state.");
 
         var sanitizedRedirect = LogSanitizer.SanitizeUrl(redirectUri);
         logger.ConnectionsLinkGitHubRequested(userId, sanitizedRedirect.SanitizeForLogging());
@@ -73,7 +108,7 @@ public class ConnectionService(
         {
             // Update the existing linked account with fresh token/profile
             existing.ConnectedAs = gitHubUser.Login;
-            existing.AccessToken = tokenBody.AccessToken;
+            existing.AccessToken = _tokenProtector.Protect(tokenBody.AccessToken);
             existing.ExternalUserId = gitHubUser.Id.ToString();
             existing.ConnectedAt = DateTime.UtcNow;
             await connectionRepository.UpdateAsync(existing);
@@ -86,7 +121,7 @@ public class ConnectionService(
         {
             Provider = "GitHub",
             ConnectedAs = gitHubUser.Login,
-            AccessToken = tokenBody.AccessToken,
+            AccessToken = _tokenProtector.Protect(tokenBody.AccessToken),
             ExternalUserId = gitHubUser.Id.ToString(),
             ConnectedAt = DateTime.UtcNow,
             UserProfileId = userId,
@@ -134,7 +169,8 @@ public class ConnectionService(
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub")
             ?? throw new InvalidOperationException("No GitHub account is linked.");
 
-        if (string.IsNullOrEmpty(account.AccessToken))
+        var accessToken = _tokenProtector.Unprotect(account.AccessToken);
+        if (string.IsNullOrEmpty(accessToken))
             throw new InvalidOperationException("GitHub access token is missing.");
 
         var httpClient = httpClientFactory.CreateClient("GitHub");
@@ -146,7 +182,7 @@ public class ConnectionService(
         {
             using var request = new HttpRequestMessage(HttpMethod.Get,
                 $"https://api.github.com/user/repos?per_page=100&page={page}&sort=updated&direction=desc");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", account.AccessToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Headers.UserAgent.ParseAdd("Fleet/1.0");
 
             var response = await httpClient.SendAsync(request);
@@ -227,4 +263,43 @@ public class ConnectionService(
         [JsonPropertyName("login")]
         public string Login { get; set; } = string.Empty;
     }
+
+    private sealed class NoOpTokenProtector : IGitHubTokenProtector
+    {
+        public string Protect(string token) => token;
+        public string? Unprotect(string? protectedToken) => protectedToken;
+    }
+
+    private bool ValidateState(int userId, string state)
+    {
+        if (string.IsNullOrWhiteSpace(state))
+            return false;
+
+        try
+        {
+            var json = _stateProtector.Unprotect(state);
+            var payload = JsonSerializer.Deserialize<OAuthStatePayload>(json);
+            if (payload is null)
+                return false;
+
+            if (payload.UserId != userId)
+                return false;
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (payload.ExpiresAtUnix < now)
+                return false;
+
+            return !string.IsNullOrWhiteSpace(payload.Nonce);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record OAuthStatePayload(int UserId, long ExpiresAtUnix, string Nonce);
 }

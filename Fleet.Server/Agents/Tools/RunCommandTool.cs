@@ -21,7 +21,7 @@ public class RunCommandTool : IAgentTool
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The command to run (e.g., 'dotnet', 'npm', 'npx', 'node', 'python')."
+                    "description": "The command to run (e.g., 'dotnet', 'npm', 'bash', 'pwsh')."
                 },
                 "arguments": {
                     "type": "string",
@@ -47,17 +47,18 @@ public class RunCommandTool : IAgentTool
             return "Error: 'arguments' parameter is required.";
 
         var command = cmdProp.GetString()!;
+        var normalizedCommand = command.Trim();
         var arguments = argsProp.GetString() ?? "";
         var timeout = args.TryGetProperty("timeout_seconds", out var timeoutProp) ? timeoutProp.GetInt32() : 120;
         timeout = Math.Min(timeout, 300); // Hard cap at 5 minutes
 
         try
         {
-            var result = await context.Sandbox.RunCommandAsync(command, arguments, timeout, cancellationToken);
+            var result = await context.Sandbox.RunCommandAsync(normalizedCommand, arguments, timeout, cancellationToken);
 
             var output = new
             {
-                command = $"{command} {arguments}",
+                command = $"{normalizedCommand} {arguments}",
                 exitCode = result.ExitCode,
                 timedOut = result.TimedOut,
                 stdout = TruncateOutput(result.Stdout, 8000),

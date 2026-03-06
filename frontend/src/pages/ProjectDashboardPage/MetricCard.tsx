@@ -1,11 +1,13 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Caption1,
     Text,
     Card,
     ProgressBar,
 } from '@fluentui/react-components'
+import { usePreferences } from '../../hooks'
 import type { ReactNode } from 'react'
 
 const useStyles = makeStyles({
@@ -15,11 +17,21 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '0.5rem',
     },
+    metricCardCompact: {
+        paddingTop: '0.5rem',
+        paddingBottom: '0.5rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+        gap: '0.25rem',
+    },
     metricHeader: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
         color: tokens.colorNeutralForeground3,
+    },
+    metricHeaderCompact: {
+        gap: '0.375rem',
     },
     metricValue: {
         fontSize: '28px',
@@ -27,15 +39,27 @@ const useStyles = makeStyles({
         lineHeight: 1,
         color: tokens.colorNeutralForeground1,
     },
+    metricValueCompact: {
+        fontSize: '18px',
+        lineHeight: '20px',
+    },
     metricSubtext: {
         color: tokens.colorNeutralForeground3,
         fontSize: '12px',
+    },
+    metricSubtextCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
     },
     progressWrapper: {
         display: 'flex',
         flexDirection: 'column',
         gap: '0.5rem',
         marginTop: '0.5rem',
+    },
+    progressWrapperCompact: {
+        marginTop: '0.25rem',
+        gap: '0.25rem',
     },
 })
 
@@ -49,20 +73,22 @@ interface MetricCardProps {
 
 export function MetricCard({ icon, label, value, subtext, progress }: MetricCardProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
 
     return (
-        <Card className={styles.metricCard}>
-            <div className={styles.metricHeader}>
+        <Card className={mergeClasses(styles.metricCard, isCompact && styles.metricCardCompact)}>
+            <div className={mergeClasses(styles.metricHeader, isCompact && styles.metricHeaderCompact)}>
                 {icon}
                 <Caption1>{label}</Caption1>
             </div>
-            <Text className={styles.metricValue}>{value}</Text>
+            <Text className={mergeClasses(styles.metricValue, isCompact && styles.metricValueCompact)}>{value}</Text>
             {progress !== undefined ? (
-                <div className={styles.progressWrapper}>
+                <div className={mergeClasses(styles.progressWrapper, isCompact && styles.progressWrapperCompact)}>
                     <ProgressBar value={progress} thickness="large" color="brand" />
                 </div>
             ) : (
-                <Text className={styles.metricSubtext}>{subtext}</Text>
+                <Text className={mergeClasses(styles.metricSubtext, isCompact && styles.metricSubtextCompact)}>{subtext}</Text>
             )}
         </Card>
     )

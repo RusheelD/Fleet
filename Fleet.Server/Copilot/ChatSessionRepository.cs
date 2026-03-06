@@ -29,7 +29,9 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
     {
         var entities = await context.ChatMessages
             .AsNoTracking()
-            .Where(m => m.ChatSessionId == sessionId)
+            .Where(m =>
+                m.ChatSessionId == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || m.ChatSession.ProjectId == projectId))
             .ToListAsync();
 
         return entities.Select(m => new ChatMessageDto(m.Id, m.Role, m.Content, m.Timestamp)).ToList();
@@ -50,7 +52,6 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
             ProjectId = projectId
         };
 
-        // Deactivate other sessions for this project
         var activeSessions = await context.ChatSessions
             .Where(s => s.ProjectId == projectId && s.IsActive)
             .ToListAsync();
@@ -65,9 +66,15 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         return new ChatSessionDto(entity.Id, entity.Title, entity.LastMessage, entity.Timestamp, entity.IsActive, entity.IsGenerating);
     }
 
-    public async Task<bool> RenameSessionAsync(string sessionId, string title)
+    public Task<bool> RenameSessionAsync(string sessionId, string title)
+        => RenameSessionAsync(string.Empty, sessionId, title);
+
+    public async Task<bool> RenameSessionAsync(string projectId, string sessionId, string title)
     {
-        var entity = await context.ChatSessions.FindAsync(sessionId);
+        var entity = await context.ChatSessions
+            .FirstOrDefaultAsync(s =>
+                s.Id == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || s.ProjectId == projectId));
         if (entity is null) return false;
 
         entity.Title = title;
@@ -75,9 +82,15 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         return true;
     }
 
-    public async Task<bool> DeleteSessionAsync(string sessionId)
+    public Task<bool> DeleteSessionAsync(string sessionId)
+        => DeleteSessionAsync(string.Empty, sessionId);
+
+    public async Task<bool> DeleteSessionAsync(string projectId, string sessionId)
     {
-        var entity = await context.ChatSessions.FindAsync(sessionId);
+        var entity = await context.ChatSessions
+            .FirstOrDefaultAsync(s =>
+                s.Id == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || s.ProjectId == projectId));
         if (entity is null) return false;
 
         context.ChatSessions.Remove(entity);
@@ -99,8 +112,10 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
 
         context.ChatMessages.Add(entity);
 
-        // Update session's last message
-        var session = await context.ChatSessions.FindAsync(sessionId);
+        var session = await context.ChatSessions
+            .FirstOrDefaultAsync(s =>
+                s.Id == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || s.ProjectId == projectId));
         if (session is not null)
         {
             session.LastMessage = content.Length > 100 ? content[..100] + "..." : content;
@@ -112,9 +127,15 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         return new ChatMessageDto(entity.Id, entity.Role, entity.Content, entity.Timestamp);
     }
 
-    public async Task SetSessionGeneratingAsync(string sessionId, bool isGenerating)
+    public Task SetSessionGeneratingAsync(string sessionId, bool isGenerating)
+        => SetSessionGeneratingAsync(string.Empty, sessionId, isGenerating);
+
+    public async Task SetSessionGeneratingAsync(string projectId, string sessionId, bool isGenerating)
     {
-        var session = await context.ChatSessions.FindAsync(sessionId);
+        var session = await context.ChatSessions
+            .FirstOrDefaultAsync(s =>
+                s.Id == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || s.ProjectId == projectId));
         if (session is not null)
         {
             session.IsGenerating = isGenerating;
@@ -122,10 +143,19 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         }
     }
 
-    // ── Attachments ──────────────────────────────────────────
+    public Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content)
+        => AddAttachmentAsync(string.Empty, sessionId, fileName, content);
 
-    public async Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content)
+    public async Task<ChatAttachmentDto> AddAttachmentAsync(string projectId, string sessionId, string fileName, string content)
     {
+        var sessionExists = await context.ChatSessions
+            .AsNoTracking()
+            .AnyAsync(s =>
+                s.Id == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || s.ProjectId == projectId));
+        if (!sessionExists)
+            throw new KeyNotFoundException("Chat session not found.");
+
         var entity = new ChatAttachment
         {
             Id = Guid.NewGuid().ToString(),
@@ -141,28 +171,45 @@ public class ChatSessionRepository(FleetDbContext context) : IChatSessionReposit
         return new ChatAttachmentDto(entity.Id, entity.FileName, entity.Content.Length, entity.UploadedAt);
     }
 
-    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId)
+    public Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId)
+        => GetAttachmentsBySessionIdAsync(string.Empty, sessionId);
+
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string projectId, string sessionId)
     {
         var entities = await context.ChatAttachments
             .AsNoTracking()
-            .Where(a => a.ChatSessionId == sessionId)
+            .Where(a =>
+                a.ChatSessionId == sessionId &&
+                (string.IsNullOrWhiteSpace(projectId) || a.ChatSession.ProjectId == projectId))
             .ToListAsync();
 
         return entities.Select(a => new ChatAttachmentDto(a.Id, a.FileName, a.Content.Length, a.UploadedAt)).ToList();
     }
 
-    public async Task<string?> GetAttachmentContentAsync(string attachmentId)
+    public Task<string?> GetAttachmentContentAsync(string attachmentId)
+        => GetAttachmentContentAsync(string.Empty, attachmentId);
+
+    public async Task<string?> GetAttachmentContentAsync(string projectId, string attachmentId)
     {
         var entity = await context.ChatAttachments
             .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Id == attachmentId);
+            .FirstOrDefaultAsync(a =>
+                a.Id == attachmentId &&
+                (string.IsNullOrWhiteSpace(projectId) || a.ChatSession.ProjectId == projectId));
 
         return entity?.Content;
     }
 
-    public async Task<bool> DeleteAttachmentAsync(string attachmentId)
+    public Task<bool> DeleteAttachmentAsync(string attachmentId)
+        => DeleteAttachmentAsync(string.Empty, string.Empty, attachmentId);
+
+    public async Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId)
     {
-        var entity = await context.ChatAttachments.FindAsync(attachmentId);
+        var entity = await context.ChatAttachments
+            .FirstOrDefaultAsync(a =>
+                a.Id == attachmentId &&
+                (string.IsNullOrWhiteSpace(sessionId) || a.ChatSessionId == sessionId) &&
+                (string.IsNullOrWhiteSpace(projectId) || a.ChatSession.ProjectId == projectId));
         if (entity is null) return false;
 
         context.ChatAttachments.Remove(entity);

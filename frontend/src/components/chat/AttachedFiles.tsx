@@ -1,5 +1,6 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Badge,
     Button,
@@ -11,6 +12,7 @@ import {
     DismissRegular,
 } from '@fluentui/react-icons'
 import type { ChatAttachment } from '../../models'
+import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     container: {
@@ -21,6 +23,13 @@ const useStyles = makeStyles({
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
         flexShrink: 0,
     },
+    containerCompact: {
+        gap: '0.25rem',
+        paddingTop: '0.25rem',
+        paddingBottom: '0.25rem',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+    },
     chip: {
         display: 'flex',
         alignItems: 'center',
@@ -30,10 +39,21 @@ const useStyles = makeStyles({
         padding: '0.125rem 0.375rem 0.125rem 0.5rem',
         maxWidth: '200px',
     },
+    chipCompact: {
+        maxWidth: '170px',
+        paddingTop: '0.0625rem',
+        paddingBottom: '0.0625rem',
+        paddingLeft: '0.375rem',
+        paddingRight: '0.25rem',
+    },
     fileName: {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+    },
+    fileNameCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
     },
 })
 
@@ -45,18 +65,20 @@ interface AttachedFilesProps {
 
 export function AttachedFiles({ attachments, onDelete, deleting }: AttachedFilesProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
 
     if (attachments.length === 0) return null
 
     return (
-        <div className={styles.container}>
+        <div className={mergeClasses(styles.container, isCompact && styles.containerCompact)}>
             {attachments.map((a) => (
-                <div key={a.id} className={styles.chip}>
-                    <DocumentRegular fontSize={14} />
+                <div key={a.id} className={mergeClasses(styles.chip, isCompact && styles.chipCompact)}>
+                    <DocumentRegular fontSize={isCompact ? 12 : 14} />
                     <Tooltip content={`${a.fileName} (${formatSize(a.contentLength)})`} relationship="description">
-                        <Text size={200} className={styles.fileName}>{a.fileName}</Text>
+                        <Text size={200} className={mergeClasses(styles.fileName, isCompact && styles.fileNameCompact)}>{a.fileName}</Text>
                     </Tooltip>
-                    <Badge appearance="filled" size="small" color="informative">
+                    <Badge appearance="filled" size={isCompact ? 'tiny' : 'small'} color="informative">
                         {formatSize(a.contentLength)}
                     </Badge>
                     <Button

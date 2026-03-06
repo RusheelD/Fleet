@@ -359,6 +359,7 @@ public static class FleetDbSeeder
             Bio = "Building the future with AI agents",
             Location = "San Francisco, CA",
             AvatarUrl = "",
+            Role = Fleet.Server.Auth.UserRoles.Free,
             CreatedAt = DateTime.UtcNow,
             Preferences = new UserPreferences
             {

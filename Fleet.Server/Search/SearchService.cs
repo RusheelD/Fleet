@@ -9,13 +9,14 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
 {
     public async Task<IReadOnlyList<SearchResultDto>> SearchAsync(string ownerId, string? query, string? type)
     {
-        logger.SearchStarted((query ?? string.Empty).SanitizeForLogging(), (type ?? "all").SanitizeForLogging());
+        var normalizedType = NormalizeType(type);
+        logger.SearchStarted((query ?? string.Empty).SanitizeForLogging(), normalizedType.SanitizeForLogging());
         var results = new List<SearchResultDto>();
 
-        var includeAll = string.IsNullOrWhiteSpace(type) || type == "all";
+        var includeAll = normalizedType == "all";
 
         // Search projects (scoped to current user)
-        if (includeAll || type == "projects")
+        if (includeAll || normalizedType == "projects")
         {
             var projects = await context.Projects.AsNoTracking()
                 .Where(p => p.OwnerId == ownerId)
@@ -25,7 +26,7 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
         }
 
         // Search work items (scoped to user's projects)
-        if (includeAll || type == "workitems")
+        if (includeAll || normalizedType == "workitems")
         {
             var workItems = await context.WorkItems
                 .AsNoTracking()
@@ -38,7 +39,7 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
         }
 
         // Search chat sessions (scoped to user's projects)
-        if (includeAll || type == "chats")
+        if (includeAll || normalizedType == "chats")
         {
             var chats = await context.ChatSessions
                 .AsNoTracking()
@@ -51,7 +52,7 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
         }
 
         // Search agent executions (scoped to user's projects)
-        if (includeAll || type == "agents")
+        if (includeAll || normalizedType == "agents")
         {
             var agents = await context.AgentExecutions
                 .AsNoTracking()
@@ -77,4 +78,15 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
         logger.SearchCompleted(results.Count);
         return results;
     }
+
+    private static string NormalizeType(string? type) => type?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => "all",
+        "all" => "all",
+        "project" or "projects" => "projects",
+        "workitem" or "workitems" => "workitems",
+        "chat" or "chats" => "chats",
+        "agent" or "agents" => "agents",
+        _ => "all",
+    };
 }

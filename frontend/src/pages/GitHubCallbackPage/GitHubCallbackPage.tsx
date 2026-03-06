@@ -58,7 +58,14 @@ export function GitHubCallbackPage() {
 
     useEffect(() => {
         const code = searchParams.get('code')
-        if (!code || searchParams.get('error') || processedCodes.has(code)) return
+        const state = searchParams.get('state')
+        if (!code || !state)
+        {
+            setStatus('error')
+            setErrorMessage('Missing OAuth code or state. Please retry linking GitHub.')
+            return
+        }
+        if (searchParams.get('error') || processedCodes.has(code)) return
         processedCodes.add(code)
 
         const origin = window.location.origin
@@ -66,7 +73,7 @@ export function GitHubCallbackPage() {
         const redirectUri = `${normalizedOrigin}/auth/github/callback`
 
         // Call the proxy function directly — no hooks, no React lifecycle issues.
-        linkGitHub(code, redirectUri)
+        linkGitHub(code, redirectUri, state)
             .then(() => {
                 // Invalidate user-settings so the rest of the app knows GitHub is connected
                 void queryClient.invalidateQueries({ queryKey: ['user-settings'] })

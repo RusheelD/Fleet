@@ -5,12 +5,13 @@ public class LLMOptions
 {
     public const string SectionName = "LLM";
 
-    public string Provider { get; set; } = "claude";
+    public string Provider { get; set; } = "azure-openai";
+    public string Endpoint { get; set; } = string.Empty;
     public string ApiKey { get; set; } = string.Empty;
-    /// <summary>Default model used for normal chat (e.g., claude-haiku-4-20250514).</summary>
-    public string Model { get; set; } = "claude-haiku-4-20250514";
-    /// <summary>Stronger model used for work-item generation (e.g., claude-sonnet-4-20250514).</summary>
-    public string GenerateModel { get; set; } = "claude-haiku-4-20250514";
+    /// <summary>Default model used for normal chat (e.g., gpt-5.2-codex).</summary>
+    public string Model { get; set; } = "gpt-5.2-codex";
+    /// <summary>Model used for work-item generation.</summary>
+    public string GenerateModel { get; set; } = "gpt-5.2-codex";
     public int MaxToolLoops { get; set; } = 25;
     public int MaxToolCallsTotal { get; set; } = 50;
     public int TimeoutSeconds { get; set; } = 180;
@@ -20,3 +21,4 @@ public class LLMOptions
     public int GenerateMaxToolLoops { get; set; } = 200;
     public int MaxToolOutputLength { get; set; } = 24000;
 }
+

@@ -1,5 +1,7 @@
 using Fleet.Server.Agents;
 using Fleet.Server.Auth;
+using Fleet.Server.Connections;
+using Fleet.Server.Data.Entities;
 using Fleet.Server.GitHub;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
@@ -9,12 +11,32 @@ namespace Fleet.Server.Projects;
 
 public class ProjectService(
     IProjectRepository projectRepository,
+    IConnectionRepository connectionRepository,
     IWorkItemRepository workItemRepository,
     IAgentTaskRepository agentTaskRepository,
     IGitHubApiService gitHubApiService,
     IAuthService authService,
     ILogger<ProjectService> logger) : IProjectService
 {
+    // Backward-compatible constructor for existing tests/callers.
+    public ProjectService(
+        IProjectRepository projectRepository,
+        IWorkItemRepository workItemRepository,
+        IAgentTaskRepository agentTaskRepository,
+        IGitHubApiService gitHubApiService,
+        IAuthService authService,
+        ILogger<ProjectService> logger)
+        : this(
+            projectRepository,
+            new NullConnectionRepository(),
+            workItemRepository,
+            agentTaskRepository,
+            gitHubApiService,
+            authService,
+            logger)
+    {
+    }
+
     private async Task<string> GetCurrentOwnerIdAsync() =>
         (await authService.GetCurrentUserIdAsync()).ToString();
 
@@ -49,19 +71,57 @@ public class ProjectService(
             return new SlugCheckResult(slug, false);
         }
 
-        var available = await projectRepository.IsSlugAvailableAsync(slug);
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var available = await projectRepository.IsSlugAvailableAsync(ownerId, slug);
         logger.ProjectsSlugAvailability(slug.SanitizeForLogging(), available);
         return new SlugCheckResult(slug, available);
     }
 
-    public async Task<ProjectDto> CreateProjectAsync(string title, string description, string repo)
+    public async Task<ProjectDto> CreateProjectAsync(
+        string title,
+        string description,
+        string repo,
+        string? branchPattern = null,
+        string? commitAuthorMode = null,
+        string? commitAuthorName = null,
+        string? commitAuthorEmail = null)
     {
         logger.ProjectsCreating(title.SanitizeForLogging());
         var ownerId = await GetCurrentOwnerIdAsync();
-        return await projectRepository.CreateAsync(ownerId, title, description, repo);
+
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new InvalidOperationException("A GitHub repository must be selected to create a project.");
+
+        if (!repo.Contains('/') || repo.StartsWith('/') || repo.EndsWith('/'))
+            throw new InvalidOperationException("Repository must be in 'owner/repo' format.");
+
+        if (!int.TryParse(ownerId, out var userId))
+            throw new InvalidOperationException("Unable to resolve current user.");
+
+        var linkedGitHub = await connectionRepository.GetByProviderAsync(userId, "GitHub");
+        if (linkedGitHub is null)
+            throw new InvalidOperationException("Link your GitHub account before creating a project.");
+
+        return await projectRepository.CreateAsync(
+            ownerId,
+            title,
+            description,
+            repo,
+            branchPattern,
+            commitAuthorMode,
+            commitAuthorName,
+            commitAuthorEmail);
     }
 
-    public async Task<ProjectDto?> UpdateProjectAsync(string id, string? title, string? description, string? repo)
+    public async Task<ProjectDto?> UpdateProjectAsync(
+        string id,
+        string? title,
+        string? description,
+        string? repo,
+        string? branchPattern = null,
+        string? commitAuthorMode = null,
+        string? commitAuthorName = null,
+        string? commitAuthorEmail = null)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
@@ -70,7 +130,16 @@ public class ProjectService(
 
         logger.ProjectsUpdating(id.SanitizeForLogging());
         var ownerId = await GetCurrentOwnerIdAsync();
-        return await projectRepository.UpdateAsync(id, ownerId, title, description, repo);
+        return await projectRepository.UpdateAsync(
+            id,
+            ownerId,
+            title,
+            description,
+            repo,
+            branchPattern,
+            commitAuthorMode,
+            commitAuthorName,
+            commitAuthorEmail);
     }
 
     public async Task<bool> DeleteProjectAsync(string id)
@@ -125,22 +194,24 @@ public class ProjectService(
 
     private async Task<ProjectDashboardDto> BuildDashboard(ProjectDto project)
     {
-        var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id); var agentSummary = await agentTaskRepository.GetAgentSummaryByProjectIdAsync(project.Id);
+        var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id);
+        var agentSummary = await agentTaskRepository.GetAgentSummaryByProjectIdAsync(project.Id);
+        var userId = await authService.GetCurrentUserIdAsync();
         // ── Real work item metrics from the database ──────────────
         var workItems = await workItemRepository.GetByProjectIdAsync(project.Id);
+        workItems = await ApplyPullRequestReferencesAsync(project, userId, workItems);
         var totalItems = workItems.Count;
         var activeItems = workItems.Count(w =>
-            w.State.Equals("Active", StringComparison.OrdinalIgnoreCase) ||
-            w.State.Equals("New", StringComparison.OrdinalIgnoreCase));
+            IsActiveWorkItemState(w.State));
         var resolvedItems = workItems.Count(w =>
-            w.State.Equals("Resolved", StringComparison.OrdinalIgnoreCase));
+            w.State.Equals("Resolved", StringComparison.OrdinalIgnoreCase) ||
+            w.State.Equals("Resolved (AI)", StringComparison.OrdinalIgnoreCase));
         var closedItems = workItems.Count(w =>
             w.State.Equals("Closed", StringComparison.OrdinalIgnoreCase));
         var completedItems = resolvedItems + closedItems;
         var completionPct = totalItems > 0 ? Math.Round((double)completedItems / totalItems, 2) : 0;
 
         // ── Real GitHub stats ─────────────────────────────────────
-        var userId = await authService.GetCurrentUserIdAsync();
         GitHubRepoStats gitHubStats;
         try
         {
@@ -192,6 +263,104 @@ public class ProjectService(
         );
     }
 
+    private async Task<IReadOnlyList<WorkItemDto>> ApplyPullRequestReferencesAsync(
+        ProjectDto project,
+        int userId,
+        IReadOnlyList<WorkItemDto> workItems)
+    {
+        if (string.IsNullOrWhiteSpace(project.Repo) || workItems.Count == 0)
+            return workItems;
+
+        IReadOnlyList<GitHubWorkItemReference> references;
+        try
+        {
+            references = await gitHubApiService.GetWorkItemReferencesAsync(userId, project.Repo);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to sync PR references for project {ProjectId}", project.Id);
+            return workItems;
+        }
+
+        if (references.Count == 0)
+            return workItems;
+
+        var anyUpdates = false;
+        var byWorkItemNumber = workItems.ToDictionary(w => w.WorkItemNumber);
+
+        foreach (var group in references.GroupBy(r => r.WorkItemNumber))
+        {
+            if (!byWorkItemNumber.TryGetValue(group.Key, out var workItem))
+                continue;
+
+            var selectedReference = group
+                .OrderByDescending(r => r.IsFixReference && r.IsMerged)
+                .ThenByDescending(r => r.IsFixReference)
+                .ThenByDescending(r => r.UpdatedAt)
+                .First();
+
+            var targetState = ResolveStateFromReference(workItem, selectedReference);
+            var normalizedPrUrl = string.IsNullOrWhiteSpace(selectedReference.PullRequestUrl)
+                ? null
+                : selectedReference.PullRequestUrl;
+            var stateChanged = !string.Equals(workItem.State, targetState, StringComparison.Ordinal);
+            var linkChanged = !string.Equals(workItem.LinkedPullRequestUrl, normalizedPrUrl, StringComparison.Ordinal);
+            if (!stateChanged && !linkChanged)
+                continue;
+
+            await workItemRepository.UpdateAsync(project.Id, workItem.WorkItemNumber,
+                new UpdateWorkItemRequest(
+                    Title: null,
+                    Description: null,
+                    Priority: null,
+                    Difficulty: null,
+                    State: stateChanged ? targetState : null,
+                    AssignedTo: null,
+                    Tags: null,
+                    IsAI: null,
+                    ParentWorkItemNumber: null,
+                    LevelId: null,
+                    LinkedPullRequestUrl: linkChanged ? normalizedPrUrl ?? string.Empty : null));
+
+            byWorkItemNumber[group.Key] = workItem with
+            {
+                State = stateChanged ? targetState : workItem.State,
+                LinkedPullRequestUrl = linkChanged ? normalizedPrUrl : workItem.LinkedPullRequestUrl,
+            };
+            anyUpdates = true;
+        }
+
+        return anyUpdates
+            ? [.. byWorkItemNumber.Values.OrderBy(w => w.WorkItemNumber)]
+            : workItems;
+    }
+
+    private static bool IsActiveWorkItemState(string state)
+        => state.Equals("New", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("Active", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("Planning (AI)", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("In Progress", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("In Progress (AI)", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("In-PR", StringComparison.OrdinalIgnoreCase) ||
+           state.Equals("In-PR (AI)", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveStateFromReference(WorkItemDto workItem, GitHubWorkItemReference reference)
+    {
+        if (workItem.State.Equals("Closed", StringComparison.OrdinalIgnoreCase))
+            return workItem.State;
+
+        if (reference.IsFixReference && reference.IsMerged)
+            return workItem.IsAI ? "Resolved (AI)" : "Resolved";
+
+        if (workItem.State.Equals("Resolved", StringComparison.OrdinalIgnoreCase) ||
+            workItem.State.Equals("Resolved (AI)", StringComparison.OrdinalIgnoreCase))
+        {
+            return workItem.State;
+        }
+
+        return workItem.IsAI ? "In-PR (AI)" : "In-PR";
+    }
+
     private static string FormatRelativeTime(DateTimeOffset timestamp)
     {
         var diff = DateTimeOffset.UtcNow - timestamp;
@@ -204,5 +373,19 @@ public class ProjectService(
             < 10080 => diff.TotalDays < 2 ? "1 day ago" : $"{(int)diff.TotalDays} days ago",
             _ => timestamp.ToString("MMM d, yyyy"),
         };
+    }
+
+    private sealed class NullConnectionRepository : IConnectionRepository
+    {
+        public Task<LinkedAccount?> GetByProviderAsync(int userId, string provider) => Task.FromResult<LinkedAccount?>(new LinkedAccount
+        {
+            Provider = provider,
+            AccessToken = "test-token",
+            UserProfileId = userId,
+        });
+        public Task<IReadOnlyList<LinkedAccountDto>> GetAllAsync(int userId) => Task.FromResult<IReadOnlyList<LinkedAccountDto>>([]);
+        public Task<LinkedAccount> CreateAsync(LinkedAccount account) => Task.FromResult(account);
+        public Task UpdateAsync(LinkedAccount account) => Task.CompletedTask;
+        public Task DeleteAsync(LinkedAccount account) => Task.CompletedTask;
     }
 }

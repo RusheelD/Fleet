@@ -52,7 +52,7 @@ public class ChatsController(IChatService chatService) : ControllerBase
     [HttpGet("sessions/{sessionId}/attachments")]
     public async Task<IActionResult> GetAttachments(string projectId, string sessionId)
     {
-        var attachments = await chatService.GetAttachmentsAsync(sessionId);
+        var attachments = await chatService.GetAttachmentsAsync(projectId, sessionId);
         return Ok(attachments);
     }
 
@@ -79,7 +79,7 @@ public class ChatsController(IChatService chatService) : ControllerBase
     [HttpDelete("sessions/{sessionId}/attachments/{attachmentId}")]
     public async Task<IActionResult> DeleteAttachment(string projectId, string sessionId, string attachmentId)
     {
-        var deleted = await chatService.DeleteAttachmentAsync(attachmentId);
+        var deleted = await chatService.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
         return deleted ? NoContent() : NotFound();
     }
 }

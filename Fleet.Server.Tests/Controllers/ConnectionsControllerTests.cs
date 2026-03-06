@@ -45,10 +45,10 @@ public class ConnectionsControllerTests
     public async Task LinkGitHub_ReturnsOk()
     {
         var dto = new LinkedAccountDto("GitHub", "user123", "ext-1", DateTime.UtcNow);
-        _connectionService.Setup(s => s.LinkGitHubAsync(UserId, "code123", "http://redirect"))
+        _connectionService.Setup(s => s.LinkGitHubAsync(UserId, "code123", "http://redirect", "state-123"))
             .ReturnsAsync(dto);
 
-        var result = await _sut.LinkGitHub(new LinkGitHubRequest("code123", "http://redirect"));
+        var result = await _sut.LinkGitHub(new LinkGitHubRequest("code123", "http://redirect", "state-123"));
 
         var ok = result as OkObjectResult;
         Assert.IsNotNull(ok);

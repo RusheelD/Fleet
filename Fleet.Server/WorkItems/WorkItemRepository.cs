@@ -17,7 +17,13 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
                 ProjectId = g.Key,
                 Total = g.Count(),
                 Active = g.Count(w =>
-                    w.State == "Active" || w.State == "New"),
+                    w.State == "New" ||
+                    w.State == "Active" ||
+                    w.State == "Planning (AI)" ||
+                    w.State == "In Progress" ||
+                    w.State == "In Progress (AI)" ||
+                    w.State == "In-PR" ||
+                    w.State == "In-PR (AI)"),
                 Resolved = g.Count(w =>
                     w.State == "Resolved" || w.State == "Resolved (AI)"),
             })
@@ -78,6 +84,9 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             AssignedTo = request.AssignedTo,
             Tags = [.. request.Tags],
             IsAI = request.IsAI,
+            AssignmentMode = NormalizeAssignmentMode(request.AssignmentMode, request.IsAI),
+            AssignedAgentCount = NormalizeAssignedAgentCount(request.AssignedAgentCount),
+            AcceptanceCriteria = request.AcceptanceCriteria?.Trim() ?? string.Empty,
             ParentId = parentDbId,
             LevelId = request.LevelId,
             ProjectId = projectId,
@@ -91,7 +100,11 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             [.. entity.Tags], entity.IsAI, entity.Description,
             request.ParentWorkItemNumber,
             [],
-            entity.LevelId
+            entity.LevelId,
+            entity.AssignmentMode,
+            entity.AssignedAgentCount,
+            entity.AcceptanceCriteria,
+            entity.LinkedPullRequestUrl
         );
     }
 
@@ -111,6 +124,13 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         if (request.AssignedTo is not null) entity.AssignedTo = request.AssignedTo;
         if (request.Tags is not null) entity.Tags = [.. request.Tags];
         if (request.IsAI is not null) entity.IsAI = request.IsAI.Value;
+        if (request.AssignmentMode is not null) entity.AssignmentMode = NormalizeAssignmentMode(request.AssignmentMode, entity.IsAI);
+        if (request.AssignedAgentCount is not null) entity.AssignedAgentCount = NormalizeAssignedAgentCount(request.AssignedAgentCount);
+        if (request.AcceptanceCriteria is not null) entity.AcceptanceCriteria = request.AcceptanceCriteria.Trim();
+        if (request.LinkedPullRequestUrl is not null)
+            entity.LinkedPullRequestUrl = string.IsNullOrWhiteSpace(request.LinkedPullRequestUrl)
+                ? null
+                : request.LinkedPullRequestUrl.Trim();
 
         // ParentWorkItemNumber: 0 = clear (set to null), null = don't change, >0 = set by resolving WorkItemNumber
         if (request.ParentWorkItemNumber is not null)
@@ -154,6 +174,23 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         [.. w.Tags], w.IsAI, w.Description,
         w.Parent?.WorkItemNumber,
         w.Children.Select(c => c.WorkItemNumber).ToArray(),
-        w.LevelId
+        w.LevelId,
+        string.IsNullOrWhiteSpace(w.AssignmentMode) ? (w.IsAI ? "auto" : "manual") : w.AssignmentMode,
+        w.AssignedAgentCount,
+        w.AcceptanceCriteria,
+        w.LinkedPullRequestUrl
     );
+
+    private static string NormalizeAssignmentMode(string? requestedMode, bool isAi) => requestedMode?.ToLowerInvariant() switch
+    {
+        "auto" => "auto",
+        "manual" => "manual",
+        _ => isAi ? "auto" : "manual",
+    };
+
+    private static int? NormalizeAssignedAgentCount(int? value)
+    {
+        if (value is null) return null;
+        return value.Value <= 0 ? null : Math.Min(value.Value, 10);
+    }
 }

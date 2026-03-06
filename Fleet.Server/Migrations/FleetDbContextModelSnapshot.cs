@@ -48,6 +48,9 @@ namespace Fleet.Server.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("PullRequestTitle")
+                        .HasColumnType("text");
+
                     b.Property<string>("PullRequestUrl")
                         .HasColumnType("text");
 
@@ -321,9 +324,109 @@ namespace Fleet.Server.Migrations
                     b.ToTable("LogEntries");
                 });
 
+            modelBuilder.Entity("Fleet.Server.Data.Entities.MonthlyUsageLedger", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CodingRunCharges")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CodingRunRefunds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserProfileId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UtcMonth")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("WorkItemRunCharges")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WorkItemRunRefunds")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserProfileId", "UtcMonth")
+                        .IsUnique();
+
+                    b.ToTable("MonthlyUsageLedgers");
+                });
+
+            modelBuilder.Entity("Fleet.Server.Data.Entities.NotificationEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExecutionId")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("UserProfileId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("UserProfileId", "IsRead", "CreatedAtUtc");
+
+                    b.ToTable("NotificationEvents");
+                });
+
             modelBuilder.Entity("Fleet.Server.Data.Entities.Project", b =>
                 {
                     b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BranchPattern")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CommitAuthorEmail")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CommitAuthorMode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CommitAuthorName")
                         .HasColumnType("text");
 
                     b.Property<string>("Description")
@@ -352,7 +455,7 @@ namespace Fleet.Server.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Slug")
+                    b.HasIndex("OwnerId", "Slug")
                         .IsUnique();
 
                     b.ToTable("Projects");
@@ -414,6 +517,12 @@ namespace Fleet.Server.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("free");
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasColumnType("text");
@@ -437,7 +546,18 @@ namespace Fleet.Server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AcceptanceCriteria")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("AssignedAgentCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("AssignedTo")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("AssignmentMode")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -453,6 +573,9 @@ namespace Fleet.Server.Migrations
 
                     b.Property<int?>("LevelId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("LinkedPullRequestUrl")
+                        .HasColumnType("text");
 
                     b.Property<int?>("ParentId")
                         .HasColumnType("integer");
@@ -642,6 +765,17 @@ namespace Fleet.Server.Migrations
                 {
                     b.HasOne("Fleet.Server.Data.Entities.Project", "Project")
                         .WithMany("LogEntries")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Fleet.Server.Data.Entities.NotificationEvent", b =>
+                {
+                    b.HasOne("Fleet.Server.Data.Entities.Project", "Project")
+                        .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

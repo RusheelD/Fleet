@@ -105,9 +105,17 @@ public class ConnectionServiceTests
         var sut = new ConnectionService(
             _connectionRepo.Object, _httpClientFactory.Object,
             _configuration.Object, _logger.Object);
+        var state = await sut.CreateGitHubOAuthStateAsync(UserId);
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
-            () => sut.LinkGitHubAsync(UserId, "code", "http://redirect"));
+            () => sut.LinkGitHubAsync(UserId, "code", "http://redirect", state.State));
+    }
+
+    [TestMethod]
+    public async Task LinkGitHubAsync_MissingState_ThrowsUnauthorized()
+    {
+        await Assert.ThrowsExceptionAsync<UnauthorizedAccessException>(
+            () => _sut.LinkGitHubAsync(UserId, "code", "http://redirect", ""));
     }
 
     [TestMethod]
@@ -117,9 +125,10 @@ public class ConnectionServiceTests
         var sut = new ConnectionService(
             _connectionRepo.Object, _httpClientFactory.Object,
             _configuration.Object, _logger.Object);
+        var state = await sut.CreateGitHubOAuthStateAsync(UserId);
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
-            () => sut.LinkGitHubAsync(UserId, "code", "http://redirect"));
+            () => sut.LinkGitHubAsync(UserId, "code", "http://redirect", state.State));
     }
 
     // ── GetGitHubRepositoriesAsync ───────────────────────────

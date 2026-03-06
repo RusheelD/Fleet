@@ -16,10 +16,11 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.625rem',
-        padding: '0 0.75rem',
-        minHeight: '48px',
+        padding: '0 0.625rem',
+        minHeight: '52px',
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         position: 'relative',
+        backgroundColor: tokens.colorNeutralBackground2,
     },
     brandIcon: {
         color: tokens.colorPaletteDarkOrangeForeground1,
@@ -31,15 +32,16 @@ const useStyles = makeStyles({
         fontSize: '15px',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
-        letterSpacing: '-0.01em',
+        letterSpacing: '0.01em',
     },
     collapseButton: {
         marginLeft: 'auto',
+        flexShrink: 0,
     },
     collapsedToggle: {
         position: 'absolute' as const,
-        left: '8px',
-        top: '8px',
+        left: '6px',
+        top: '10px',
     },
 })
 

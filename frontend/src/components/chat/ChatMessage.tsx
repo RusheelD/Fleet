@@ -1,21 +1,26 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Avatar,
     Text,
-    mergeClasses,
     Link,
 } from '@fluentui/react-components'
 import { BotRegular, PersonRegular } from '@fluentui/react-icons'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessageData } from '../../models'
+import { formatInitials } from './initials'
+import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
     messageRow: {
         display: 'flex',
         gap: '0.5rem',
         maxWidth: '100%',
+    },
+    messageRowCompact: {
+        gap: '0.375rem',
     },
     messageRowUser: {
         alignSelf: 'flex-end',
@@ -29,6 +34,17 @@ const useStyles = makeStyles({
         borderRadius: tokens.borderRadiusLarge,
         lineHeight: '1.5',
         fontSize: '13px',
+        maxWidth: 'min(78ch, 75vw)',
+        boxShadow: tokens.shadow4,
+    },
+    messageBubbleCompact: {
+        paddingTop: '0.5rem',
+        paddingBottom: '0.5rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+        fontSize: '12px',
+        lineHeight: '1.35',
+        maxWidth: 'min(68ch, 72vw)',
     },
     messageBubbleUser: {
         backgroundColor: tokens.colorBrandBackground,
@@ -37,12 +53,33 @@ const useStyles = makeStyles({
     messageBubbleAssistant: {
         backgroundColor: tokens.colorNeutralBackground3,
         color: tokens.colorNeutralForeground1,
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
     },
     messageTime: {
         color: tokens.colorNeutralForeground4,
         fontSize: '11px',
         marginTop: '0.25rem',
+    },
+    messageTimeCompact: {
+        fontSize: '10px',
+        marginTop: '0.125rem',
+    },
+    messageTimeUser: {
         textAlign: 'right',
+    },
+    messageTimeAssistant: {
+        textAlign: 'left',
     },
     // Markdown content styles
     markdown: {
@@ -161,28 +198,35 @@ const useStyles = makeStyles({
 
 interface ChatMessageProps {
     message: ChatMessageData
+    currentUserIdentity?: string
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
+    const userIdentity = currentUserIdentity?.trim() || 'Me'
 
     return (
         <div
             className={mergeClasses(
                 styles.messageRow,
+                isCompact && styles.messageRowCompact,
                 message.role === 'user' ? styles.messageRowUser : styles.messageRowAssistant,
             )}
         >
             <Avatar
-                name={message.role === 'user' ? 'You' : 'Fleet AI'}
+                name={message.role === 'user' ? userIdentity : 'Fleet AI'}
+                initials={message.role === 'user' ? formatInitials(userIdentity, 'Me') : 'FA'}
                 icon={message.role === 'user' ? <PersonRegular /> : <BotRegular />}
                 color={message.role === 'user' ? 'neutral' : 'brand'}
-                size={28}
+                size={isCompact ? 24 : 28}
             />
             <div>
                 <div
                     className={mergeClasses(
                         styles.messageBubble,
+                        isCompact && styles.messageBubbleCompact,
                         message.role === 'user' ? styles.messageBubbleUser : styles.messageBubbleAssistant,
                     )}
                 >
@@ -212,7 +256,15 @@ export function ChatMessage({ message }: ChatMessageProps) {
                         </div>
                     )}
                 </div>
-                <Text className={styles.messageTime}>{message.timestamp}</Text>
+                <Text
+                    className={mergeClasses(
+                        styles.messageTime,
+                        isCompact && styles.messageTimeCompact,
+                        message.role === 'user' ? styles.messageTimeUser : styles.messageTimeAssistant,
+                    )}
+                >
+                    {message.timestamp}
+                </Text>
             </div>
         </div>
     )

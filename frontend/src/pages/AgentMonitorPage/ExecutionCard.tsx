@@ -1,7 +1,7 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
-    Body1,
     Caption1,
     Text,
     Card,
@@ -29,6 +29,8 @@ import {
     CircleRegular,
 } from '@fluentui/react-icons'
 import type { AgentExecution, AgentInfo } from '../../models'
+import { usePreferences } from '../../hooks'
+import { openPullRequest, openPullRequestDiff } from './pullRequest'
 
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informative' | 'subtle'> = {
     running: 'warning',
@@ -40,7 +42,6 @@ const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informat
     idle: 'subtle',
 }
 
-/** Format an ISO timestamp into a friendly relative or short string. */
 function formatTimestamp(iso: string): string {
     try {
         const date = new Date(iso)
@@ -66,41 +67,91 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalM,
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
+        boxShadow: tokens.shadow4,
+    },
+    executionCardCompact: {
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalS,
+        paddingLeft: tokens.spacingHorizontalM,
+        paddingRight: tokens.spacingHorizontalM,
+        gap: tokens.spacingVerticalS,
     },
     executionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
+        gap: tokens.spacingHorizontalM,
+    },
+    executionHeaderCompact: {
+        gap: tokens.spacingHorizontalS,
     },
     executionTitle: {
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalXXS,
+        minWidth: 0,
+    },
+    executionTitleCompact: {
+        gap: '1px',
+    },
+    titleText: {
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+    },
+    titleTextCompact: {
+        fontSize: '12px',
+        lineHeight: '16px',
     },
     flexRowGap: {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
     },
+    flexRowGapCompact: {
+        gap: tokens.spacingHorizontalXS,
+    },
     metaRow: {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalXS,
         color: tokens.colorNeutralForeground3,
+        flexWrap: 'wrap',
+    },
+    metaRowCompact: {
+        gap: '2px',
+    },
+    metaCaptionCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
     },
     metaIcon: {
         fontSize: '12px',
     },
+    metaIconCompact: {
+        fontSize: '10px',
+    },
     executionActions: {
         display: 'flex',
         gap: tokens.spacingHorizontalXXS,
+        flexShrink: 0,
     },
-
-    /* --- Pipeline / agent list --- */
     pipeline: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0px', /* controlled by individual rows */
+        gap: '0px',
     },
     agentStep: {
         display: 'grid',
@@ -110,8 +161,12 @@ const useStyles = makeStyles({
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
     },
-
-    /* Left gutter: icon + connector line */
+    agentStepCompact: {
+        gridTemplateColumns: '16px 1fr auto',
+        gap: tokens.spacingHorizontalXS,
+        paddingTop: '2px',
+        paddingBottom: '2px',
+    },
     stepGutter: {
         display: 'flex',
         flexDirection: 'column',
@@ -125,9 +180,6 @@ const useStyles = makeStyles({
     },
     stepIconCompleted: {
         color: tokens.colorPaletteGreenForeground1,
-    },
-    stepIconRunning: {
-        /* Spinner replaces the icon — no extra colour needed */
     },
     stepIconFailed: {
         color: tokens.colorPaletteRedForeground1,
@@ -145,8 +197,6 @@ const useStyles = makeStyles({
     connectorCompleted: {
         backgroundColor: tokens.colorPaletteGreenBorder1,
     },
-
-    /* Center: role + task info */
     stepBody: {
         display: 'flex',
         flexDirection: 'column',
@@ -155,18 +205,32 @@ const useStyles = makeStyles({
     roleName: {
         lineHeight: '20px',
     },
+    roleNameCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
+    },
     taskCaption: {
         color: tokens.colorNeutralForeground3,
     },
     taskCaptionRunning: {
         color: tokens.colorNeutralForeground2,
     },
+    taskCaptionCompact: {
+        fontSize: '10px',
+        lineHeight: '13px',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: '26ch',
+    },
     stepProgress: {
         maxWidth: '120px',
         marginTop: tokens.spacingVerticalXXS,
     },
-
-    /* Right: percentage or badge */
+    stepProgressCompact: {
+        maxWidth: '88px',
+        marginTop: '1px',
+    },
     stepTrailing: {
         display: 'flex',
         alignItems: 'center',
@@ -177,10 +241,20 @@ const useStyles = makeStyles({
         fontVariantNumeric: 'tabular-nums',
         color: tokens.colorNeutralForeground3,
     },
-
+    progressPercentCompact: {
+        fontSize: '10px',
+    },
     completedActions: {
         display: 'flex',
         gap: tokens.spacingHorizontalS,
+        flexWrap: 'wrap',
+    },
+    completedActionsCompact: {
+        gap: tokens.spacingHorizontalXS,
+    },
+    compactDivider: {
+        marginTop: '2px',
+        marginBottom: '2px',
     },
 })
 
@@ -188,10 +262,13 @@ interface ExecutionCardProps {
     execution: AgentExecution
     onPause?: (executionId: string) => void
     onCancel?: (executionId: string) => void
+    onRetry?: (executionId: string) => void
+    onViewDocs?: (executionId: string) => void
 }
 
 function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
     const styles = useStyles()
+
     switch (status) {
         case 'completed':
             return <CheckmarkCircleFilled className={`${styles.stepIcon} ${styles.stepIconCompleted}`} />
@@ -204,8 +281,10 @@ function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
     }
 }
 
-export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardProps) {
+export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDocs }: ExecutionCardProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const toasterId = useId('exec-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
@@ -233,23 +312,35 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
     const agents = execution.agents
 
     return (
-        <Card className={styles.executionCard}>
+        <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact)}>
             <Toaster toasterId={toasterId} />
 
-            {/* ── Header ── */}
-            <div className={styles.executionHeader}>
-                <div className={styles.executionTitle}>
-                    <div className={styles.flexRowGap}>
+            <div className={mergeClasses(styles.executionHeader, isCompact && styles.executionHeaderCompact)}>
+                <div className={mergeClasses(styles.executionTitle, isCompact && styles.executionTitleCompact)}>
+                    <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
                         <Badge appearance="filled" color={STATUS_COLORS[execution.status]} size="small">
                             {execution.status}
                         </Badge>
                     </div>
-                    <Body1 weight="semibold">{execution.workItemTitle}</Body1>
-                    <div className={styles.metaRow}>
-                        <ClockRegular className={styles.metaIcon} />
-                        <Caption1>Started {formatTimestamp(execution.startedAt)} · {execution.duration}</Caption1>
+                    <Text
+                        weight="semibold"
+                        className={mergeClasses(styles.titleText, isCompact && styles.titleTextCompact)}
+                    >
+                        {execution.workItemTitle}
+                    </Text>
+                    <div className={mergeClasses(styles.metaRow, isCompact && styles.metaRowCompact)}>
+                        <ClockRegular className={mergeClasses(styles.metaIcon, isCompact && styles.metaIconCompact)} />
+                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
+                            Started {formatTimestamp(execution.startedAt)} - {execution.duration}
+                            {execution.currentPhase ? ` - ${execution.currentPhase}` : ''}
+                        </Caption1>
                     </div>
+                    {execution.branchName && (
+                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
+                            Branch: {execution.branchName}
+                        </Caption1>
+                    )}
                 </div>
                 <div className={styles.executionActions}>
                     {execution.status === 'running' && (
@@ -259,20 +350,31 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
                         </>
                     )}
                     {execution.status === 'failed' && (
-                        <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Retry" onClick={() => notify('Retrying agent execution...')} />
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<ArrowClockwiseRegular />}
+                            aria-label="Retry"
+                            onClick={() => {
+                                if (onRetry) {
+                                    onRetry(execution.id)
+                                } else {
+                                    notify('Retry is unavailable for this execution', 'error')
+                                }
+                            }}
+                        />
                     )}
                 </div>
             </div>
 
             <ProgressBar
                 value={execution.progress}
-                thickness="large"
+                thickness={isCompact ? 'medium' : 'large'}
                 color={execution.status === 'failed' ? 'error' : execution.status === 'completed' ? 'success' : 'brand'}
             />
 
-            <Divider />
+            <Divider className={isCompact ? styles.compactDivider : undefined} />
 
-            {/* ── Pipeline steps ── */}
             <div className={styles.pipeline}>
                 {agents.map((agent, i) => {
                     const isLast = i === agents.length - 1
@@ -280,8 +382,7 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
                     const isCompleted = agent.status === 'completed'
 
                     return (
-                        <div key={agent.role} className={styles.agentStep}>
-                            {/* Gutter: icon + vertical connector */}
+                        <div key={agent.role} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
                             <div className={styles.stepGutter}>
                                 <AgentStepIcon status={agent.status} />
                                 {!isLast && (
@@ -289,17 +390,25 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
                                 )}
                             </div>
 
-                            {/* Body: role name + current task */}
                             <div className={styles.stepBody}>
-                                <Text size={200} weight="semibold" className={styles.roleName}>
+                                <Text
+                                    size={200}
+                                    weight="semibold"
+                                    className={mergeClasses(styles.roleName, isCompact && styles.roleNameCompact)}
+                                >
                                     {agent.role}
                                 </Text>
-                                <Caption1 className={isRunning ? styles.taskCaptionRunning : styles.taskCaption}>
+                                <Caption1
+                                    className={mergeClasses(
+                                        isRunning ? styles.taskCaptionRunning : styles.taskCaption,
+                                        isCompact && styles.taskCaptionCompact,
+                                    )}
+                                >
                                     {agent.currentTask}
                                 </Caption1>
                                 {isRunning && agent.progress > 0 && (
                                     <ProgressBar
-                                        className={styles.stepProgress}
+                                        className={mergeClasses(styles.stepProgress, isCompact && styles.stepProgressCompact)}
                                         value={agent.progress}
                                         thickness="medium"
                                         color="brand"
@@ -307,10 +416,9 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
                                 )}
                             </div>
 
-                            {/* Trailing: percentage */}
                             <div className={styles.stepTrailing}>
                                 {isRunning && agent.progress > 0 && agent.progress < 1 && (
-                                    <Text className={styles.progressPercent}>
+                                    <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
                                         {Math.round(agent.progress * 100)}%
                                     </Text>
                                 )}
@@ -321,10 +429,42 @@ export function ExecutionCard({ execution, onPause, onCancel }: ExecutionCardPro
             </div>
 
             {execution.status === 'completed' && (
-                <div className={styles.completedActions}>
-                    <Button appearance="outline" size="small" icon={<BranchRegular />} onClick={() => notify('PR view is not available in this version')}>View PR</Button>
-                    <Button appearance="outline" size="small" icon={<CodeRegular />} onClick={() => notify('Code diff view coming soon')}>View Changes</Button>
-                    <Button appearance="outline" size="small" icon={<DocumentRegular />} onClick={() => notify('Documentation view coming soon')}>Docs</Button>
+                <div className={mergeClasses(styles.completedActions, isCompact && styles.completedActionsCompact)}>
+                    <Button
+                        appearance="outline"
+                        size="small"
+                        icon={<BranchRegular />}
+                        disabled={!execution.pullRequestUrl}
+                        onClick={() => openPullRequest(execution.pullRequestUrl)}
+                    >
+                        View PR
+                    </Button>
+                    <Button
+                        appearance="outline"
+                        size="small"
+                        icon={<CodeRegular />}
+                        onClick={() => {
+                            if (!openPullRequestDiff(execution.pullRequestUrl)) {
+                                notify('No pull request diff is available for this execution', 'error')
+                            }
+                        }}
+                    >
+                        View Changes
+                    </Button>
+                    <Button
+                        appearance="outline"
+                        size="small"
+                        icon={<DocumentRegular />}
+                        onClick={() => {
+                            if (onViewDocs) {
+                                onViewDocs(execution.id)
+                            } else {
+                                notify('Documentation is unavailable for this execution', 'error')
+                            }
+                        }}
+                    >
+                        Docs
+                    </Button>
                 </div>
             )}
         </Card>

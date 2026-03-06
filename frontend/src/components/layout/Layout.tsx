@@ -25,10 +25,13 @@ import type { NavItemConfig } from '../../models'
 
 const SIDEBAR_WIDTH_EXPANDED = '260px'
 const SIDEBAR_WIDTH_COLLAPSED = '48px'
+const SIDEBAR_WIDTH_EXPANDED_COMPACT = '220px'
+const SIDEBAR_WIDTH_COLLAPSED_COMPACT = '44px'
 
 const useStyles = makeStyles({
     root: {
         backgroundColor: tokens.colorNeutralBackground2,
+        height: '100%',
     },
 
     /* ───── Sidebar pane (SplitView first) ───── */
@@ -47,20 +50,32 @@ const useStyles = makeStyles({
         overflowX: 'hidden',
         overflowY: 'auto',
         flexShrink: 0,
+        boxShadow: `inset -1px 0 0 ${tokens.colorNeutralStroke2}`,
     },
     sidebarExpanded: {
         width: SIDEBAR_WIDTH_EXPANDED,
     },
+    sidebarExpandedCompact: {
+        width: SIDEBAR_WIDTH_EXPANDED_COMPACT,
+    },
     sidebarCollapsed: {
         width: SIDEBAR_WIDTH_COLLAPSED,
+    },
+    sidebarCollapsedCompact: {
+        width: SIDEBAR_WIDTH_COLLAPSED_COMPACT,
     },
 
     /* ───── Nav section / group ───── */
     navSection: {
         display: 'flex',
         flexDirection: 'column',
-        padding: '0.375rem',
-        gap: '1px',
+        padding: '0.5rem 0.375rem 0',
+        gap: '2px',
+    },
+    navSectionCompact: {
+        paddingTop: '0.25rem',
+        paddingLeft: '0.25rem',
+        paddingRight: '0.25rem',
     },
     navSectionLabel: {
         padding: '0.375rem 0.625rem 0.25rem',
@@ -73,12 +88,23 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         userSelect: 'none',
     },
+    navSectionLabelCompact: {
+        paddingTop: '0.25rem',
+        paddingBottom: '0.125rem',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        fontSize: '10px',
+    },
 
     /* ───── Footer ───── */
     sidebarFooter: {
         marginTop: 'auto',
         padding: '0.375rem',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground2,
+    },
+    sidebarFooterCompact: {
+        padding: '0.25rem',
     },
 
     /* ───── Main content area ───── */
@@ -87,6 +113,7 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         height: '100%',
         overflow: 'hidden',
+        backgroundColor: tokens.colorNeutralBackground3,
     },
     mainContent: {
         flex: 1,
@@ -103,19 +130,21 @@ const useStyles = makeStyles({
         height: '100%',
         display: 'flex',
         flexDirection: 'row',
+        backgroundColor: tokens.colorNeutralBackground1,
+        borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
     },
     resizeHandle: {
-        width: '4px',
+        width: '6px',
         cursor: 'col-resize',
         backgroundColor: 'transparent',
         flexShrink: 0,
         transition: 'background-color 0.15s',
         ':hover': {
-            backgroundColor: tokens.colorBrandBackground,
+            backgroundColor: tokens.colorBrandBackground2,
         },
     },
     resizeHandleActive: {
-        backgroundColor: tokens.colorBrandBackground,
+        backgroundColor: tokens.colorBrandBackground2,
     },
 })
 
@@ -137,6 +166,13 @@ export function Layout() {
             window.history.replaceState({}, '')
         }
     }, [location.state, projectId])
+
+    // Keep live layout state synced with the settings toggle.
+    useEffect(() => {
+        if (preferences) {
+            setSidebarExpanded(!preferences.sidebarCollapsed)
+        }
+    }, [preferences?.sidebarCollapsed])
 
     /* ── Chat pane resize state ── */
     const MIN_CHAT_WIDTH = 340
@@ -241,6 +277,8 @@ export function Layout() {
                     className={mergeClasses(
                         styles.sidebar,
                         sidebarExpanded ? styles.sidebarExpanded : styles.sidebarCollapsed,
+                        preferences?.compactMode && sidebarExpanded && styles.sidebarExpandedCompact,
+                        preferences?.compactMode && !sidebarExpanded && styles.sidebarCollapsedCompact,
                     )}
                 >
                     <SidebarHeader
@@ -254,8 +292,12 @@ export function Layout() {
                     )}
 
                     {/* Global nav */}
-                    <div className={styles.navSection}>
-                        {sidebarExpanded && <Text className={styles.navSectionLabel}>Navigate</Text>}
+                    <div className={mergeClasses(styles.navSection, preferences?.compactMode && styles.navSectionCompact)}>
+                        {sidebarExpanded && (
+                            <Text className={mergeClasses(styles.navSectionLabel, preferences?.compactMode && styles.navSectionLabelCompact)}>
+                                Navigate
+                            </Text>
+                        )}
                         {globalNav.map((item) => (
                             <SidebarNavItem
                                 key={item.path}
@@ -268,8 +310,12 @@ export function Layout() {
 
                     {/* Project-scoped nav */}
                     {slug && (
-                        <div className={styles.navSection}>
-                            {sidebarExpanded && <Text className={styles.navSectionLabel}>Project</Text>}
+                        <div className={mergeClasses(styles.navSection, preferences?.compactMode && styles.navSectionCompact)}>
+                            {sidebarExpanded && (
+                                <Text className={mergeClasses(styles.navSectionLabel, preferences?.compactMode && styles.navSectionLabelCompact)}>
+                                    Project
+                                </Text>
+                            )}
                             {projectNav.map((item) => (
                                 <SidebarNavItem
                                     key={item.path}
@@ -282,7 +328,7 @@ export function Layout() {
                     )}
 
                     {/* Footer / utility nav */}
-                    <div className={styles.sidebarFooter}>
+                    <div className={mergeClasses(styles.sidebarFooter, preferences?.compactMode && styles.sidebarFooterCompact)}>
                         {bottomNav.map((item) => (
                             <SidebarNavItem
                                 key={item.path}

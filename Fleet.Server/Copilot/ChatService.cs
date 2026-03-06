@@ -3,6 +3,7 @@ using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
+using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Copilot;
@@ -13,8 +14,11 @@ public class ChatService(
     ChatToolRegistry toolRegistry,
     IAuthService authService,
     IOptions<LLMOptions> llmOptions,
-    ILogger<ChatService> logger) : IChatService
+    ILogger<ChatService> logger,
+    IUsageLedgerService? usageLedgerService = null) : IChatService
 {
+    private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
+
     private static readonly Lazy<string> SystemPromptLazy = new(() =>
     {
         var promptPath = Path.Combine(AppContext.BaseDirectory, "Copilot", "chat_prompt.txt");
@@ -85,7 +89,7 @@ public class ChatService(
         });
 
         logger.CopilotSessionDeleting(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging());
-        return await chatSessionRepository.DeleteSessionAsync(sessionId);
+        return await chatSessionRepository.DeleteSessionAsync(projectId, sessionId);
     }
 
     public async Task<SendMessageResponseDto> SendMessageAsync(string projectId, string sessionId, string content, bool generateWorkItems = false)
@@ -105,7 +109,15 @@ public class ChatService(
 
         // 1a. Mark session as generating so the UI shows a spinner on refresh
         if (generateWorkItems)
-            await chatSessionRepository.SetSessionGeneratingAsync(sessionId, true);
+            await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, true);
+
+        var userId = await authService.GetCurrentUserIdAsync();
+        var chargedWorkItemRun = false;
+        if (generateWorkItems)
+        {
+            await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
+            chargedWorkItemRun = true;
+        }
 
         // 2. Load full session history for context
         var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
@@ -122,7 +134,7 @@ public class ChatService(
         }
 
         // 2b. Build system prompt with any uploaded documents
-        var systemPrompt = await BuildSystemPromptAsync(sessionId);
+        var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
 
         // 3. Get tool definitions — only include write tools when generation is requested.
         //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
@@ -134,13 +146,12 @@ public class ChatService(
         // 4. Auto-name the session before generation starts (fast Haiku call)
         if (generateWorkItems)
         {
-            await GenerateSessionNameAsync(sessionId, llmMessages, config);
+            await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config);
         }
 
         // 5. Run the tool-calling loop with safety limits
         var toolEvents = new List<ToolEventDto>();
-        var userId = (await authService.GetCurrentUserIdAsync()).ToString();
-        var toolContext = new ChatToolContext(projectId, userId);
+        var toolContext = new ChatToolContext(projectId, userId.ToString());
         var totalToolCalls = 0;
 
         var timeoutSeconds = generateWorkItems ? config.GenerateTimeoutSeconds : config.TimeoutSeconds;
@@ -163,7 +174,8 @@ public class ChatService(
                 logger.CopilotLlmTimeout(timeoutSeconds);
                 var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
-                await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
+                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                 return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
             }
             catch (Exception ex)
@@ -172,7 +184,8 @@ public class ChatService(
                 var assistantError = BuildAssistantErrorMessage(ex);
                 var errorMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantError);
-                await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
+                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                 return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
             }
 
@@ -238,7 +251,7 @@ public class ChatService(
 
             logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
-            await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
+            await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
             return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
         }
 
@@ -247,7 +260,8 @@ public class ChatService(
         var fallbackMsg = await chatSessionRepository.AddMessageAsync(
             projectId, sessionId, "assistant",
             "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
-        await ClearGeneratingFlagAsync(sessionId, generateWorkItems);
+        await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+        await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
         return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
     }
 
@@ -257,12 +271,12 @@ public class ChatService(
     /// Clears the IsGenerating flag on the session when a generate request completes.
     /// Best-effort — failures are logged but do not propagate.
     /// </summary>
-    private async Task ClearGeneratingFlagAsync(string sessionId, bool wasGenerating)
+    private async Task ClearGeneratingFlagAsync(string projectId, string sessionId, bool wasGenerating)
     {
         if (!wasGenerating) return;
         try
         {
-            await chatSessionRepository.SetSessionGeneratingAsync(sessionId, false);
+            await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, false);
         }
         catch (Exception ex)
         {
@@ -274,7 +288,7 @@ public class ChatService(
     /// Calls Haiku to generate a concise name for the chat session based on conversation context,
     /// then persists it. Failures are logged but do not propagate — naming is best-effort.
     /// </summary>
-    private async Task GenerateSessionNameAsync(string sessionId, List<LLMMessage> conversationMessages, LLMOptions config)
+    private async Task GenerateSessionNameAsync(string projectId, string sessionId, List<LLMMessage> conversationMessages, LLMOptions config)
     {
         try
         {
@@ -305,7 +319,7 @@ public class ChatService(
                 if (name.Length > 60)
                     name = name[..60];
 
-                await chatSessionRepository.RenameSessionAsync(sessionId, name);
+                await chatSessionRepository.RenameSessionAsync(projectId, sessionId, name);
             }
         }
         catch (Exception ex)
@@ -367,9 +381,9 @@ public class ChatService(
         Content = msg.Content,
     };
 
-    private async Task<string> BuildSystemPromptAsync(string sessionId)
+    private async Task<string> BuildSystemPromptAsync(string projectId, string sessionId)
     {
-        var attachments = await chatSessionRepository.GetAttachmentsBySessionIdAsync(sessionId);
+        var attachments = await chatSessionRepository.GetAttachmentsBySessionIdAsync(projectId, sessionId) ?? [];
         if (attachments.Count == 0)
             return SystemPrompt;
 
@@ -382,7 +396,7 @@ public class ChatService(
         var totalLength = 0;
         foreach (var attachment in attachments)
         {
-            var content = await chatSessionRepository.GetAttachmentContentAsync(attachment.Id);
+            var content = await chatSessionRepository.GetAttachmentContentAsync(projectId, attachment.Id);
             if (content is null) continue;
 
             if (totalLength + content.Length > MaxAttachmentContextLength)
@@ -410,14 +424,14 @@ public class ChatService(
         if (message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("quota", StringComparison.OrdinalIgnoreCase))
         {
-            return "The AI service quota for this API key is exhausted or disabled. Update your Gemini billing/quota settings or use a different API key, then try again.";
+            return "The AI service quota for this key is exhausted or disabled. Update your Azure OpenAI quota/billing settings or use a different key, then try again.";
         }
 
         if (message.Contains("API key", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("403", StringComparison.OrdinalIgnoreCase))
         {
-            return "The AI service API key is missing or invalid. Update your Gemini API key in user secrets and restart Fleet.AppHost.";
+            return "The AI service API key is missing or invalid. Update your Azure OpenAI API key in user secrets and restart Fleet.AppHost.";
         }
 
         if (message.Contains("429", StringComparison.OrdinalIgnoreCase))
@@ -439,17 +453,37 @@ public class ChatService(
     public async Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content)
     {
         logger.CopilotAttachmentUploading(sessionId.SanitizeForLogging(), fileName.SanitizeForLogging(), content.Length);
-        return await chatSessionRepository.AddAttachmentAsync(sessionId, fileName, content);
+        return await chatSessionRepository.AddAttachmentAsync(projectId, sessionId, fileName, content);
     }
 
-    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string sessionId)
+    private async Task RefundIfNeededAsync(bool isGenerateRequest, bool chargedRun, int userId)
     {
-        return await chatSessionRepository.GetAttachmentsBySessionIdAsync(sessionId);
+        if (!isGenerateRequest || !chargedRun)
+            return;
+
+        await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.WorkItem);
     }
 
-    public async Task<bool> DeleteAttachmentAsync(string attachmentId)
+    public Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string sessionId)
+    {
+        // Backward-compatible overload for existing tests/callers.
+        return GetAttachmentsAsync(string.Empty, sessionId);
+    }
+
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string projectId, string sessionId)
+    {
+        return await chatSessionRepository.GetAttachmentsBySessionIdAsync(projectId, sessionId);
+    }
+
+    public Task<bool> DeleteAttachmentAsync(string attachmentId)
+    {
+        // Backward-compatible overload for existing tests/callers.
+        return DeleteAttachmentAsync(string.Empty, string.Empty, attachmentId);
+    }
+
+    public async Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId)
     {
         logger.CopilotAttachmentDeleting(attachmentId.SanitizeForLogging());
-        return await chatSessionRepository.DeleteAttachmentAsync(attachmentId);
+        return await chatSessionRepository.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
     }
 }

@@ -8,6 +8,10 @@ export interface ProjectData {
   workItems: { total: number; active: number; resolved: number }
   agents: { total: number; running: number }
   lastActivity: string
+  branchPattern: string
+  commitAuthorMode: string
+  commitAuthorName?: string | null
+  commitAuthorEmail?: string | null
 }
 
 export interface SlugCheckResult {

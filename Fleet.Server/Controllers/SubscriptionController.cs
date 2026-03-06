@@ -1,20 +1,20 @@
 using Fleet.Server.Subscriptions;
+using Fleet.Server.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 
 namespace Fleet.Server.Controllers;
 
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
-public class SubscriptionController(ISubscriptionService subscriptionService) : ControllerBase
+public class SubscriptionController(ISubscriptionService subscriptionService, IAuthService authService) : ControllerBase
 {
     [HttpGet]
-    [OutputCache(Duration = 5)]
     public async Task<IActionResult> Get()
     {
-        var data = await subscriptionService.GetSubscriptionDataAsync();
+        var userId = await authService.GetCurrentUserIdAsync();
+        var data = await subscriptionService.GetSubscriptionDataAsync(userId);
         return Ok(data);
     }
 }

@@ -18,9 +18,9 @@ public class ModelCatalog : IModelCatalog
         }
 
         // Ensure defaults if configuration doesn't provide them.
-        SetDefault("Haiku", "claude-haiku-4-5-20251001");
-        SetDefault("Sonnet", "claude-sonnet-4-6");
-        SetDefault("Opus", "claude-opus-4-6");
+        SetDefault("Haiku", "gpt-5.2-codex");
+        SetDefault("Sonnet", "gpt-5.2-codex");
+        SetDefault("Opus", "gpt-5.2-codex");
     }
 
     private void SetDefault(string key, string modelName)
@@ -48,3 +48,4 @@ public class ModelCatalog : IModelCatalog
 
     public IReadOnlyDictionary<string, string> Models => _models;
 }
+

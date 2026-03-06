@@ -111,7 +111,7 @@ public class ChatsControllerTests
     public async Task GetAttachments_ReturnsOk()
     {
         var attachments = new List<ChatAttachmentDto>();
-        _chatService.Setup(s => s.GetAttachmentsAsync(SessionId)).ReturnsAsync(attachments);
+        _chatService.Setup(s => s.GetAttachmentsAsync(ProjectId, SessionId)).ReturnsAsync(attachments);
 
         var result = await _sut.GetAttachments(ProjectId, SessionId);
 
@@ -174,7 +174,7 @@ public class ChatsControllerTests
     [TestMethod]
     public async Task DeleteAttachment_Found_ReturnsNoContent()
     {
-        _chatService.Setup(s => s.DeleteAttachmentAsync("att-1")).ReturnsAsync(true);
+        _chatService.Setup(s => s.DeleteAttachmentAsync(ProjectId, SessionId, "att-1")).ReturnsAsync(true);
 
         var result = await _sut.DeleteAttachment(ProjectId, SessionId, "att-1");
 
@@ -184,7 +184,7 @@ public class ChatsControllerTests
     [TestMethod]
     public async Task DeleteAttachment_NotFound_Returns404()
     {
-        _chatService.Setup(s => s.DeleteAttachmentAsync("att-1")).ReturnsAsync(false);
+        _chatService.Setup(s => s.DeleteAttachmentAsync(ProjectId, SessionId, "att-1")).ReturnsAsync(false);
 
         var result = await _sut.DeleteAttachment(ProjectId, SessionId, "att-1");
 

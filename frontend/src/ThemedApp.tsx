@@ -1,5 +1,10 @@
 import { FluentProvider } from '@fluentui/react-components'
-import { warmDarkTheme, warmLightTheme } from './theme'
+import {
+    warmDarkTheme,
+    warmLightTheme,
+    warmDarkCompactTheme,
+    warmLightCompactTheme,
+} from './theme'
 import { usePreferences } from './hooks'
 import { App } from './'
 
@@ -10,9 +15,13 @@ import { App } from './'
 export function ThemedApp() {
     const { preferences } = usePreferences()
     const isDark = preferences?.darkMode ?? true
+    const isCompact = preferences?.compactMode ?? false
+    const theme = isCompact
+        ? (isDark ? warmDarkCompactTheme : warmLightCompactTheme)
+        : (isDark ? warmDarkTheme : warmLightTheme)
 
     return (
-        <FluentProvider theme={isDark ? warmDarkTheme : warmLightTheme} style={{ height: '100%' }}>
+        <FluentProvider theme={theme} style={{ height: '100%' }}>
             <App />
         </FluentProvider>
     )

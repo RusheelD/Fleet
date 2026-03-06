@@ -12,5 +12,9 @@ public record WorkItemDto(
     string Description,
     int? ParentWorkItemNumber,
     int[] ChildWorkItemNumbers,
-    int? LevelId
+    int? LevelId,
+    string AssignmentMode = "auto",
+    int? AssignedAgentCount = null,
+    string AcceptanceCriteria = "",
+    string? LinkedPullRequestUrl = null
 );

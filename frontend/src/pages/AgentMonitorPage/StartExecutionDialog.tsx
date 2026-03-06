@@ -66,7 +66,7 @@ export function StartExecutionDialog({
     const eligible = workItems.filter(
         (wi) =>
             wi.isAI &&
-            !['Closed', 'Resolved', 'Resolved (AI)'].includes(wi.state),
+            !['Closed', 'Resolved', 'Resolved (AI)', 'In-PR', 'In-PR (AI)'].includes(wi.state),
     )
 
     const handleStart = () => {
@@ -113,7 +113,7 @@ export function StartExecutionDialog({
                                                             appearance="outline"
                                                             size="small"
                                                             color={
-                                                                wi.state === 'Active' || wi.state === 'In Progress' || wi.state === 'In Progress (AI)'
+                                                                wi.state === 'Active' || wi.state === 'Planning (AI)' || wi.state === 'In Progress' || wi.state === 'In Progress (AI)'
                                                                     ? 'success'
                                                                     : 'informative'
                                                             }

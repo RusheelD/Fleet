@@ -9,6 +9,10 @@ public class Project
     public string Description { get; set; } = string.Empty;
     public string Repo { get; set; } = string.Empty;
     public string LastActivity { get; set; } = string.Empty;
+    public string BranchPattern { get; set; } = "fleet/{workItemNumber}-{slug}";
+    public string CommitAuthorMode { get; set; } = "fleet";
+    public string? CommitAuthorName { get; set; }
+    public string? CommitAuthorEmail { get; set; }
 
     // Stored as JSON (jsonb) columns — demonstrates PostgreSQL JSON support
     public WorkItemSummary WorkItemSummary { get; set; } = new();

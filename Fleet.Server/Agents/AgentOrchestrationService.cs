@@ -1,12 +1,16 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Fleet.Server.Auth;
 using Fleet.Server.Connections;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.LLM;
 using Fleet.Server.Models;
+using Fleet.Server.Notifications;
+using Fleet.Server.Subscriptions;
 using Fleet.Server.WorkItems;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,13 +23,18 @@ namespace Fleet.Server.Agents;
 public class AgentOrchestrationService(
     FleetDbContext db,
     IConnectionRepository connectionRepository,
+    IGitHubTokenProtector tokenProtector,
     IWorkItemRepository workItemRepository,
     IServiceScopeFactory serviceScopeFactory,
     ILLMClient llmClient,
     IHttpClientFactory httpClientFactory,
     ILogger<AgentOrchestrationService> logger,
-    IModelCatalog modelCatalog) : IAgentOrchestrationService
+    IModelCatalog modelCatalog,
+    INotificationService notificationService,
+    IUsageLedgerService? usageLedgerService = null) : IAgentOrchestrationService
 {
+    private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
+
     /// <summary>
     /// Tracks CancellationTokenSources for active executions so they can be cancelled/paused externally.
     /// Key = executionId, Value = (CTS, desired final status when cancelled).
@@ -33,19 +42,25 @@ public class AgentOrchestrationService(
     private static readonly ConcurrentDictionary<string, (CancellationTokenSource Cts, string FinalStatus)> ActiveExecutions = new();
 
     /// <summary>
+    /// Queues operator steering notes to inject into the next phase prompt.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, ConcurrentQueue<string>> SteeringNotes = new();
+
+    /// <summary>
     /// The ordered pipeline phases. Implementation phases run sequentially within their group.
     /// </summary>
     private static readonly AgentRole[][] FullPipeline =
     [
-        // Phase 1 — Planning
+        [AgentRole.Manager],
+        // Phase 1 - Planning
         [AgentRole.Planner],
-        // Phase 2 — Contracts / interfaces
+        // Phase 2 - Contracts / interfaces
         [AgentRole.Contracts],
-        // Phase 3 — Implementation (sequential: Backend → Frontend → Testing → Styling)
+        // Phase 3 - Implementation (sequential: Backend -> Frontend -> Testing -> Styling)
         [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling],
-        // Phase 4 — Consolidation
+        // Phase 4 - Consolidation
         [AgentRole.Consolidation],
-        // Phase 5 — Review & documentation
+        // Phase 5 - Review and documentation
         [AgentRole.Review, AgentRole.Documentation],
     ];
 
@@ -158,23 +173,28 @@ public class AgentOrchestrationService(
     /// Arranges selected roles into the standard <c>AgentRole[][]</c> pipeline format,
     /// preserving the canonical dependency order.
     /// </summary>
-    private static AgentRole[][] ArrangePipeline(List<AgentRole> roles)
+        private static AgentRole[][] ArrangePipeline(List<AgentRole> roles)
     {
-        // Ensure Planner is always present
+        // Ensure Manager and Planner are always present
+        if (!roles.Contains(AgentRole.Manager))
+            roles.Insert(0, AgentRole.Manager);
         if (!roles.Contains(AgentRole.Planner))
             roles.Insert(0, AgentRole.Planner);
 
-        // Canonical ordering: Planner → Contracts → [Backend, Frontend, Testing, Styling] → Consolidation → [Review, Documentation]
+        // Canonical ordering: Manager -> Planner -> Contracts -> [Backend, Frontend, Testing, Styling] -> Consolidation -> [Review, Documentation]
         var pipeline = new List<AgentRole[]>();
 
-        // Group 1: Planner
+        // Group 1: Manager
+        pipeline.Add([AgentRole.Manager]);
+
+        // Group 2: Planner
         pipeline.Add([AgentRole.Planner]);
 
-        // Group 2: Contracts (if selected)
+        // Group 3: Contracts (if selected)
         if (roles.Contains(AgentRole.Contracts))
             pipeline.Add([AgentRole.Contracts]);
 
-        // Group 3: Implementation agents (Backend, Frontend, Testing, Styling — in order, if selected)
+        // Group 4: Implementation agents (Backend, Frontend, Testing, Styling - in order, if selected)
         var implGroup = new List<AgentRole>();
         foreach (var role in new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling })
         {
@@ -184,12 +204,12 @@ public class AgentOrchestrationService(
         if (implGroup.Count > 0)
             pipeline.Add([.. implGroup]);
 
-        // Group 4: Consolidation (if selected and both Backend+Frontend are in the pipeline)
+        // Group 5: Consolidation (if selected and both Backend+Frontend are in the pipeline)
         if (roles.Contains(AgentRole.Consolidation) &&
             roles.Contains(AgentRole.Backend) && roles.Contains(AgentRole.Frontend))
             pipeline.Add([AgentRole.Consolidation]);
 
-        // Group 5: Review and Documentation (if selected)
+        // Group 6: Review and Documentation (if selected)
         var reviewGroup = new List<AgentRole>();
         foreach (var role in new[] { AgentRole.Review, AgentRole.Documentation })
         {
@@ -223,90 +243,139 @@ public class AgentOrchestrationService(
     public async Task<string> StartExecutionAsync(
         string projectId, int workItemNumber, int userId, CancellationToken cancellationToken = default)
     {
-        // 1. Load the work item and ALL of its descendants (recursively)
-        var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, workItemNumber)
-            ?? throw new InvalidOperationException($"Work item #{workItemNumber} not found in project {projectId}.");
-
-        var childWorkItems = new List<Models.WorkItemDto>();
-        await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
-
-        // 2. Load the project to get the repo name
-        var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-
-        if (string.IsNullOrWhiteSpace(project.Repo))
-            throw new InvalidOperationException("Project has no linked repository.");
-
-        // 3. Get the user's GitHub access token
-        var linkedAccount = await connectionRepository.GetByProviderAsync(userId, "GitHub")
-            ?? throw new InvalidOperationException("No GitHub account linked. Please connect your GitHub account first.");
-
-        if (string.IsNullOrWhiteSpace(linkedAccount.AccessToken))
-            throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
-
-        var accessToken = linkedAccount.AccessToken;
-        var repoFullName = project.Repo;
-
-        // 4. Use AI to determine which agents are needed for this work item.
-        //    Always use Haiku for cost savings.
-        var selectedModelKey = ModelKeys.Haiku;
-        var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
-        var pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
-        logger.LogInformation(
-            "Execution: AI-selected pipeline with {PhaseCount} agents, model={Model}",
-            pipeline.SelectMany(g => g).Count(), selectedModelKey);
-
-        // 5. Create the execution record
-        var executionId = Guid.NewGuid().ToString("N")[..12];
-        var branchName = $"fleet/{workItemNumber}-{Slugify(workItem.Title)}";
-
-        var execution = new AgentExecution
+        var codingRunCharged = false;
+        try
         {
-            Id = executionId,
-            WorkItemId = workItemNumber,
-            WorkItemTitle = workItem.Title,
-            Status = "running",
-            StartedAt = DateTime.UtcNow.ToString("o"),
-            StartedAtUtc = DateTime.UtcNow,
-            Progress = 0,
-            BranchName = branchName,
-            CurrentPhase = "Initializing",
-            UserId = userId.ToString(),
-            ProjectId = projectId,
-            Agents = BuildAgentInfoList(pipeline),
-        };
+            // 1. Load the work item and ALL of its descendants (recursively)
+            var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, workItemNumber)
+                ?? throw new InvalidOperationException($"Work item #{workItemNumber} not found in project {projectId}.");
 
-        db.AgentExecutions.Add(execution);
-        await db.SaveChangesAsync(cancellationToken);
+            var childWorkItems = new List<Models.WorkItemDto>();
+            await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
 
-        // 6. Mark the work item as in-progress
-        await workItemRepository.UpdateAsync(projectId, workItemNumber,
-            new UpdateWorkItemRequest(
-                Title: null, Description: null, Priority: null, Difficulty: null,
-                State: "Active", AssignedTo: null, Tags: null, IsAI: null,
-                ParentWorkItemNumber: null, LevelId: null));
+            // 2. Load the project to get the repo name
+            var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-        // 7. Write an initial log entry
-        await WriteLogEntryAsync(db, projectId, "System", "info",
-            $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}");
+            if (string.IsNullOrWhiteSpace(project.Repo))
+                throw new InvalidOperationException("Project has no linked repository.");
 
-        // 8. Fire-and-forget the pipeline on a background thread
-        //    We use IServiceScopeFactory (singleton) to create a new scope so the DbContext isn't shared.
-        var cts = new CancellationTokenSource();
-        ActiveExecutions[executionId] = (cts, "cancelled");
-        _ = Task.Run(() => RunPipelineAsync(
-            executionId, projectId, workItem, childWorkItems, repoFullName,
-            accessToken, branchName, userId, selectedModelKey, pipeline, cts.Token), CancellationToken.None);
+            // 3. Resolve the user's tier and enforce concurrent execution caps.
+            var userRole = await db.UserProfiles
+                .AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => u.Role)
+                .FirstOrDefaultAsync(cancellationToken);
+            var normalizedRole = UserRoles.Normalize(userRole);
+            var tierPolicy = TierPolicyCatalog.Get(normalizedRole);
 
-        return executionId;
+            var activeExecutions = await db.AgentExecutions
+                .AsNoTracking()
+                .CountAsync(e => e.UserId == userId.ToString() && e.Status == "running", cancellationToken);
+            if (activeExecutions >= tierPolicy.MaxActiveAgentExecutions)
+            {
+                throw new InvalidOperationException(
+                    $"Active execution limit reached for the '{tierPolicy.Tier}' tier ({tierPolicy.MaxActiveAgentExecutions}).");
+            }
+
+            // 4. Charge quota at accepted run start.
+            await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.Coding, cancellationToken);
+            codingRunCharged = true;
+
+            // 5. Get the user's GitHub access token
+            var linkedAccount = await connectionRepository.GetByProviderAsync(userId, "GitHub")
+                ?? throw new InvalidOperationException("No GitHub account linked. Please connect your GitHub account first.");
+
+            var accessToken = tokenProtector.Unprotect(linkedAccount.AccessToken);
+            if (string.IsNullOrWhiteSpace(accessToken))
+                throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
+            var repoFullName = project.Repo;
+
+            // 6. Use AI to determine which agents are needed for this work item.
+            var selectedModelKey = ModelKeys.Haiku;
+            var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
+            var pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
+            logger.LogInformation(
+                "Execution: AI-selected pipeline with {PhaseCount} agents, model={Model}",
+                pipeline.SelectMany(g => g).Count(), selectedModelKey);
+
+            // 7. Resolve collision-safe branch and PR title values.
+            var plannedBranch = BuildBranchName(project.BranchPattern, workItemNumber, workItem.Title);
+            var branchName = await ResolveUniqueBranchNameAsync(accessToken, repoFullName, plannedBranch, cancellationToken);
+            var plannedPrTitle = BuildPullRequestTitle(workItem);
+            var (commitAuthorName, commitAuthorEmail) = ResolveCommitAuthor(
+                project.CommitAuthorMode,
+                project.CommitAuthorName,
+                project.CommitAuthorEmail);
+
+            // 8. Create the execution record
+            var executionId = Guid.NewGuid().ToString("N")[..12];
+            var execution = new AgentExecution
+            {
+                Id = executionId,
+                WorkItemId = workItemNumber,
+                WorkItemTitle = workItem.Title,
+                Status = "running",
+                StartedAt = DateTime.UtcNow.ToString("o"),
+                StartedAtUtc = DateTime.UtcNow,
+                Progress = 0,
+                BranchName = branchName,
+                PullRequestTitle = plannedPrTitle,
+                CurrentPhase = "Initializing",
+                UserId = userId.ToString(),
+                ProjectId = projectId,
+                Agents = BuildAgentInfoList(pipeline),
+            };
+
+            db.AgentExecutions.Add(execution);
+            await db.SaveChangesAsync(cancellationToken);
+
+            // 9. Mark the work item as in-progress
+            await workItemRepository.UpdateAsync(projectId, workItemNumber,
+                new UpdateWorkItemRequest(
+                    Title: null, Description: null, Priority: null, Difficulty: null,
+                    State: "Planning (AI)", AssignedTo: null, Tags: null, IsAI: null,
+                    ParentWorkItemNumber: null, LevelId: null));
+
+            // 10. Write an initial log entry
+            await WriteLogEntryAsync(db, projectId, "System", "info",
+                $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}");
+
+            // 11. Fire-and-forget the pipeline on a background thread
+            var cts = new CancellationTokenSource();
+            ActiveExecutions[executionId] = (cts, "cancelled");
+            SteeringNotes.TryAdd(executionId, new ConcurrentQueue<string>());
+            _ = Task.Run(() => RunPipelineAsync(
+                executionId, projectId, workItem, childWorkItems, repoFullName,
+                accessToken, branchName, commitAuthorName, commitAuthorEmail,
+                userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask, cts.Token), CancellationToken.None);
+
+            return executionId;
+        }
+        catch
+        {
+            if (codingRunCharged)
+            {
+                try
+                {
+                    await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.Coding, cancellationToken);
+                }
+                catch (Exception refundEx)
+                {
+                    logger.LogWarning(refundEx, "Failed to refund coding run usage during start-execution rollback");
+                }
+            }
+
+            throw;
+        }
     }
 
     public async Task<AgentExecutionStatus?> GetExecutionStatusAsync(
-        string executionId, CancellationToken cancellationToken = default)
+        string projectId, string executionId, CancellationToken cancellationToken = default)
     {
         var exec = await db.AgentExecutions
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.Id == executionId, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == executionId && e.ProjectId == projectId, cancellationToken);
 
         if (exec is null) return null;
 
@@ -321,14 +390,134 @@ public class AgentOrchestrationService(
         );
     }
 
-    public Task<bool> CancelExecutionAsync(string executionId)
+    public async Task<AgentExecutionStatus?> GetExecutionStatusAsync(
+        string executionId, CancellationToken cancellationToken = default)
     {
-        return StopExecutionAsync(executionId, "cancelled");
+        var projectId = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(e => e.Id == executionId)
+            .Select(e => e.ProjectId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return projectId is null
+            ? null
+            : await GetExecutionStatusAsync(projectId, executionId, cancellationToken);
     }
 
-    public Task<bool> PauseExecutionAsync(string executionId)
+    public async Task<bool> CancelExecutionAsync(string executionId)
     {
-        return StopExecutionAsync(executionId, "paused");
+        var projectId = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(e => e.Id == executionId)
+            .Select(e => e.ProjectId)
+            .FirstOrDefaultAsync();
+
+        return projectId is not null && await CancelExecutionAsync(projectId, executionId);
+    }
+
+    public async Task<bool> CancelExecutionAsync(string projectId, string executionId)
+    {
+        var exists = await db.AgentExecutions
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == executionId && e.ProjectId == projectId);
+        if (!exists) return false;
+
+        return await StopExecutionAsync(executionId, "cancelled");
+    }
+
+    public async Task<bool> PauseExecutionAsync(string executionId)
+    {
+        var projectId = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(e => e.Id == executionId)
+            .Select(e => e.ProjectId)
+            .FirstOrDefaultAsync();
+
+        return projectId is not null && await PauseExecutionAsync(projectId, executionId);
+    }
+
+    public async Task<bool> PauseExecutionAsync(string projectId, string executionId)
+    {
+        var exists = await db.AgentExecutions
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == executionId && e.ProjectId == projectId);
+        if (!exists) return false;
+
+        return await StopExecutionAsync(executionId, "paused");
+    }
+
+    public async Task<bool> SteerExecutionAsync(string projectId, string executionId, string note)
+    {
+        if (string.IsNullOrWhiteSpace(note))
+            return false;
+
+        var execution = await db.AgentExecutions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == executionId && e.ProjectId == projectId && e.Status == "running");
+
+        if (execution is null) return false;
+
+        var queue = SteeringNotes.GetOrAdd(executionId, _ => new ConcurrentQueue<string>());
+        queue.Enqueue(note.Trim());
+
+        if (int.TryParse(execution.UserId, out var executionUserId))
+        {
+            await notificationService.PublishAsync(
+                userId: executionUserId,
+                projectId: projectId,
+                type: "execution_needs_input",
+                title: "Execution received steering input",
+                message: note.Trim(),
+                executionId: executionId);
+        }
+        return true;
+    }
+
+    public async Task<string?> RetryExecutionAsync(
+        string projectId,
+        string executionId,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var priorExecution = await db.AgentExecutions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == executionId && e.ProjectId == projectId, cancellationToken);
+
+        if (priorExecution is null)
+            return null;
+
+        if (string.Equals(priorExecution.Status, "running", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return await StartExecutionAsync(projectId, priorExecution.WorkItemId, userId, cancellationToken);
+    }
+
+    public async Task<ExecutionDocumentationDto?> GetExecutionDocumentationAsync(
+        string projectId,
+        string executionId,
+        CancellationToken cancellationToken = default)
+    {
+        var execution = await db.AgentExecutions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == executionId && e.ProjectId == projectId, cancellationToken);
+
+        if (execution is null)
+            return null;
+
+        var phaseResults = await db.AgentPhaseResults
+            .AsNoTracking()
+            .Where(r => r.ExecutionId == executionId)
+            .OrderBy(r => r.PhaseOrder)
+            .ToListAsync(cancellationToken);
+
+        var title = BuildExecutionDocumentationTitle(execution);
+        var markdown = BuildExecutionDocumentationMarkdown(execution, phaseResults);
+        return new ExecutionDocumentationDto(
+            execution.Id,
+            title,
+            markdown,
+            execution.PullRequestUrl,
+            BuildDiffUrl(execution.PullRequestUrl));
     }
 
     /// <summary>
@@ -354,7 +543,9 @@ public class AgentOrchestrationService(
         string executionId, string projectId, Models.WorkItemDto workItem,
         List<Models.WorkItemDto> childWorkItems,
         string repoFullName, string accessToken, string branchName,
+        string commitAuthorName, string commitAuthorEmail,
         int userId, string selectedModelKey, AgentRole[][] pipeline,
+        int maxConcurrentAgentsPerTask,
         CancellationToken externalCancellation)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
@@ -385,7 +576,7 @@ public class AgentOrchestrationService(
 
             // Open a draft PR immediately so agent commits are visible throughout development
             var (prUrl, prNumber) = await OpenDraftPullRequestAsync(
-                sandbox, accessToken, repoFullName, workItem, scopedDb, executionId, externalCancellation);
+                sandbox, accessToken, repoFullName, workItem, commitAuthorName, commitAuthorEmail, scopedDb, executionId, externalCancellation);
 
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
@@ -394,73 +585,192 @@ public class AgentOrchestrationService(
             var totalRoles = pipeline.SelectMany(g => g).Count();
             var completedRoles = 0;
             var phaseOrder = 0;
+            using var dbLock = new SemaphoreSlim(1, 1);
+
+            async Task WithDbLockAsync(Func<Task> action)
+            {
+                await dbLock.WaitAsync(externalCancellation);
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    dbLock.Release();
+                }
+            }
+
+            static string BuildSteeringBlock(IReadOnlyList<string> notes)
+            {
+                if (notes.Count == 0)
+                    return string.Empty;
+
+                var block = new StringBuilder();
+                block.AppendLine();
+                block.AppendLine("## Live Steering Notes");
+                foreach (var note in notes)
+                {
+                    block.AppendLine($"- {note}");
+                }
+
+                return block.ToString();
+            }
+
+            // Transition from planning to active AI execution.
+            await scopedWorkItemRepo.UpdateAsync(projectId, workItem.WorkItemNumber,
+                new UpdateWorkItemRequest(
+                    Title: null, Description: null, Priority: null, Difficulty: null,
+                    State: "In Progress (AI)", AssignedTo: null, Tags: null, IsAI: null,
+                    ParentWorkItemNumber: null, LevelId: null));
 
             foreach (var group in pipeline)
             {
-                foreach (var role in group)
+                externalCancellation.ThrowIfCancellationRequested();
+
+                var rolesInGroup = group.ToArray();
+                if (rolesInGroup.Length == 0)
+                    continue;
+
+                var currentPhase = rolesInGroup.Length == 1
+                    ? rolesInGroup[0].ToString()
+                    : $"Parallel: {string.Join(", ", rolesInGroup.Select(r => r.ToString()))}";
+
+                await WithDbLockAsync(async () =>
                 {
-                    // Check for external cancellation (stop/pause) before starting each phase
-                    externalCancellation.ThrowIfCancellationRequested();
-
-                    // Update execution status
-                    await UpdateExecutionAsync(scopedDb, executionId, role.ToString(),
+                    await UpdateExecutionAsync(scopedDb, executionId, currentPhase,
                         (double)completedRoles / totalRoles);
+                });
 
-                    // Mark this agent as running with a meaningful task description
+                var notes = new List<string>();
+                if (SteeringNotes.TryGetValue(executionId, out var queue))
+                {
+                    while (queue.TryDequeue(out var queuedNote))
+                    {
+                        notes.Add(queuedNote);
+                    }
+                }
+
+                var steeringBlock = BuildSteeringBlock(notes);
+                if (notes.Count > 0)
+                {
+                    await WithDbLockAsync(async () =>
+                    {
+                        await WriteLogEntryAsync(scopedDb, projectId, "System", "info",
+                            $"Applied {notes.Count} steering note(s) before phase group {currentPhase}");
+                    });
+                }
+
+                var priorOutputs = phaseOutputs.ToList();
+                var groupCompletedBase = completedRoles;
+
+                var executionOrderResults = new List<RolePhaseExecutionResult>(rolesInGroup.Length);
+                var maxParallel = Math.Max(1, maxConcurrentAgentsPerTask);
+
+                for (var batchStart = 0; batchStart < rolesInGroup.Length; batchStart += maxParallel)
+                {
+                    var batchRoles = rolesInGroup.Skip(batchStart).Take(maxParallel).ToArray();
+                    var batchTasks = batchRoles
+                        .Select((role, roleOffset) => RunRoleAsync(
+                            role,
+                            batchStart + roleOffset,
+                            priorOutputs,
+                            steeringBlock,
+                            groupCompletedBase))
+                        .ToArray();
+
+                    var batchResults = await Task.WhenAll(batchTasks);
+                    executionOrderResults.AddRange(batchResults);
+                }
+
+                foreach (var role in rolesInGroup)
+                {
+                    var roleResult = executionOrderResults.First(r => r.Role == role);
+                    phaseOutputs.Add((role, roleResult.SummarizedOutput));
+                }
+
+                completedRoles += rolesInGroup.Length;
+            }
+
+            async Task<RolePhaseExecutionResult> RunRoleAsync(
+                AgentRole role,
+                int roleIndex,
+                List<(AgentRole Role, string Output)> priorOutputs,
+                string steeringBlock,
+                int groupCompletedBase)
+            {
+                await WithDbLockAsync(async () =>
+                {
                     await SetAgentRunningAsync(scopedDb, executionId, role.ToString(),
                         GetPhaseTaskDescription(role));
 
-                    // Write a log entry for phase start
                     await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info",
                         $"Starting phase: {GetPhaseTaskDescription(role)}");
+                });
 
-                    // Build the message for this phase: work item context + all prior outputs
-                    var userMessage = BuildPhaseMessage(role, workItemContext, phaseOutputs);
+                var userMessage = BuildPhaseMessage(role, workItemContext, priorOutputs);
+                if (!string.IsNullOrWhiteSpace(steeringBlock))
+                    userMessage += steeringBlock;
 
-                    logger.LogInformation("Execution {ExecutionId}: starting phase {Role}",
-                        executionId, role);
+                logger.LogInformation("Execution {ExecutionId}: starting phase {Role}",
+                    executionId, role);
 
-                    // Progress callback: flushes tool-call progress to the DB so the polling
-                    // endpoint returns live data instead of waiting until the phase finishes.
-                    PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
+                PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
+                {
+                    await WithDbLockAsync(async () =>
                     {
-                        var overallProgress = ((double)completedRoles + estimatedProgress) / totalRoles;
+                        var overallProgress = ((double)(groupCompletedBase + roleIndex) + estimatedProgress) / totalRoles;
 
                         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
                         if (exec is null) return;
 
-                        exec.Progress = Math.Clamp(overallProgress, 0, 0.99);
+                        var clampedOverall = Math.Clamp(overallProgress, 0, 0.99);
+                        exec.Progress = Math.Max(exec.Progress, clampedOverall);
 
                         var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
                         if (agent is not null)
                         {
-                            agent.CurrentTask = summary;
-                            agent.Progress = Math.Clamp(estimatedProgress, 0, 0.99);
+                            if (!string.IsNullOrWhiteSpace(summary))
+                                agent.CurrentTask = summary;
+
+                            var clampedRoleProgress = Math.Clamp(estimatedProgress, 0, 0.99);
+                            agent.Progress = Math.Max(agent.Progress, clampedRoleProgress);
                         }
 
                         await scopedDb.SaveChangesAsync();
 
-                        // Write a log entry so progress reports appear in the execution logs
                         var pct = (int)Math.Round(estimatedProgress * 100);
                         var logMessage = string.IsNullOrWhiteSpace(summary)
                             ? $"Progress: {pct}%"
-                            : $"Progress: {pct}% — {summary}";
+                            : $"Progress: {pct}% - {summary}";
                         await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMessage);
-                    };
+                    });
+                };
 
-                    // Tool-call logger: writes each tool invocation as a detailed log entry
-                    PhaseToolCallLogger onToolCall = async (toolName, resultSnippet) =>
+                PhaseToolCallLogger onToolCall = async (toolName, resultSnippet) =>
+                {
+                    await WithDbLockAsync(async () =>
                     {
-                        var logMsg = $"Tool: {toolName} → {resultSnippet}";
+                        var logMsg = $"Tool: {toolName} -> {resultSnippet}";
                         await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMsg, isDetailed: true);
-                    };
+                    });
+                };
 
-                    var maxTokens = GetMaxTokensForRole(role);
-                    var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(role, userMessage, toolContext, model, maxTokens, onProgress, onToolCall, externalCancellation);
-                    var phaseEnd = DateTime.UtcNow;
+                var maxTokens = GetMaxTokensForRole(role);
+                var phaseStart = DateTime.UtcNow;
+                var result = await scopedPhaseRunner.RunPhaseAsync(
+                    role,
+                    userMessage,
+                    toolContext,
+                    model,
+                    maxTokens,
+                    onProgress,
+                    onToolCall,
+                    externalCancellation);
+                var phaseEnd = DateTime.UtcNow;
+                var rolePhaseOrder = Interlocked.Increment(ref phaseOrder) - 1;
 
-                    // Persist the phase result
+                await WithDbLockAsync(async () =>
+                {
                     var phaseResultEntity = new AgentPhaseResult
                     {
                         Role = role.ToString(),
@@ -470,17 +780,15 @@ public class AgentOrchestrationService(
                         Error = result.Error,
                         StartedAt = phaseStart,
                         CompletedAt = phaseEnd,
-                        PhaseOrder = phaseOrder++,
+                        PhaseOrder = rolePhaseOrder,
                         ExecutionId = executionId,
                     };
                     scopedDb.AgentPhaseResults.Add(phaseResultEntity);
                     await scopedDb.SaveChangesAsync();
 
-                    // Update the agent info status
                     await UpdateAgentInfoAsync(scopedDb, executionId, role.ToString(),
                         result.Success ? "completed" : "failed", result.ToolCallCount);
 
-                    // Write a log entry for phase completion
                     if (result.Success)
                     {
                         await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "success",
@@ -493,15 +801,11 @@ public class AgentOrchestrationService(
 
                         logger.LogWarning("Execution {ExecutionId}: phase {Role} failed: {Error}",
                             executionId, role, result.Error);
-                        // Continue — downstream phases can still attempt recovery
                     }
+                });
 
-                    // Summarize the phase output before passing to downstream phases.
-                    // The full output is already saved to AgentPhaseResult above for debugging.
-                    var summarized = await SummarizePhaseOutputAsync(role, result.Output);
-                    phaseOutputs.Add((role, summarized));
-                    completedRoles++;
-                }
+                var summarized = await SummarizePhaseOutputAsync(role, result.Output, externalCancellation);
+                return new RolePhaseExecutionResult(role, summarized);
             }
 
             // Pipeline complete — final commit + push so the draft PR has all changes
@@ -509,8 +813,8 @@ public class AgentOrchestrationService(
             {
                 await sandbox.CommitAndPushAsync(
                     $"fleet: finalize changes for #{workItem.WorkItemNumber}",
-                    authorName: "Fleet Agent",
-                    authorEmail: "agent@fleet.dev",
+                    authorName: commitAuthorName,
+                    authorEmail: commitAuthorEmail,
                     externalCancellation);
             }
             catch (Exception pushEx)
@@ -522,16 +826,30 @@ public class AgentOrchestrationService(
             if (prNumber > 0)
             {
                 await MarkPullRequestReadyAsync(accessToken, repoFullName, prNumber, externalCancellation);
+                await notificationService.PublishAsync(
+                    userId,
+                    projectId,
+                    "pr_ready",
+                    $"PR ready for #{workItem.WorkItemNumber}",
+                    prUrl ?? "A pull request is ready for review.",
+                    executionId);
             }
 
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
+            await notificationService.PublishAsync(
+                userId,
+                projectId,
+                "execution_completed",
+                $"Execution completed for #{workItem.WorkItemNumber}",
+                workItem.Title,
+                executionId);
 
             // Update work item state to reflect AI completion
             await scopedWorkItemRepo.UpdateAsync(projectId, workItem.WorkItemNumber,
                 new UpdateWorkItemRequest(
                     Title: null, Description: null, Priority: null, Difficulty: null,
-                    State: "Resolved (AI)", AssignedTo: null, Tags: null, IsAI: null,
-                    ParentWorkItemNumber: null, LevelId: null));
+                    State: workItem.IsAI ? "In-PR (AI)" : "In-PR", AssignedTo: null, Tags: null, IsAI: null,
+                    ParentWorkItemNumber: null, LevelId: null, LinkedPullRequestUrl: prUrl));
 
             await WriteLogEntryAsync(scopedDb, projectId, "System", "success",
                 $"Execution {executionId} completed successfully" +
@@ -550,6 +868,16 @@ public class AgentOrchestrationService(
                 await FinalizeExecutionAsync(scopedDb, executionId, finalStatus);
                 await WriteLogEntryAsync(scopedDb, projectId, "System", "warn",
                     $"Execution {executionId} was {finalStatus} by user");
+                if (finalStatus == "paused")
+                {
+                    await notificationService.PublishAsync(
+                        userId,
+                        projectId,
+                        "execution_needs_input",
+                        $"Execution paused for #{workItem.WorkItemNumber}",
+                        "Execution is paused and may require additional guidance.",
+                        executionId);
+                }
             }
             catch (Exception dbEx)
             {
@@ -560,6 +888,15 @@ public class AgentOrchestrationService(
         {
             logger.LogError(ex, "Execution {ExecutionId}: pipeline failed with exception", executionId);
 
+            try
+            {
+                await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.Coding, externalCancellation);
+            }
+            catch (Exception refundEx)
+            {
+                logger.LogWarning(refundEx, "Execution {ExecutionId}: failed to refund coding run usage", executionId);
+            }
+
             // Wrap error-handling DB writes in their own try/catch so a secondary failure
             // (e.g., broken DB connection) doesn't mask the original error.
             try
@@ -567,6 +904,13 @@ public class AgentOrchestrationService(
                 await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
                 await WriteLogEntryAsync(scopedDb, projectId, "System", "error",
                     $"Execution {executionId} failed: {ex.Message}");
+                await notificationService.PublishAsync(
+                    userId,
+                    projectId,
+                    "execution_failed",
+                    $"Execution failed for #{workItem.WorkItemNumber}",
+                    ex.Message,
+                    executionId);
             }
             catch (Exception dbEx)
             {
@@ -578,6 +922,8 @@ public class AgentOrchestrationService(
             // Clean up the CTS tracking entry
             if (ActiveExecutions.TryRemove(executionId, out var removed))
                 removed.Cts.Dispose();
+
+            SteeringNotes.TryRemove(executionId, out _);
 
             if (sandbox is not null)
                 await sandbox.DisposeAsync();
@@ -729,6 +1075,8 @@ public class AgentOrchestrationService(
         }).ToList();
     }
 
+    private sealed record RolePhaseExecutionResult(AgentRole Role, string SummarizedOutput);
+
     private static class ModelKeys
     {
         public const string Haiku = "Haiku";
@@ -850,6 +1198,7 @@ public class AgentOrchestrationService(
     /// </summary>
     private static string GetPhaseTaskDescription(AgentRole role) => role switch
     {
+        AgentRole.Manager => "Coordinating execution strategy",
         AgentRole.Planner => "Creating implementation plan",
         AgentRole.Contracts => "Defining interfaces and contracts",
         AgentRole.Backend => "Implementing backend changes",
@@ -861,6 +1210,108 @@ public class AgentOrchestrationService(
         AgentRole.Documentation => "Generating documentation",
         _ => "Processing",
     };
+
+    private static string BuildExecutionDocumentationTitle(AgentExecution execution)
+        => $"fleet-execution-{execution.WorkItemId}-{execution.Id}.md";
+
+    private static string BuildExecutionDocumentationMarkdown(
+        AgentExecution execution,
+        IReadOnlyList<AgentPhaseResult> phaseResults)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Work Item #{execution.WorkItemId}: {execution.WorkItemTitle}");
+        sb.AppendLine();
+        sb.AppendLine("## Execution Summary");
+        sb.AppendLine($"- Execution ID: `{execution.Id}`");
+        sb.AppendLine($"- Status: **{execution.Status}**");
+        sb.AppendLine($"- Started: {execution.StartedAt}");
+        if (execution.CompletedAtUtc.HasValue)
+            sb.AppendLine($"- Completed (UTC): {execution.CompletedAtUtc:O}");
+        if (!string.IsNullOrWhiteSpace(execution.Duration))
+            sb.AppendLine($"- Duration: {execution.Duration}");
+        if (!string.IsNullOrWhiteSpace(execution.CurrentPhase))
+            sb.AppendLine($"- Final phase: {execution.CurrentPhase}");
+        if (!string.IsNullOrWhiteSpace(execution.BranchName))
+            sb.AppendLine($"- Branch: `{execution.BranchName}`");
+        if (!string.IsNullOrWhiteSpace(execution.PullRequestUrl))
+            sb.AppendLine($"- Pull request: {execution.PullRequestUrl}");
+        var diffUrl = BuildDiffUrl(execution.PullRequestUrl);
+        if (!string.IsNullOrWhiteSpace(diffUrl))
+            sb.AppendLine($"- Diff: {diffUrl}");
+
+        var documentationOutput = phaseResults
+            .Where(p => p.Success && string.Equals(p.Role, AgentRole.Documentation.ToString(), StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => p.PhaseOrder)
+            .Select(p => p.Output)
+            .FirstOrDefault(output => !string.IsNullOrWhiteSpace(output));
+
+        if (!string.IsNullOrWhiteSpace(documentationOutput))
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Generated Documentation");
+            sb.AppendLine();
+            sb.AppendLine(documentationOutput.Trim());
+        }
+
+        if (phaseResults.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Phase Timeline");
+            sb.AppendLine();
+            sb.AppendLine("| # | Role | Status | Tool Calls | Duration |");
+            sb.AppendLine("|---|------|--------|------------|----------|");
+            foreach (var phase in phaseResults)
+            {
+                var status = phase.Success ? "completed" : "failed";
+                var duration = phase.CompletedAt.HasValue
+                    ? $"{(phase.CompletedAt.Value - phase.StartedAt).TotalSeconds:F0}s"
+                    : "-";
+                sb.AppendLine($"| {phase.PhaseOrder + 1} | {phase.Role} | {status} | {phase.ToolCallCount} | {duration} |");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("## Phase Outputs");
+            foreach (var phase in phaseResults)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"### {phase.PhaseOrder + 1}. {phase.Role}");
+                if (!phase.Success && !string.IsNullOrWhiteSpace(phase.Error))
+                    sb.AppendLine($"- Error: {phase.Error}");
+                sb.AppendLine();
+                sb.AppendLine("```text");
+                sb.AppendLine(TrimOutputForDocs(phase.Output));
+                sb.AppendLine("```");
+            }
+        }
+        else
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Notes");
+            sb.AppendLine("No phase outputs were recorded for this execution.");
+        }
+
+        return sb.ToString();
+    }
+
+    private static string TrimOutputForDocs(string output, int maxChars = 6000)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return "(no output captured)";
+
+        var normalized = output.Replace("\r\n", "\n").Trim();
+        if (normalized.Length <= maxChars)
+            return normalized;
+
+        return $"{normalized[..maxChars]}\n\n[truncated]";
+    }
+
+    private static string? BuildDiffUrl(string? pullRequestUrl)
+    {
+        if (string.IsNullOrWhiteSpace(pullRequestUrl))
+            return null;
+
+        return $"{pullRequestUrl.TrimEnd('/')}/files";
+    }
 
     private static async Task FinalizeExecutionAsync(
         FleetDbContext scopedDb, string executionId, string status,
@@ -904,23 +1355,24 @@ public class AgentOrchestrationService(
     /// </summary>
     private async Task<(string? Url, int Number)> OpenDraftPullRequestAsync(
         IRepoSandbox sandbox, string accessToken, string repoFullName,
-        WorkItemDto workItem, FleetDbContext scopedDb, string executionId,
+        WorkItemDto workItem, string commitAuthorName, string commitAuthorEmail,
+        FleetDbContext scopedDb, string executionId,
         CancellationToken cancellationToken)
     {
         try
         {
-            // 1. Create an initial marker commit so the branch has something to push
+            // 1. Create an initial marker commit so the branch has something to push.
             sandbox.WriteFile(".fleet",
                 $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
                 $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n");
 
             await sandbox.CommitAndPushAsync(
-                $"fleet: start work on #{workItem.WorkItemNumber} — {workItem.Title}",
-                authorName: "Fleet Agent",
-                authorEmail: "agent@fleet.dev",
+                $"fleet: start work on #{workItem.WorkItemNumber} - {workItem.Title}",
+                authorName: commitAuthorName,
+                authorEmail: commitAuthorEmail,
                 cancellationToken);
 
-            // 2. Fetch the default branch name
+            // 2. Fetch default branch and resolve a collision-safe PR title.
             var client = httpClientFactory.CreateClient("GitHub");
             var repoJson = await GitHubGetAsync(client, accessToken,
                 $"https://api.github.com/repos/{repoFullName}", cancellationToken);
@@ -928,44 +1380,56 @@ public class AgentOrchestrationService(
                 ? dbProp.GetString() ?? "main"
                 : "main";
 
-            // 3. Open a draft PR
-            var prPayload = JsonSerializer.Serialize(new
+            var execution = await scopedDb.AgentExecutions.FindAsync(executionId);
+            var basePrTitle = execution?.PullRequestTitle ?? BuildPullRequestTitle(workItem);
+            var resolvedPrTitle = await ResolveUniquePullRequestTitleAsync(
+                client, accessToken, repoFullName, basePrTitle, cancellationToken);
+
+            if (execution is not null)
             {
-                title = $"[Fleet] #{workItem.WorkItemNumber}: {workItem.Title}",
-                body = $"Resolves work item **#{workItem.WorkItemNumber}**: {workItem.Title}\n\n" +
-                       $"_This PR was opened automatically by Fleet. Agents are actively pushing changes._",
-                head = sandbox.BranchName,
-                @base = baseBranch,
-                draft = true,
-            });
+                execution.PullRequestTitle = resolvedPrTitle;
+                await scopedDb.SaveChangesAsync(cancellationToken);
+            }
 
-            using var prRequest = new HttpRequestMessage(HttpMethod.Post,
-                $"https://api.github.com/repos/{repoFullName}/pulls");
-            prRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            prRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
-            prRequest.Content = new StringContent(prPayload, Encoding.UTF8, "application/json");
+            // 3. Open a draft PR. If we hit a title-collision race, resolve once and retry.
+            var openResult = await CreateDraftPullRequestAsync(
+                client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, resolvedPrTitle, cancellationToken);
 
-            using var prResponse = await client.SendAsync(prRequest, cancellationToken);
-            var prResponseBody = await prResponse.Content.ReadAsStringAsync(cancellationToken);
-
-            if (!prResponse.IsSuccessStatusCode)
+            if (!openResult.Success && IsPrTitleCollision(openResult.StatusCode, openResult.ResponseBody))
             {
-                logger.LogWarning("Failed to open draft PR: {Status} — {Body}",
-                    prResponse.StatusCode, prResponseBody);
+                var retriedTitle = await ResolveUniquePullRequestTitleAsync(
+                    client, accessToken, repoFullName, basePrTitle, cancellationToken);
+
+                if (!string.Equals(retriedTitle, resolvedPrTitle, StringComparison.Ordinal))
+                {
+                    if (execution is not null)
+                    {
+                        execution.PullRequestTitle = retriedTitle;
+                        await scopedDb.SaveChangesAsync(cancellationToken);
+                    }
+
+                    openResult = await CreateDraftPullRequestAsync(
+                        client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, retriedTitle, cancellationToken);
+                }
+            }
+
+            if (!openResult.Success)
+            {
+                logger.LogWarning("Failed to open draft PR: {Status} - {Body}",
+                    openResult.StatusCode, openResult.ResponseBody);
                 return (null, 0);
             }
 
-            var prResult = JsonSerializer.Deserialize<JsonElement>(prResponseBody);
+            var prResult = JsonSerializer.Deserialize<JsonElement>(openResult.ResponseBody);
             var prUrl = prResult.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() : null;
             var prNumber = prResult.TryGetProperty("number", out var numProp) ? numProp.GetInt32() : 0;
 
             logger.LogInformation("Opened draft PR #{PrNumber}: {PrUrl}", prNumber, prUrl);
 
-            // 4. Immediately store the PR URL in the execution record so it's visible in the UI
-            var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
-            if (exec is not null)
+            // 4. Persist URL/title on the execution record.
+            if (execution is not null)
             {
-                exec.PullRequestUrl = prUrl;
+                execution.PullRequestUrl = prUrl;
                 await scopedDb.SaveChangesAsync(cancellationToken);
             }
 
@@ -977,6 +1441,162 @@ public class AgentOrchestrationService(
             return (null, 0);
         }
     }
+
+    private async Task<DraftPullRequestCreateResult> CreateDraftPullRequestAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string headBranch,
+        string baseBranch,
+        WorkItemDto workItem,
+        string prTitle,
+        CancellationToken cancellationToken)
+    {
+        var prPayload = JsonSerializer.Serialize(new
+        {
+            title = prTitle,
+            body = $"Links F#{workItem.WorkItemNumber}: {workItem.Title}\n\n" +
+                   $"fixes F#{workItem.WorkItemNumber} when merged.\n\n" +
+                   "_This PR was opened automatically by Fleet. Agents are actively pushing changes._",
+            head = headBranch,
+            @base = baseBranch,
+            draft = true,
+        });
+
+        using var prRequest = new HttpRequestMessage(HttpMethod.Post,
+            $"https://api.github.com/repos/{repoFullName}/pulls");
+        prRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        prRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+        prRequest.Content = new StringContent(prPayload, Encoding.UTF8, "application/json");
+
+        using var prResponse = await client.SendAsync(prRequest, cancellationToken);
+        var prResponseBody = await prResponse.Content.ReadAsStringAsync(cancellationToken);
+
+        return new DraftPullRequestCreateResult(
+            prResponse.IsSuccessStatusCode,
+            prResponse.StatusCode,
+            prResponseBody);
+    }
+
+    private async Task<string> ResolveUniqueBranchNameAsync(
+        string accessToken,
+        string repoFullName,
+        string requestedBranchName,
+        CancellationToken cancellationToken)
+    {
+        var client = httpClientFactory.CreateClient("GitHub");
+
+        for (var copyIndex = 0; copyIndex < 100; copyIndex++)
+        {
+            var candidate = copyIndex == 0
+                ? requestedBranchName
+                : BuildBranchCopyName(requestedBranchName, copyIndex);
+
+            var exists = await BranchExistsAsync(client, accessToken, repoFullName, candidate, cancellationToken);
+            if (!exists)
+                return candidate;
+        }
+
+        throw new InvalidOperationException("Unable to allocate a unique branch name after 100 attempts.");
+    }
+
+    private static async Task<bool> BranchExistsAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        var encodedBranch = Uri.EscapeDataString(branchName);
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"https://api.github.com/repos/{repoFullName}/git/ref/heads/{encodedBranch}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return false;
+
+        return response.IsSuccessStatusCode;
+    }
+
+    private async Task<string> ResolveUniquePullRequestTitleAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string baseTitle,
+        CancellationToken cancellationToken)
+    {
+        var openTitles = await FetchOpenPullRequestTitlesAsync(client, accessToken, repoFullName, cancellationToken);
+        if (!openTitles.Contains(baseTitle))
+            return baseTitle;
+
+        for (var copyIndex = 1; copyIndex < 100; copyIndex++)
+        {
+            var candidate = BuildPullRequestCopyTitle(baseTitle, copyIndex);
+            if (!openTitles.Contains(candidate))
+                return candidate;
+        }
+
+        throw new InvalidOperationException("Unable to allocate a unique pull request title after 100 attempts.");
+    }
+
+    private static async Task<HashSet<string>> FetchOpenPullRequestTitlesAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"https://api.github.com/repos/{repoFullName}/pulls?state=open&per_page=100");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var root = JsonSerializer.Deserialize<JsonElement>(body);
+        if (root.ValueKind != JsonValueKind.Array)
+            return titles;
+
+        foreach (var item in root.EnumerateArray())
+        {
+            if (item.TryGetProperty("title", out var titleProp))
+            {
+                var title = titleProp.GetString();
+                if (!string.IsNullOrWhiteSpace(title))
+                    titles.Add(title);
+            }
+        }
+
+        return titles;
+    }
+
+    private static bool IsPrTitleCollision(HttpStatusCode statusCode, string responseBody)
+    {
+        if (statusCode != HttpStatusCode.UnprocessableEntity)
+            return false;
+
+        return responseBody.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
+               responseBody.Contains("\"title\"", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildPullRequestTitle(WorkItemDto workItem)
+        => $"[Fleet] #{workItem.WorkItemNumber}: {workItem.Title}";
+
+    private static string BuildBranchCopyName(string baseBranchName, int copyIndex)
+        => copyIndex <= 1 ? $"{baseBranchName}-copy" : $"{baseBranchName}-copy-{copyIndex}";
+
+    private static string BuildPullRequestCopyTitle(string baseTitle, int copyIndex)
+        => copyIndex <= 1 ? $"{baseTitle} (copy)" : $"{baseTitle} (copy {copyIndex})";
+
+    private sealed record DraftPullRequestCreateResult(
+        bool Success,
+        HttpStatusCode StatusCode,
+        string ResponseBody);
 
     /// <summary>
     /// Marks a draft pull request as ready for review.
@@ -1026,6 +1646,37 @@ public class AgentOrchestrationService(
         return JsonSerializer.Deserialize<JsonElement>(body);
     }
 
+    private static string BuildBranchName(string? pattern, int workItemNumber, string title)
+    {
+        var branchPattern = string.IsNullOrWhiteSpace(pattern)
+            ? "fleet/{workItemNumber}-{slug}"
+            : pattern.Trim();
+
+        var slug = Slugify(title);
+        var raw = branchPattern
+            .Replace("{workItemNumber}", workItemNumber.ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("{slug}", slug, StringComparison.OrdinalIgnoreCase);
+
+        return string.IsNullOrWhiteSpace(raw)
+            ? $"fleet/{workItemNumber}-{slug}"
+            : raw;
+    }
+
+    private static (string Name, string Email) ResolveCommitAuthor(
+        string? mode,
+        string? customName,
+        string? customEmail)
+    {
+        if (string.Equals(mode, "custom", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(customName) &&
+            !string.IsNullOrWhiteSpace(customEmail))
+        {
+            return (customName.Trim(), customEmail.Trim());
+        }
+
+        return ("Fleet Agent", "agent@fleet.dev");
+    }
+
     private static string Slugify(string title)
     {
         var slug = title.ToLowerInvariant()
@@ -1043,3 +1694,8 @@ public class AgentOrchestrationService(
         return slug.Trim('-').Length > 50 ? slug[..50].TrimEnd('-') : slug.Trim('-');
     }
 }
+
+
+
+
+

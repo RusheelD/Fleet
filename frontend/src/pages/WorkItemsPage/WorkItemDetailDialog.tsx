@@ -12,6 +12,7 @@ import {
     Caption1,
     Divider,
     Tooltip,
+    Link,
 } from '@fluentui/react-components'
 import {
     SaveRegular,
@@ -25,50 +26,53 @@ import { useUpdateWorkItem, useDeleteWorkItem, resolveLevelIcon } from '../../pr
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { StateDot } from './StateDot'
 import { PriorityDot } from './PriorityDot'
+import { formatWorkItemState } from './stateLabel'
 
 const NONE_PARENT = '(None)'
 const NONE_LEVEL = '(None)'
 
 const PRIORITY_LABELS: Record<number, string> = {
-    1: 'P1 — Critical',
-    2: 'P2 — High',
-    3: 'P3 — Medium',
-    4: 'P4 — Low',
+    1: 'P1 - Critical',
+    2: 'P2 - High',
+    3: 'P3 - Medium',
+    4: 'P4 - Low',
 }
 
 const PRIORITY_MAP: Record<string, number> = {
-    'P1 — Critical': 1,
-    'P2 — High': 2,
-    'P3 — Medium': 3,
-    'P4 — Low': 4,
+    'P1 - Critical': 1,
+    'P2 - High': 2,
+    'P3 - Medium': 3,
+    'P4 - Low': 4,
 }
 
 const DIFFICULTY_LABELS: Record<number, string> = {
-    1: 'D1 — Very Easy',
-    2: 'D2 — Easy',
-    3: 'D3 — Medium',
-    4: 'D4 — Hard',
-    5: 'D5 — Very Hard',
+    1: 'D1 - Very Easy',
+    2: 'D2 - Easy',
+    3: 'D3 - Medium',
+    4: 'D4 - Hard',
+    5: 'D5 - Very Hard',
 }
 
 const DIFFICULTY_MAP: Record<string, number> = {
-    'D1 — Very Easy': 1,
-    'D2 — Easy': 2,
-    'D3 — Medium': 3,
-    'D4 — Hard': 4,
-    'D5 — Very Hard': 5,
+    'D1 - Very Easy': 1,
+    'D2 - Easy': 2,
+    'D3 - Medium': 3,
+    'D4 - Hard': 4,
+    'D5 - Very Hard': 5,
 }
 
-const AGENT_MAP: Record<string, boolean> = {
-    'Auto-detect': true,
-    '1 agent': true,
-    '3 agents': true,
-    '5 agents': true,
-    'Manual assignment': false,
+function getAgentSettings(label: string): { isAI: boolean; assignmentMode: 'auto' | 'manual'; assignedAgentCount: number | null } {
+    if (label === 'Manual assignment') {
+        return { isAI: false, assignmentMode: 'manual', assignedAgentCount: null }
+    }
+    if (label === '1 agent') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 1 }
+    if (label === '3 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 3 }
+    if (label === '5 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 5 }
+    return { isAI: true, assignmentMode: 'auto', assignedAgentCount: null }
 }
 
 const useStyles = makeStyles({
-    /* ── Overlay backdrop ──────────────────────────────────── */
+    /* Overlay backdrop */
     overlay: {
         position: 'fixed',
         inset: 0,
@@ -76,7 +80,7 @@ const useStyles = makeStyles({
         zIndex: 900,
     },
 
-    /* ── Panel container ───────────────────────────────────── */
+    /* Panel container */
     panel: {
         position: 'fixed',
         top: 0,
@@ -92,7 +96,7 @@ const useStyles = makeStyles({
         overflow: 'hidden',
     },
 
-    /* ── Header bar (type badge + ID + title) ──────────────── */
+    /* Header bar (type badge + ID + title) */
     headerBar: {
         display: 'flex',
         alignItems: 'center',
@@ -136,7 +140,7 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
 
-    /* ── Action bar (Save / Delete) ────────────────────────── */
+    /* Action bar (Save / Delete) */
     actionBar: {
         display: 'flex',
         alignItems: 'center',
@@ -157,7 +161,7 @@ const useStyles = makeStyles({
         color: tokens.colorPaletteRedForeground1,
     },
 
-    /* ── Scrollable body ──────────────────────────────────── */
+    /* Scrollable body */
     body: {
         display: 'flex',
         flexDirection: 'column',
@@ -170,7 +174,7 @@ const useStyles = makeStyles({
         gap: tokens.spacingVerticalL,
     },
 
-    /* ── Fields grid (compact strip across top) ────────────── */
+    /* Fields grid (compact strip across top) */
     fieldsGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
@@ -180,7 +184,7 @@ const useStyles = makeStyles({
         borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
     },
 
-    /* ── Description (full width, fills remaining space) ───── */
+    /* Description (full width, fills remaining space) */
     descriptionSection: {
         display: 'flex',
         flexDirection: 'column',
@@ -195,7 +199,7 @@ const useStyles = makeStyles({
         },
     },
 
-    /* ── Section headers ───────────────────────────────────── */
+    /* Section headers */
     sectionTitle: {
         fontWeight: tokens.fontWeightSemibold,
         fontSize: '13px',
@@ -204,7 +208,7 @@ const useStyles = makeStyles({
         letterSpacing: '0.03em',
     },
 
-    /* ── Field rows ────────────────────────────────────────── */
+    /* Field rows */
     fieldRow: {
         display: 'flex',
         flexDirection: 'column',
@@ -229,7 +233,7 @@ const useStyles = makeStyles({
         width: '100%',
     },
 
-    /* ── Children section ──────────────────────────────────── */
+    /* Children section */
     childRow: {
         display: 'flex',
         alignItems: 'center',
@@ -260,7 +264,7 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
 
-    /* ── AI badge ──────────────────────────────────────────── */
+    /* AI badge */
     aiBadge: {
         flexShrink: 0,
     },
@@ -282,8 +286,9 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
-    const [priorityLabel, setPriorityLabel] = useState('P2 — High')
-    const [difficultyLabel, setDifficultyLabel] = useState('D3 — Medium')
+    const [acceptanceCriteria, setAcceptanceCriteria] = useState('')
+    const [priorityLabel, setPriorityLabel] = useState('P2 - High')
+    const [difficultyLabel, setDifficultyLabel] = useState('D3 - Medium')
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [assignedTo, setAssignedTo] = useState('')
@@ -325,8 +330,9 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         if (item) {
             setTitle(item.title)
             setDescription(item.description)
-            setPriorityLabel(PRIORITY_LABELS[item.priority] ?? 'P2 — High')
-            setDifficultyLabel(DIFFICULTY_LABELS[item.difficulty] ?? 'D3 — Medium')
+            setAcceptanceCriteria(item.acceptanceCriteria ?? '')
+            setPriorityLabel(PRIORITY_LABELS[item.priority] ?? 'P2 - High')
+            setDifficultyLabel(DIFFICULTY_LABELS[item.difficulty] ?? 'D3 - Medium')
             setState(item.state)
             setTags(item.tags.join(', '))
             setAssignedTo(item.assignedTo)
@@ -340,7 +346,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form only when item changes, not on every levels refetch
     }, [item?.workItemNumber])
 
-    /* ── Escape key handler ─────────────────────────────────── */
+    /* Escape key handler */
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (e.key === 'Escape') onClose()
     }, [onClose])
@@ -356,6 +362,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         if (!item || !title.trim()) return
         const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
+        const agentSettings = getAgentSettings(agentLabel)
         updateMutation.mutate(
             {
                 workItemNumber: item.workItemNumber,
@@ -365,8 +372,11 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     priority: PRIORITY_MAP[priorityLabel] ?? 2,
                     difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                     state,
-                    assignedTo: assignedTo.trim() || 'Unassigned',
-                    isAI: AGENT_MAP[agentLabel] ?? true,
+                    assignedTo: agentSettings.isAI ? 'Fleet AI' : (assignedTo.trim() || 'Unassigned'),
+                    isAI: agentSettings.isAI,
+                    assignmentMode: agentSettings.assignmentMode,
+                    assignedAgentCount: agentSettings.assignedAgentCount,
+                    acceptanceCriteria: acceptanceCriteria.trim(),
                     tags: tags
                         .split(',')
                         .map((t) => t.trim())
@@ -393,7 +403,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
             {/* Panel */}
             <div className={styles.panel}>
-                {/* ── Header bar ──────────────────────────── */}
+                {/* Header bar */}
                 <div className={styles.headerBar}>
                     <div className={styles.headerType}>
                         {currentLevel ? (
@@ -437,7 +447,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     </div>
                 </div>
 
-                {/* ── Action bar ──────────────────────────── */}
+                {/* Action bar */}
                 <div className={styles.actionBar}>
                     <div className={styles.actionBarLeft}>
                         <Button
@@ -447,7 +457,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             onClick={handleSave}
                             disabled={!title.trim() || updateMutation.isPending}
                         >
-                            {updateMutation.isPending ? 'Saving…' : 'Save'}
+                            {updateMutation.isPending ? 'Saving...' : 'Save'}
                         </Button>
                         <Button appearance="subtle" size="small" onClick={onClose}>
                             Cancel
@@ -465,7 +475,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     </Button>
                 </div>
 
-                {/* ── Body: fields grid → description → children ── */}
+                {/* Body: fields grid -> description -> children */}
                 <div className={styles.body}>
                     {/* Detail fields in a compact grid */}
                     <div className={styles.fieldsGrid}>
@@ -480,8 +490,13 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             >
                                 <Option>New</Option>
                                 <Option>Active</Option>
+                                <Option>Planning (AI)</Option>
                                 <Option>In Progress</Option>
+                                <Option>In Progress (AI)</Option>
+                                <Option>In-PR</Option>
+                                <Option>In-PR (AI)</Option>
                                 <Option>Resolved</Option>
+                                <Option>Resolved (AI)</Option>
                                 <Option>Closed</Option>
                             </Dropdown>
                         </div>
@@ -518,12 +533,12 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                     className={styles.fieldDropdown}
                                     size="small"
                                     value={priorityLabel}
-                                    onOptionSelect={(_e, data) => setPriorityLabel(data.optionText ?? 'P2 — High')}
+                                    onOptionSelect={(_e, data) => setPriorityLabel(data.optionText ?? 'P2 - High')}
                                 >
-                                    <Option>P1 — Critical</Option>
-                                    <Option>P2 — High</Option>
-                                    <Option>P3 — Medium</Option>
-                                    <Option>P4 — Low</Option>
+                                    <Option>P1 - Critical</Option>
+                                    <Option>P2 - High</Option>
+                                    <Option>P3 - Medium</Option>
+                                    <Option>P4 - Low</Option>
                                 </Dropdown>
                             </div>
                         </div>
@@ -535,13 +550,13 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                 className={styles.fieldDropdown}
                                 size="small"
                                 value={difficultyLabel}
-                                onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? 'D3 — Medium')}
+                                onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? 'D3 - Medium')}
                             >
-                                <Option>D1 — Very Easy</Option>
-                                <Option>D2 — Easy</Option>
-                                <Option>D3 — Medium</Option>
-                                <Option>D4 — Hard</Option>
-                                <Option>D5 — Very Hard</Option>
+                                <Option>D1 - Very Easy</Option>
+                                <Option>D2 - Easy</Option>
+                                <Option>D3 - Medium</Option>
+                                <Option>D4 - Hard</Option>
+                                <Option>D5 - Very Hard</Option>
                             </Dropdown>
                         </div>
 
@@ -571,7 +586,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             </div>
                         </div>
 
-                        {/* Assigned To — only editable for manual assignment */}
+                        {/* Assigned To - only editable for manual assignment */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Assigned To</Text>
                             {agentLabel === 'Manual assignment' ? (
@@ -580,13 +595,24 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                     appearance="underline"
                                     value={assignedTo}
                                     onChange={(_e, data) => setAssignedTo(data.value)}
-                                    placeholder="Enter name…"
+                                    placeholder="Enter name..."
                                 />
                             ) : (
                                 <div className={styles.fieldValue}>
                                     <BotRegular />
                                     <Text size={200}>{assignedTo}</Text>
                                 </div>
+                            )}
+                        </div>
+
+                        <div className={styles.fieldRow}>
+                            <Text className={styles.fieldLabel}>Linked PR</Text>
+                            {item.linkedPullRequestUrl ? (
+                                <Link href={item.linkedPullRequestUrl} target="_blank" rel="noreferrer">
+                                    Open pull request
+                                </Link>
+                            ) : (
+                                <Text size={200}>-</Text>
                             )}
                         </div>
 
@@ -613,7 +639,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             <Input
                                 size="small"
                                 appearance="underline"
-                                placeholder="tag1, tag2, …"
+                                placeholder="tag1, tag2, ..."
                                 value={tags}
                                 onChange={(_e, data) => setTags(data.value)}
                             />
@@ -622,13 +648,21 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
                     {/* Full-width description */}
                     <div className={styles.descriptionSection}>
+                        <Text className={styles.sectionTitle}>Acceptance Criteria</Text>
+                        <Textarea
+                            value={acceptanceCriteria}
+                            onChange={(_e, data) => setAcceptanceCriteria(data.value)}
+                            resize="vertical"
+                            rows={4}
+                            placeholder="Define what must be true for this work item to be done..."
+                        />
                         <Text className={styles.sectionTitle}>Description</Text>
                         <Textarea
                             className={styles.descriptionTextarea}
                             value={description}
                             onChange={(_e, data) => setDescription(data.value)}
                             resize="vertical"
-                            placeholder="Add a description…"
+                            placeholder="Add a description..."
                         />
                     </div>
 
@@ -657,7 +691,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                         <ChevronRightRegular fontSize={10} />
                                         <Text className={styles.childTitle}>{child.title}</Text>
                                         <StateDot state={child.state} />
-                                        <Caption1>{child.state}</Caption1>
+                                        <Caption1>{formatWorkItemState(child.state)}</Caption1>
                                     </div>
                                 )
                             })}
@@ -668,3 +702,4 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         </>
     )
 }
+

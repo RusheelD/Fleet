@@ -17,6 +17,7 @@ import {
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { resolveLevelIcon } from '../../proxies'
 import { StateDot } from './StateDot'
+import { formatWorkItemState } from './stateLabel'
 
 /* ── Sortable columns ─────────────────────────────────────── */
 type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
@@ -342,7 +343,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                         {/* Work Item Type */}
                         <div className={styles.typeCell}>
                             <Text className={styles.typeName}>
-                                {level?.name ?? '—'}
+                                {level?.name ?? '-'}
                             </Text>
                         </div>
 
@@ -381,7 +382,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                         {/* State */}
                         <div className={styles.stateCell}>
                             <StateDot state={item.state} />
-                            <Text className={styles.stateText}>{item.state}</Text>
+                            <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
                         </div>
 
                         {/* ID */}
@@ -389,7 +390,7 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
 
                         {/* Difficulty */}
                         <Text className={styles.difficultyText}>
-                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '—'}
+                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
                         </Text>
 
                         {/* Assigned To */}
@@ -418,3 +419,4 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
         </div>
     )
 }
+

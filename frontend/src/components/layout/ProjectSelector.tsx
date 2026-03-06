@@ -27,9 +27,21 @@ const useStyles = makeStyles({
         margin: '0.375rem 0.375rem 0',
         borderRadius: tokens.borderRadiusMedium,
         cursor: 'pointer',
-        backgroundColor: tokens.colorNeutralBackground3,
+        backgroundColor: tokens.colorNeutralBackground2,
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground3Hover,
+            backgroundColor: tokens.colorNeutralBackground2Hover,
         },
     },
     projectSelectorIcon: {
@@ -68,6 +80,7 @@ const useStyles = makeStyles({
     collapsedButton: {
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: '0.75rem',
         padding: '0 0.75rem',
         borderRadius: tokens.borderRadiusMedium,
@@ -87,6 +100,10 @@ const useStyles = makeStyles({
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
             color: tokens.colorNeutralForeground1,
+        },
+        ':focus-visible': {
+            outline: `2px solid ${tokens.colorStrokeFocus2}`,
+            outlineOffset: '-2px',
         },
     },
     collapsedIcon: {
@@ -130,7 +147,7 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        padding: '0.5rem 0.5rem',
+        padding: '0.5rem 0.625rem',
         borderRadius: tokens.borderRadiusMedium,
         cursor: 'pointer',
         ':hover': {
@@ -234,7 +251,7 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
                                 {project.title}
                             </Text>
                             <Text className={styles.projectItemMeta}>
-                                {project.workItems.total} items · {project.agents.running} agents active
+                                {project.workItems.total} items | {project.agents.running} agents active
                             </Text>
                         </div>
                         {isActive ? (
@@ -287,8 +304,8 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
             trapFocus
         >
             <PopoverTrigger disableButtonEnhancement>
-                <Tooltip content={`${projectName} — Switch project`} relationship="label" positioning="after">
-                    <button className={styles.collapsedButton}>
+                <Tooltip content={`${projectName} - Switch project`} relationship="label" positioning="after">
+                    <button className={styles.collapsedButton} type="button" aria-label={`${projectName} - Switch project`}>
                         <span className={styles.collapsedIcon}><FolderOpenRegular /></span>
                     </button>
                 </Tooltip>

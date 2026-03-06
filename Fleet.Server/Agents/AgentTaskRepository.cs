@@ -16,7 +16,7 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         return entities.Select(e => new AgentExecutionDto(
             e.Id, e.WorkItemId, e.WorkItemTitle, e.Status,
             e.Agents.Select(a => new AgentInfoDto(a.Role, a.Status, a.CurrentTask, a.Progress)).ToArray(),
-            e.StartedAt, ComputeDuration(e), e.Progress
+            e.StartedAt, ComputeDuration(e), e.Progress, e.BranchName, e.PullRequestUrl, e.CurrentPhase
         )).ToList();
     }
 

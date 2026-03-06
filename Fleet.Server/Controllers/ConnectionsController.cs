@@ -22,12 +22,21 @@ public class ConnectionsController(
         return Ok(connections);
     }
 
+    /// <summary>GET /api/connections/github/state — Creates a signed OAuth state value for GitHub auth.</summary>
+    [HttpGet("github/state")]
+    public async Task<IActionResult> GetGitHubOAuthState()
+    {
+        var userId = await authService.GetCurrentUserIdAsync();
+        var state = await connectionService.CreateGitHubOAuthStateAsync(userId);
+        return Ok(state);
+    }
+
     /// <summary>POST /api/connections/github — Exchange a GitHub OAuth code and link the account.</summary>
     [HttpPost("github")]
     public async Task<IActionResult> LinkGitHub([FromBody] LinkGitHubRequest request)
     {
         var userId = await authService.GetCurrentUserIdAsync();
-        var result = await connectionService.LinkGitHubAsync(userId, request.Code, request.RedirectUri);
+        var result = await connectionService.LinkGitHubAsync(userId, request.Code, request.RedirectUri, request.State);
         return Ok(result);
     }
 

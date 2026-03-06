@@ -1,3 +1,5 @@
+using Fleet.Server.Models;
+
 namespace Fleet.Server.Agents;
 
 /// <summary>
@@ -21,16 +23,34 @@ public interface IAgentOrchestrationService
     /// Gets the current status of an execution.
     /// </summary>
     Task<AgentExecutionStatus?> GetExecutionStatusAsync(string executionId, CancellationToken cancellationToken = default);
+    Task<AgentExecutionStatus?> GetExecutionStatusAsync(string projectId, string executionId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cancels an active execution. The pipeline stops and the execution status is set to "cancelled".
     /// </summary>
     /// <returns>True if the execution was found and cancellation was signalled; false if not found or already stopped.</returns>
     Task<bool> CancelExecutionAsync(string executionId);
+    Task<bool> CancelExecutionAsync(string projectId, string executionId);
 
     /// <summary>
     /// Pauses an active execution. The pipeline stops and the execution status is set to "paused".
     /// </summary>
     /// <returns>True if the execution was found and pause was signalled; false if not found or already stopped.</returns>
     Task<bool> PauseExecutionAsync(string executionId);
+    Task<bool> PauseExecutionAsync(string projectId, string executionId);
+
+    /// <summary>
+    /// Adds a steering note for an in-flight execution.
+    /// </summary>
+    Task<bool> SteerExecutionAsync(string projectId, string executionId, string note);
+
+    /// <summary>
+    /// Retries a previous execution by starting a new execution for the same work item.
+    /// </summary>
+    Task<string?> RetryExecutionAsync(string projectId, string executionId, int userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds documentation markdown for an execution from persisted phase results.
+    /// </summary>
+    Task<ExecutionDocumentationDto?> GetExecutionDocumentationAsync(string projectId, string executionId, CancellationToken cancellationToken = default);
 }

@@ -20,30 +20,34 @@ import { resolveLevelIcon } from '../../proxies'
 import type { WorkItem, WorkItemLevel } from '../../models'
 
 const PRIORITY_MAP: Record<string, number> = {
-    'P1 — Critical': 1,
-    'P2 — High': 2,
-    'P3 — Medium': 3,
-    'P4 — Low': 4,
+    'P1 - Critical': 1,
+    'P2 - High': 2,
+    'P3 - Medium': 3,
+    'P4 - Low': 4,
 }
 
 const DIFFICULTY_MAP: Record<string, number> = {
-    '1 — Trivial': 1,
-    '2 — Easy': 2,
-    '3 — Moderate': 3,
-    '4 — Hard': 4,
-    '5 — Complex': 5,
-}
-
-const AGENT_MAP: Record<string, boolean> = {
-    'Auto-detect': true,
-    '1 agent': true,
-    '3 agents': true,
-    '5 agents': true,
-    'Manual assignment': false,
+    '1 - Trivial': 1,
+    '2 - Easy': 2,
+    '3 - Moderate': 3,
+    '4 - Hard': 4,
+    '5 - Complex': 5,
 }
 
 const NONE_PARENT = '(None)'
 const NONE_LEVEL = '(None)'
+
+function getAgentSettings(label: string): { isAI: boolean; assignmentMode: 'auto' | 'manual'; assignedAgentCount: number | null } {
+    if (label === 'Manual assignment') {
+        return { isAI: false, assignmentMode: 'manual', assignedAgentCount: null }
+    }
+
+    if (label === '1 agent') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 1 }
+    if (label === '3 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 3 }
+    if (label === '5 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 5 }
+
+    return { isAI: true, assignmentMode: 'auto', assignedAgentCount: null }
+}
 
 const useStyles = makeStyles({
     dialogForm: {
@@ -72,8 +76,9 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
-    const [priorityLabel, setPriorityLabel] = useState('P2 — High')
-    const [difficultyLabel, setDifficultyLabel] = useState('3 — Moderate')
+    const [acceptanceCriteria, setAcceptanceCriteria] = useState('')
+    const [priorityLabel, setPriorityLabel] = useState('P2 - High')
+    const [difficultyLabel, setDifficultyLabel] = useState('3 - Moderate')
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [agentLabel, setAgentLabel] = useState('Auto-detect')
@@ -86,8 +91,9 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
     const resetForm = () => {
         setTitle('')
         setDescription('')
-        setPriorityLabel('P2 — High')
-        setDifficultyLabel('3 — Moderate')
+        setAcceptanceCriteria('')
+        setPriorityLabel('P2 - High')
+        setDifficultyLabel('3 - Moderate')
         setState('New')
         setTags('')
         setAgentLabel('Auto-detect')
@@ -97,8 +103,11 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
     const handleCreate = () => {
         if (!title.trim()) return
+
         const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
+        const agentSettings = getAgentSettings(agentLabel)
+
         createMutation.mutate(
             {
                 title: title.trim(),
@@ -106,14 +115,17 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                 priority: PRIORITY_MAP[priorityLabel] ?? 2,
                 difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                 state,
-                assignedTo: agentLabel === 'Manual assignment' ? 'Unassigned' : 'Fleet AI',
+                assignedTo: agentSettings.isAI ? 'Fleet AI' : 'Unassigned',
                 tags: tags
                     .split(',')
                     .map((t) => t.trim())
                     .filter(Boolean),
-                isAI: AGENT_MAP[agentLabel] ?? true,
+                isAI: agentSettings.isAI,
                 parentWorkItemNumber: selectedParent?.workItemNumber ?? null,
                 levelId: selectedLevel?.id ?? null,
+                assignmentMode: agentSettings.assignmentMode,
+                assignedAgentCount: agentSettings.assignedAgentCount,
+                acceptanceCriteria: acceptanceCriteria.trim(),
             },
             {
                 onSuccess: () => {
@@ -147,6 +159,15 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                     onChange={(_e, data) => setDescription(data.value)}
                                 />
                             </Field>
+                            <Field label="Acceptance Criteria">
+                                <Textarea
+                                    placeholder="Define what must be true for this work item to be done..."
+                                    resize="vertical"
+                                    rows={3}
+                                    value={acceptanceCriteria}
+                                    onChange={(_e, data) => setAcceptanceCriteria(data.value)}
+                                />
+                            </Field>
                             <div className={styles.dialogFormGrid}>
                                 <Field label="Level">
                                     <Dropdown
@@ -169,25 +190,25 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                     <Dropdown
                                         placeholder="Select priority"
                                         value={priorityLabel}
-                                        onOptionSelect={(_e, data) => setPriorityLabel(data.optionText ?? 'P2 — High')}
+                                        onOptionSelect={(_e, data) => setPriorityLabel(data.optionText ?? 'P2 - High')}
                                     >
-                                        <Option>P1 — Critical</Option>
-                                        <Option>P2 — High</Option>
-                                        <Option>P3 — Medium</Option>
-                                        <Option>P4 — Low</Option>
+                                        <Option>P1 - Critical</Option>
+                                        <Option>P2 - High</Option>
+                                        <Option>P3 - Medium</Option>
+                                        <Option>P4 - Low</Option>
                                     </Dropdown>
                                 </Field>
                                 <Field label="Difficulty">
                                     <Dropdown
                                         placeholder="Select difficulty"
                                         value={difficultyLabel}
-                                        onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? '3 — Moderate')}
+                                        onOptionSelect={(_e, data) => setDifficultyLabel(data.optionText ?? '3 - Moderate')}
                                     >
-                                        <Option>1 — Trivial</Option>
-                                        <Option>2 — Easy</Option>
-                                        <Option>3 — Moderate</Option>
-                                        <Option>4 — Hard</Option>
-                                        <Option>5 — Complex</Option>
+                                        <Option>1 - Trivial</Option>
+                                        <Option>2 - Easy</Option>
+                                        <Option>3 - Moderate</Option>
+                                        <Option>4 - Hard</Option>
+                                        <Option>5 - Complex</Option>
                                     </Dropdown>
                                 </Field>
                                 <Field label="State">
@@ -199,7 +220,10 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                         <Option>New</Option>
                                         <Option>Active</Option>
                                         <Option>In Progress</Option>
+                                        <Option>In-PR</Option>
+                                        <Option>In-PR (AI)</Option>
                                         <Option>Resolved</Option>
+                                        <Option>Resolved (AI)</Option>
                                         <Option>Closed</Option>
                                     </Dropdown>
                                 </Field>

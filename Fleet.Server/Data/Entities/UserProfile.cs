@@ -10,6 +10,7 @@ public class UserProfile
     public string Bio { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
     public string AvatarUrl { get; set; } = string.Empty;
+    public string Role { get; set; } = Auth.UserRoles.Free;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Stored as JSON (jsonb) — demonstrates embedded document storage

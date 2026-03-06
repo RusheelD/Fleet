@@ -16,6 +16,9 @@ export interface CreateWorkItemRequest {
   isAI: boolean
   parentWorkItemNumber: number | null
   levelId: number | null
+  assignmentMode?: 'auto' | 'manual'
+  assignedAgentCount?: number | null
+  acceptanceCriteria?: string
 }
 
 export interface UpdateWorkItemRequest {
@@ -29,6 +32,9 @@ export interface UpdateWorkItemRequest {
   isAI?: boolean
   parentWorkItemNumber?: number | null
   levelId?: number | null
+  assignmentMode?: 'auto' | 'manual'
+  assignedAgentCount?: number | null
+  acceptanceCriteria?: string
 }
 
 export function createWorkItem(projectId: string, request: CreateWorkItemRequest): Promise<WorkItem> {

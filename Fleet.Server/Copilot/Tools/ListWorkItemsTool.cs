@@ -9,7 +9,7 @@ public class ListWorkItemsTool(IWorkItemService workItemService) : IChatTool
     public string Name => "list_work_items";
 
     public string Description =>
-        "List work items in the current project. Optionally filter by state (e.g., 'New', 'Active', 'In Progress', 'Resolved', 'Closed'). Returns id, title, state, priority, assignedTo, and tags.";
+        "List work items in the current project. Optionally filter by state (e.g., 'New', 'Active', 'In Progress', 'In-PR', 'Resolved', 'Closed'). Returns id, title, state, priority, assignedTo, and tags.";
 
     public string ParametersJsonSchema => """
         {

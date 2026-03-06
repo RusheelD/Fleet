@@ -13,6 +13,7 @@ namespace Fleet.Server.Copilot.Tools;
 public class GetRepoTreeTool(
     IProjectService projectService,
     IConnectionRepository connectionRepository,
+    IGitHubTokenProtector tokenProtector,
     IHttpClientFactory httpClientFactory) : IChatTool
 {
     public string Name => "get_repo_tree";
@@ -49,7 +50,8 @@ public class GetRepoTreeTool(
             return "Error: invalid user ID.";
 
         var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        if (account is null || string.IsNullOrEmpty(account.AccessToken))
+        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
+        if (account is null || string.IsNullOrEmpty(accessToken))
             return "No GitHub account is linked. Please connect GitHub in Settings first.";
 
         var client = httpClientFactory.CreateClient("GitHub");
@@ -58,18 +60,18 @@ public class GetRepoTreeTool(
         try
         {
             // 1. Get the default branch SHA
-            var repoInfo = await FetchJsonAsync<RepoResponse>(client, account.AccessToken,
+            var repoInfo = await FetchJsonAsync<RepoResponse>(client, accessToken,
                 $"https://api.github.com/repos/{repoFullName}", cancellationToken);
             var defaultBranch = repoInfo?.DefaultBranch ?? "main";
 
-            var branchInfo = await FetchJsonAsync<BranchResponse>(client, account.AccessToken,
+            var branchInfo = await FetchJsonAsync<BranchResponse>(client, accessToken,
                 $"https://api.github.com/repos/{repoFullName}/branches/{defaultBranch}", cancellationToken);
             var treeSha = branchInfo?.Commit?.Commit?.Tree?.Sha;
             if (treeSha is null)
                 return "Could not resolve the repository's default branch tree.";
 
             // 2. Fetch the recursive tree
-            var treeResponse = await FetchJsonAsync<TreeResponse>(client, account.AccessToken,
+            var treeResponse = await FetchJsonAsync<TreeResponse>(client, accessToken,
                 $"https://api.github.com/repos/{repoFullName}/git/trees/{treeSha}?recursive=1", cancellationToken);
 
             if (treeResponse?.Tree is null)

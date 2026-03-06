@@ -42,7 +42,7 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                             "state": {
                                 "type": "string",
                                 "description": "Initial state. Default 'New'.",
-                                "enum": ["New", "Active", "In Progress", "Resolved", "Closed"]
+                                "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"]
                             },
                             "level": {
                                 "type": "string",

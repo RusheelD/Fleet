@@ -19,6 +19,7 @@ import {
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { resolveLevelIcon } from '../../proxies'
 import { StateDot } from './StateDot'
+import { formatWorkItemState } from './stateLabel'
 
 /* ── Drop zone enum ────────────────────────────────────────── */
 type DropZone = 'above' | 'on' | 'below' | null
@@ -529,7 +530,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                                 <ReOrderRegular />
                             </span>
                             <Text className={styles.typeName}>
-                                {level?.name ?? '—'}
+                                {level?.name ?? '-'}
                             </Text>
                         </div>
 
@@ -588,7 +589,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         {/* State */}
                         <div className={styles.stateCell}>
                             <StateDot state={item.state} />
-                            <Text className={styles.stateText}>{item.state}</Text>
+                            <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
                         </div>
 
                         {/* ID */}
@@ -596,7 +597,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
 
                         {/* Difficulty */}
                         <Text className={styles.difficultyText}>
-                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '—'}
+                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
                         </Text>
 
                         {/* Assigned To */}
@@ -625,3 +626,4 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
         </div>
     )
 }
+

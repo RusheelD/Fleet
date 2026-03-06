@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Tab,
     TabList,
@@ -25,8 +26,9 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
-import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution } from '../../proxies'
-import { useCurrentProject, useChatGenerating } from '../../hooks'
+import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation } from '../../proxies'
+import { useCurrentProject, useChatGenerating, usePreferences } from '../../hooks'
+import { openExecutionDocumentation } from './executionDocs'
 
 const useStyles = makeStyles({
     page: {
@@ -35,16 +37,28 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         height: '100%',
         overflow: 'hidden',
+        backgroundColor: tokens.colorNeutralBackground3,
+    },
+    pageCompact: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '1rem',
+        paddingRight: '1rem',
     },
     headerActions: {
         display: 'flex',
         gap: '0.5rem',
+        width: '100%',
     },
     summaryRow: {
         display: 'flex',
         gap: '1rem',
         marginBottom: '1.5rem',
         flexWrap: 'wrap',
+    },
+    summaryRowCompact: {
+        gap: '0.5rem',
+        marginBottom: '0.75rem',
     },
     summaryIconWarning: {
         color: tokens.colorPaletteMarigoldForeground1,
@@ -60,6 +74,12 @@ const useStyles = makeStyles({
     },
     tabListSpacing: {
         marginBottom: '1rem',
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        paddingBottom: '0.5rem',
+    },
+    tabListSpacingCompact: {
+        marginBottom: '0.5rem',
+        paddingBottom: '0.25rem',
     },
     mainContent: {
         display: 'grid',
@@ -70,6 +90,9 @@ const useStyles = makeStyles({
         '@media (max-width: 1000px)': {
             gridTemplateColumns: '1fr',
         },
+    },
+    mainContentCompact: {
+        gap: '0.75rem',
     },
     executionPanel: {
         display: 'flex',
@@ -82,10 +105,20 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
+        paddingRight: '0.25rem',
+    },
+    executionListCompact: {
+        gap: '0.5rem',
+        paddingRight: 0,
     },
     searchInput: {
         maxWidth: '260px',
+        minWidth: '220px',
         flex: 1,
+    },
+    searchInputCompact: {
+        maxWidth: '200px',
+        minWidth: '160px',
     },
 })
 
@@ -93,12 +126,16 @@ export function AgentMonitorPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
     const { isGenerating } = useChatGenerating()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
     const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
     const startExecution = useStartExecution(projectId)
     const cancelExecution = useCancelExecution(projectId)
     const pauseExecution = usePauseExecution(projectId)
+    const retryExecution = useRetryExecution(projectId)
+    const fetchExecutionDocumentation = useExecutionDocumentation(projectId)
     const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
@@ -183,16 +220,55 @@ export function AgentMonitorPage() {
         })
     }
 
+    const handleRetry = (executionId: string) => {
+        retryExecution.mutate(executionId, {
+            onSuccess: (result) => {
+                dispatchToast(
+                    <Toast><ToastTitle>Execution retried (new ID: {result.executionId})</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchExec()
+                void refetchLogs()
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to retry execution</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
+    const handleViewDocs = (executionId: string) => {
+        fetchExecutionDocumentation.mutate(executionId, {
+            onSuccess: (docs) => {
+                const didOpen = openExecutionDocumentation(docs)
+                if (!didOpen) {
+                    dispatchToast(
+                        <Toast><ToastTitle>No documentation output is available for this execution</ToastTitle></Toast>,
+                        { intent: 'info' },
+                    )
+                }
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to generate execution documentation</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
     if (loadingExec || loadingLogs) {
         return (
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
                 <Spinner label="Loading agent data..." />
             </div>
         )
     }
 
     return (
-        <div className={styles.page}>
+        <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
             <Toaster toasterId={toasterId} />
             <PageHeader
                 title="Agent Monitor"
@@ -207,7 +283,7 @@ export function AgentMonitorPage() {
                                 Start Execution
                             </ToolbarButton>
                             <Input
-                                className={styles.searchInput}
+                                className={mergeClasses(styles.searchInput, isCompact && styles.searchInputCompact)}
                                 placeholder="Search executions..."
                                 size="small"
                                 appearance="underline"
@@ -221,7 +297,7 @@ export function AgentMonitorPage() {
                 }
             />
 
-            <div className={styles.summaryRow}>
+            <div className={mergeClasses(styles.summaryRow, isCompact && styles.summaryRowCompact)}>
                 <SummaryCard
                     icon={<PlayRegular />}
                     iconClassName={styles.summaryIconWarning}
@@ -248,18 +324,30 @@ export function AgentMonitorPage() {
                 />
             </div>
 
-            <TabList selectedValue={tab} onTabSelect={(_e, data) => setTab(data.value as string)} className={styles.tabListSpacing}>
+            <TabList
+                selectedValue={tab}
+                onTabSelect={(_e, data) => setTab(data.value as string)}
+                className={mergeClasses(styles.tabListSpacing, isCompact && styles.tabListSpacingCompact)}
+                size={isCompact ? 'small' : 'medium'}
+            >
                 <Tab value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
                 <Tab value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
                 <Tab value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>
                 <Tab value="all">All ({allExecutions.length})</Tab>
             </TabList>
 
-            <div className={styles.mainContent}>
+            <div className={mergeClasses(styles.mainContent, isCompact && styles.mainContentCompact)}>
                 <div className={styles.executionPanel}>
-                    <div className={styles.executionList}>
+                    <div className={mergeClasses(styles.executionList, isCompact && styles.executionListCompact)}>
                         {filteredExecutions.map((execution) => (
-                            <ExecutionCard key={execution.id} execution={execution} onPause={handlePause} onCancel={handleCancel} />
+                            <ExecutionCard
+                                key={execution.id}
+                                execution={execution}
+                                onPause={handlePause}
+                                onCancel={handleCancel}
+                                onRetry={handleRetry}
+                                onViewDocs={handleViewDocs}
+                            />
                         ))}
                     </div>
                 </div>

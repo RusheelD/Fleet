@@ -4,12 +4,13 @@ import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug,
   getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs, startExecution, cancelExecution, pauseExecution,
+  getExecutions, getLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos,
+  getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
 } from './'
 import type {
   CreateProjectRequest, UpdateProjectRequest,
@@ -159,6 +160,7 @@ export function useStartExecution(projectId: string | undefined) {
     mutationFn: (workItemNumber: number) => startExecution(projectId!, workItemNumber),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -243,10 +245,30 @@ export function useUpdatePreferences() {
 export function useLinkGitHub() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { code: string; redirectUri: string }) => linkGitHub(data.code, data.redirectUri),
+    mutationFn: (data: { code: string; redirectUri: string; state: string }) => linkGitHub(data.code, data.redirectUri, data.state),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
     },
+  })
+}
+
+export function useRetryExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => retryExecution(projectId!, executionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useExecutionDocumentation(projectId: string | undefined) {
+  return useMutation({
+    mutationFn: (executionId: string) => getExecutionDocumentation(projectId!, executionId),
   })
 }
 
@@ -262,6 +284,30 @@ export function useUnlinkGitHub() {
 
 export function useGitHubRepos(enabled = true) {
   return useDataQuery('github-repos', getGitHubRepos, [], [], { enableFetch: enabled })
+}
+
+export function useNotifications(unreadOnly = false) {
+  return useDataQuery('notifications', () => getNotifications(unreadOnly), [], [unreadOnly], { refetchInterval: 10_000 })
+}
+
+export function useMarkNotificationAsRead() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (notificationId: number) => markNotificationAsRead(notificationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    },
+  })
+}
+
+export function useMarkAllNotificationsAsRead() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => markAllNotificationsAsRead(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    },
+  })
 }
 
 // ── Work Item Mutations ───────────────────────────────────

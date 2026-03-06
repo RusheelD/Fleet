@@ -10,5 +10,9 @@ public record UpdateWorkItemRequest(
     string[]? Tags,
     bool? IsAI,
     int? ParentWorkItemNumber,
-    int? LevelId
+    int? LevelId,
+    string? AssignmentMode = null,
+    int? AssignedAgentCount = null,
+    string? AcceptanceCriteria = null,
+    string? LinkedPullRequestUrl = null
 );

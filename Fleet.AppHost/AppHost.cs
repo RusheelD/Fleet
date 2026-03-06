@@ -1,9 +1,18 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-var anthropicApiKey =
-    builder.Configuration["Secrets:AnthropicApiKey"] ??
+var azureOpenAiApiKey =
+    builder.Configuration["Secrets:AzureOpenAiApiKey"] ??
     builder.Configuration["LLM:ApiKey"] ??
-    Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+    Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
+
+var azureOpenAiEndpoint =
+    builder.Configuration["Secrets:AzureOpenAiEndpoint"] ??
+    builder.Configuration["LLM:Endpoint"] ??
+    Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
+
+var azureOpenAiModel =
+    builder.Configuration["Secrets:AzureOpenAiModel"] ??
+    builder.Configuration["LLM:Model"];
 
 var githubClientSecret =
     builder.Configuration["Secrets:GitHubClientSecret"] ??
@@ -23,9 +32,22 @@ var server = builder.AddProject<Projects.Fleet_Server>("server")
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 
-if (!string.IsNullOrWhiteSpace(anthropicApiKey))
+if (!string.IsNullOrWhiteSpace(azureOpenAiApiKey))
 {
-    server.WithEnvironment("ANTHROPIC_API_KEY", anthropicApiKey);
+    server.WithEnvironment("AZURE_OPENAI_API_KEY", azureOpenAiApiKey);
+    server.WithEnvironment("LLM__ApiKey", azureOpenAiApiKey);
+}
+
+if (!string.IsNullOrWhiteSpace(azureOpenAiEndpoint))
+{
+    server.WithEnvironment("AZURE_OPENAI_ENDPOINT", azureOpenAiEndpoint);
+    server.WithEnvironment("LLM__Endpoint", azureOpenAiEndpoint);
+}
+
+if (!string.IsNullOrWhiteSpace(azureOpenAiModel))
+{
+    server.WithEnvironment("LLM__Model", azureOpenAiModel);
+    server.WithEnvironment("LLM__GenerateModel", azureOpenAiModel);
 }
 
 if (!string.IsNullOrWhiteSpace(githubClientSecret))

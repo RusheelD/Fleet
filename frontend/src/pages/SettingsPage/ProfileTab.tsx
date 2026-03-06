@@ -129,6 +129,9 @@ export function ProfileTab({ profile }: ProfileTabProps) {
                     <Field label="Location">
                         <Input value={location} onChange={(_e, data) => setLocation(data.value)} />
                     </Field>
+                    <Field label="Subscription Tier">
+                        <Input value={(profile.role ?? 'free').toUpperCase()} readOnly />
+                    </Field>
                 </div>
             </div>
         </Card>

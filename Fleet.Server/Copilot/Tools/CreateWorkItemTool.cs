@@ -12,7 +12,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
     public string Description =>
         "Create a new work item in the current project. Returns the created work item. " +
-        "Valid states: New, Active, In Progress, Resolved, Closed. Priority: 1 (critical) to 4 (low). " +
+        "Valid states: New, Active, Planning (AI), In Progress, In Progress (AI), In-PR, In-PR (AI), Resolved, Resolved (AI), Closed. Priority: 1 (critical) to 4 (low). " +
         "Valid levels (types): Domain, Module, Feature, Component, Bug, Task. " +
         "Use parent_id to nest under an existing work item (e.g. Tasks under a Feature).";
 
@@ -41,7 +41,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                 "state": {
                     "type": "string",
                     "description": "Initial state. Default 'New'.",
-                    "enum": ["New", "Active", "In Progress", "Resolved", "Closed"]
+                    "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"]
                 },
                 "level": {
                     "type": "string",

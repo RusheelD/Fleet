@@ -1,10 +1,12 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Caption1,
     Text,
     Card,
 } from '@fluentui/react-components'
+import { usePreferences } from '../../hooks'
 import type { ReactNode } from 'react'
 
 const useStyles = makeStyles({
@@ -18,9 +20,27 @@ const useStyles = makeStyles({
             boxShadow: tokens.shadow4,
         },
     },
+    quickActionCardCompact: {
+        paddingTop: '0.5rem',
+        paddingBottom: '0.5rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+        gap: '0.5rem',
+    },
     quickActionIcon: {
         fontSize: '24px',
         color: tokens.colorBrandForeground1,
+    },
+    quickActionIconCompact: {
+        fontSize: '16px',
+    },
+    quickActionTitleCompact: {
+        fontSize: '12px',
+        lineHeight: '16px',
+    },
+    quickActionDescCompact: {
+        fontSize: '11px',
+        lineHeight: '14px',
     },
 })
 
@@ -33,13 +53,17 @@ interface QuickActionCardProps {
 
 export function QuickActionCard({ icon, title, description, onClick }: QuickActionCardProps) {
     const styles = useStyles()
+    const { preferences } = usePreferences()
+    const isCompact = preferences?.compactMode ?? false
 
     return (
-        <Card className={styles.quickActionCard} onClick={onClick}>
-            <span className={styles.quickActionIcon}>{icon}</span>
+        <Card className={mergeClasses(styles.quickActionCard, isCompact && styles.quickActionCardCompact)} onClick={onClick}>
+            <span className={mergeClasses(styles.quickActionIcon, isCompact && styles.quickActionIconCompact)}>{icon}</span>
             <div>
-                <Text weight="semibold" block>{title}</Text>
-                <Caption1>{description}</Caption1>
+                <Text weight="semibold" block className={isCompact ? styles.quickActionTitleCompact : undefined}>
+                    {title}
+                </Text>
+                <Caption1 className={isCompact ? styles.quickActionDescCompact : undefined}>{description}</Caption1>
             </div>
         </Card>
     )
