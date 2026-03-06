@@ -3,6 +3,8 @@
 #   .\restart-fleet.ps1
 #   .\restart-fleet.ps1 -Background
 
+Clear-Host
+
 param(
     [switch]$Background
 )
