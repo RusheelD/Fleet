@@ -20,6 +20,17 @@ public interface IAgentOrchestrationService
     Task<string> StartExecutionAsync(string projectId, int workItemNumber, int userId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Starts a new execution and optionally targets a specific PR base branch.
+    /// </summary>
+    /// <param name="targetBranch">Optional PR target branch (for example: "main", "develop", "release/v1").</param>
+    Task<string> StartExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? targetBranch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the current status of an execution.
     /// </summary>
     Task<AgentExecutionStatus?> GetExecutionStatusAsync(string executionId, CancellationToken cancellationToken = default);

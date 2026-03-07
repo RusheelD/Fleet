@@ -181,7 +181,8 @@ export function useClearLogs(projectId: string | undefined) {
 export function useStartExecution(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (workItemNumber: number) => startExecution(projectId!, workItemNumber),
+    mutationFn: (request: { workItemNumber: number; targetBranch?: string }) =>
+      startExecution(projectId!, request),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['executions'] })
       void queryClient.invalidateQueries({ queryKey: ['work-items'] })

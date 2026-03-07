@@ -17,6 +17,8 @@ import {
     Badge,
     Radio,
     RadioGroup,
+    Field,
+    Input,
 } from '@fluentui/react-components'
 import { BotRegular, RocketRegular } from '@fluentui/react-icons'
 import type { WorkItem } from '../../models'
@@ -28,7 +30,7 @@ interface StartExecutionDialogProps {
     workItems: WorkItem[]
     isLoading: boolean
     isPending: boolean
-    onStart: (workItemNumber: number) => void
+    onStart: (workItemNumber: number, targetBranch: string) => void
 }
 
 const useStyles = makeStyles({
@@ -173,6 +175,9 @@ const useStyles = makeStyles({
     footerHint: {
         color: tokens.colorNeutralForeground3,
     },
+    branchField: {
+        maxWidth: '320px',
+    },
     emptyState: {
         padding: '2rem 1.5rem',
         textAlign: 'center' as const,
@@ -213,6 +218,7 @@ export function StartExecutionDialog({
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
     const [selected, setSelected] = useState<number | null>(null)
+    const [targetBranch, setTargetBranch] = useState('main')
 
     // Filter to work items that are eligible (AI-assigned, active-ish states)
     const eligible = useMemo(
@@ -228,6 +234,7 @@ export function StartExecutionDialog({
     useEffect(() => {
         if (!open) {
             setSelected(null)
+            setTargetBranch('main')
             return
         }
 
@@ -239,8 +246,9 @@ export function StartExecutionDialog({
     }, [open, eligible])
 
     const handleStart = () => {
-        if (selected !== null) {
-            onStart(selected)
+        const normalizedTargetBranch = targetBranch.trim()
+        if (selected !== null && normalizedTargetBranch.length > 0) {
+            onStart(selected, normalizedTargetBranch)
         }
     }
 
@@ -268,6 +276,19 @@ export function StartExecutionDialog({
                                         Fleet will run the assigned agents and update progress automatically.
                                     </Caption1>
                                 </div>
+                                <Field
+                                    label="PR Target Branch"
+                                    hint="Agents will open the draft PR against this branch."
+                                    className={styles.branchField}
+                                    required
+                                >
+                                    <Input
+                                        value={targetBranch}
+                                        onChange={(_e, data) => setTargetBranch(data.value)}
+                                        placeholder="main"
+                                        disabled={isPending}
+                                    />
+                                </Field>
                                 <div className={styles.sectionHeader}>
                                     <Text weight="semibold">Eligible Work Items</Text>
                                     <Badge appearance="filled" color="informative" size="small">
@@ -338,7 +359,7 @@ export function StartExecutionDialog({
                         <Button
                             appearance="primary"
                             icon={<RocketRegular />}
-                            disabled={selected === null || isPending}
+                            disabled={selected === null || targetBranch.trim().length === 0 || isPending}
                             onClick={handleStart}
                         >
                             {isPending ? 'Starting...' : 'Start Execution'}

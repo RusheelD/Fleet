@@ -251,8 +251,19 @@ public class AgentOrchestrationService(
         _ => 8192,
     };
 
+    public Task<string> StartExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        CancellationToken cancellationToken = default)
+        => StartExecutionAsync(projectId, workItemNumber, userId, targetBranch: null, cancellationToken);
+
     public async Task<string> StartExecutionAsync(
-        string projectId, int workItemNumber, int userId, CancellationToken cancellationToken = default)
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? targetBranch,
+        CancellationToken cancellationToken = default)
     {
         var codingRunCharged = false;
         try
@@ -307,6 +318,11 @@ public class AgentOrchestrationService(
             if (string.IsNullOrWhiteSpace(accessToken))
                 throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
             var repoFullName = project.Repo;
+            var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
+                accessToken,
+                repoFullName,
+                targetBranch,
+                cancellationToken);
 
             // 6. Use AI to determine which agents are needed for this work item.
             var selectedModelKey = ModelKeys.Haiku;
@@ -396,7 +412,8 @@ public class AgentOrchestrationService(
             _ = Task.Run(() => RunPipelineAsync(
                 executionId, projectId, workItem, childWorkItems, repoFullName,
                 accessToken, branchName, commitAuthorName, commitAuthorEmail,
-                userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask, cts.Token), CancellationToken.None);
+                userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask,
+                pullRequestTargetBranch, cts.Token), CancellationToken.None);
 
             return executionId;
         }
@@ -594,6 +611,7 @@ public class AgentOrchestrationService(
         string commitAuthorName, string commitAuthorEmail,
         int userId, string selectedModelKey, AgentRole[][] pipeline,
         int maxConcurrentAgentsPerTask,
+        string pullRequestTargetBranch,
         CancellationToken externalCancellation)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
@@ -647,14 +665,28 @@ public class AgentOrchestrationService(
             logger.LogInformation("Execution {ExecutionId}: cloning {Repo} → branch {Branch}",
                 executionId, repoFullName, branchName);
 
-            await sandbox.CloneAsync(repoFullName, accessToken, branchName);
+            await sandbox.CloneAsync(
+                repoFullName,
+                accessToken,
+                branchName,
+                externalCancellation,
+                baseBranch: pullRequestTargetBranch);
 
             var toolContext = new AgentToolContext(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
 
             // Open a draft PR immediately so agent commits are visible throughout development
             var (prUrl, prNumber) = await OpenDraftPullRequestAsync(
-                sandbox, accessToken, repoFullName, workItem, commitAuthorName, commitAuthorEmail, scopedDb, executionId, externalCancellation);
+                sandbox,
+                accessToken,
+                repoFullName,
+                workItem,
+                commitAuthorName,
+                commitAuthorEmail,
+                pullRequestTargetBranch,
+                scopedDb,
+                executionId,
+                externalCancellation);
 
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
@@ -1671,6 +1703,7 @@ public class AgentOrchestrationService(
     private async Task<(string? Url, int Number)> OpenDraftPullRequestAsync(
         IRepoSandbox sandbox, string accessToken, string repoFullName,
         WorkItemDto workItem, string commitAuthorName, string commitAuthorEmail,
+        string pullRequestTargetBranch,
         FleetDbContext scopedDb, string executionId,
         CancellationToken cancellationToken)
     {
@@ -1679,7 +1712,8 @@ public class AgentOrchestrationService(
             // 1. Create an initial marker commit so the branch has something to push.
             sandbox.WriteFile(".fleet",
                 $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
-                $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n");
+                $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n" +
+                $"Target branch: {pullRequestTargetBranch}\n");
 
             await sandbox.CommitAndPushAsync(
                 $"fleet: start work on #{workItem.WorkItemNumber} - {workItem.Title}",
@@ -1687,13 +1721,9 @@ public class AgentOrchestrationService(
                 authorEmail: commitAuthorEmail,
                 cancellationToken);
 
-            // 2. Fetch default branch and resolve a collision-safe PR title.
+            // 2. Resolve a collision-safe PR title.
             var client = httpClientFactory.CreateClient("GitHub");
-            var repoJson = await GitHubGetAsync(client, accessToken,
-                $"https://api.github.com/repos/{repoFullName}", cancellationToken);
-            var baseBranch = repoJson?.TryGetProperty("default_branch", out var dbProp) == true
-                ? dbProp.GetString() ?? "main"
-                : "main";
+            var baseBranch = pullRequestTargetBranch;
 
             var execution = await scopedDb.AgentExecutions.FindAsync(executionId);
             var basePrTitle = execution?.PullRequestTitle ?? BuildPullRequestTitle(workItem);
@@ -1791,6 +1821,46 @@ public class AgentOrchestrationService(
             prResponse.IsSuccessStatusCode,
             prResponse.StatusCode,
             prResponseBody);
+    }
+
+    private async Task<string> ResolvePullRequestTargetBranchAsync(
+        string accessToken,
+        string repoFullName,
+        string? requestedBranch,
+        CancellationToken cancellationToken)
+    {
+        var client = httpClientFactory.CreateClient("GitHub");
+        var normalizedRequestedBranch = requestedBranch?.Trim();
+
+        if (!string.IsNullOrWhiteSpace(normalizedRequestedBranch))
+        {
+            var branchExists = await BranchExistsAsync(
+                client,
+                accessToken,
+                repoFullName,
+                normalizedRequestedBranch,
+                cancellationToken);
+
+            if (!branchExists)
+            {
+                throw new InvalidOperationException(
+                    $"Target branch '{normalizedRequestedBranch}' was not found in {repoFullName}.");
+            }
+
+            return normalizedRequestedBranch;
+        }
+
+        var repoJson = await GitHubGetAsync(
+            client,
+            accessToken,
+            $"https://api.github.com/repos/{repoFullName}",
+            cancellationToken);
+
+        var defaultBranch = repoJson?.TryGetProperty("default_branch", out var dbProp) == true
+            ? dbProp.GetString()
+            : null;
+
+        return string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch;
     }
 
     private async Task<string> ResolveUniqueBranchNameAsync(

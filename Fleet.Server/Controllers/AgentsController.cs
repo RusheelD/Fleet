@@ -51,7 +51,7 @@ public class AgentsController(
     {
         var userId = await authService.GetCurrentUserIdAsync();
         var executionId = await orchestrationService.StartExecutionAsync(
-            projectId, request.WorkItemNumber, userId);
+            projectId, request.WorkItemNumber, userId, request.TargetBranch);
 
         await eventPublisher.PublishProjectEventAsync(
             userId,

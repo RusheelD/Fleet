@@ -172,8 +172,8 @@ export function AgentMonitorPage() {
         )
     }, [filteredByTab, searchQuery])
 
-    const handleStartExecution = (workItemNumber: number) => {
-        startExecution.mutate(workItemNumber, {
+    const handleStartExecution = (workItemNumber: number, targetBranch: string) => {
+        startExecution.mutate({ workItemNumber, targetBranch }, {
             onSuccess: (result) => {
                 setDialogOpen(false)
                 dispatchToast(

@@ -13,8 +13,13 @@ export function clearLogs(projectId: string): Promise<{ deletedCount: number }> 
   return del<{ deletedCount: number }>(`/api/projects/${projectId}/agents/logs`)
 }
 
-export function startExecution(projectId: string, workItemNumber: number): Promise<{ executionId: string }> {
-  return post<{ executionId: string }>(`/api/projects/${projectId}/agents/execute`, { workItemNumber })
+export interface StartExecutionRequest {
+  workItemNumber: number
+  targetBranch?: string
+}
+
+export function startExecution(projectId: string, request: StartExecutionRequest): Promise<{ executionId: string }> {
+  return post<{ executionId: string }>(`/api/projects/${projectId}/agents/execute`, request)
 }
 
 export interface ExecutionStatus {

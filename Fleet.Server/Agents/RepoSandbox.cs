@@ -45,7 +45,12 @@ public class RepoSandbox : IRepoSandbox
     public string RepoFullName => _repoFullName;
     public string BranchName => _branchName;
 
-    public async Task CloneAsync(string repoFullName, string accessToken, string branchName, CancellationToken cancellationToken)
+    public async Task CloneAsync(
+        string repoFullName,
+        string accessToken,
+        string branchName,
+        CancellationToken cancellationToken,
+        string? baseBranch = null)
     {
         _repoFullName = repoFullName;
         _branchName = branchName;
@@ -63,10 +68,25 @@ public class RepoSandbox : IRepoSandbox
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
 
-        // Create and checkout the feature branch
-        result = await RunGitAsync($"checkout -b {branchName}", cancellationToken: cancellationToken);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException($"Git checkout failed: {result.Stderr}");
+        // Create and checkout the feature branch (optionally from a caller-provided base branch).
+        if (!string.IsNullOrWhiteSpace(baseBranch))
+        {
+            result = await RunGitAsync($"fetch --depth 1 origin {baseBranch}", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Git fetch of base branch '{baseBranch}' failed: {result.Stderr}");
+
+            result = await RunGitAsync($"checkout -B {branchName} origin/{baseBranch}", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Git checkout from base branch '{baseBranch}' failed: {result.Stderr}");
+        }
+        else
+        {
+            result = await RunGitAsync($"checkout -b {branchName}", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git checkout failed: {result.Stderr}");
+        }
 
         _logger.LogInformation("Cloned {Repo} and created branch {Branch}", repoFullName, branchName);
     }
