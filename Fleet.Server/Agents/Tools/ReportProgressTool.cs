@@ -13,7 +13,7 @@ public class ReportProgressTool : IAgentTool
 
     public string Description =>
         "Report your estimated completion percentage (0-100). " +
-        "Call this frequently (at least every 2-3 tool calls) so the user can see live progress. " +
+        "Call this frequently (ideally after each meaningful tool call) so the user can see live progress. " +
         "Use concise milestone summaries and send 100% when your phase is complete. " +
         "Be honest and realistic - estimate based on how much of your task is actually done.";
 

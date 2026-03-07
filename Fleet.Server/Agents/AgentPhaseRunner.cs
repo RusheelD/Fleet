@@ -232,7 +232,7 @@ public class AgentPhaseRunner(
                                     var estimatedPercent = EstimateProgressPercentFromToolCalls();
                                     await ReportProgressAsync(
                                         estimatedPercent,
-                                        $"Working via {toolCall.Name} ({totalToolCalls} tool calls)");
+                                        $"Working via {toolCall.Name} (step {totalToolCalls})");
                                     nonProgressToolCallsSinceLastReport = 0;
                                 }
                             }
@@ -284,7 +284,7 @@ public class AgentPhaseRunner(
                                     var estimatedPercent = EstimateProgressPercentFromToolCalls();
                                     await ReportProgressAsync(
                                         estimatedPercent,
-                                        $"Working via {toolCall.Name} ({totalToolCalls} tool calls)");
+                                        $"Working via {toolCall.Name} (step {totalToolCalls})");
                                     nonProgressToolCallsSinceLastReport = 0;
                                 }
                             }

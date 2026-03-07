@@ -37,7 +37,6 @@ public class AgentOrchestrationService(
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private const int MaxAgentRetries = 2;
-    private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
     private static readonly HashSet<string> InPrOrBeyondStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "In-PR",
@@ -865,11 +864,6 @@ public class AgentOrchestrationService(
                         attempt,
                         maxAttempts);
 
-                    var progressStateLock = new object();
-                    var latestProgressSummary = initialProgressSummary;
-                    var latestEstimatedProgress = 0.0;
-                    var lastProgressLogAtUtc = DateTime.UtcNow;
-
                     PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
                     {
                         await WithDbLockAsync(async () =>
@@ -883,8 +877,10 @@ public class AgentOrchestrationService(
                             exec.Progress = Math.Max(exec.Progress, clampedOverall);
 
                             var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
+                            string? previousTask = null;
                             if (agent is not null)
                             {
+                                previousTask = agent.CurrentTask;
                                 if (!string.IsNullOrWhiteSpace(summary))
                                     agent.CurrentTask = summary;
 
@@ -893,6 +889,18 @@ public class AgentOrchestrationService(
                             }
 
                             await scopedDb.SaveChangesAsync();
+
+                            if (!string.IsNullOrWhiteSpace(summary) &&
+                                !string.Equals(previousTask, summary, StringComparison.Ordinal))
+                            {
+                                await WriteLogEntryAsync(
+                                    scopedDb,
+                                    projectId,
+                                    $"{role} Agent",
+                                    "info",
+                                    $"Status update: {summary}",
+                                    executionId: executionId);
+                            }
 
                             var pct = (int)Math.Round(estimatedProgress * 100);
                             var logMessage = string.IsNullOrWhiteSpace(summary)
@@ -906,17 +914,6 @@ public class AgentOrchestrationService(
                                 logMessage,
                                 executionId: executionId);
                         });
-
-                        lock (progressStateLock)
-                        {
-                            latestEstimatedProgress = estimatedProgress;
-                            if (!string.IsNullOrWhiteSpace(summary))
-                            {
-                                latestProgressSummary = summary;
-                            }
-
-                            lastProgressLogAtUtc = DateTime.UtcNow;
-                        }
 
                         await PublishAgentsUpdatedAsync();
                         await PublishLogsUpdatedAsync();
@@ -941,93 +938,15 @@ public class AgentOrchestrationService(
 
                     var maxTokens = GetMaxTokensForRole(role);
                     var phaseStart = DateTime.UtcNow;
-                    using var phaseHeartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation);
-                    var heartbeatTask = Task.Run(async () =>
-                    {
-                        while (!phaseHeartbeatCts.Token.IsCancellationRequested)
-                        {
-                            try
-                            {
-                                await Task.Delay(ProgressHeartbeatInterval, phaseHeartbeatCts.Token);
-
-                                double heartbeatProgress;
-                                string heartbeatSummary;
-                                DateTime lastLogAt;
-                                lock (progressStateLock)
-                                {
-                                    heartbeatProgress = latestEstimatedProgress;
-                                    heartbeatSummary = latestProgressSummary;
-                                    lastLogAt = lastProgressLogAtUtc;
-                                }
-
-                                if (DateTime.UtcNow - lastLogAt < ProgressHeartbeatInterval)
-                                {
-                                    continue;
-                                }
-
-                                var heartbeatPercent = (int)Math.Round(Math.Clamp(heartbeatProgress, 0, 0.99) * 100);
-                                var heartbeatMessage = string.IsNullOrWhiteSpace(heartbeatSummary)
-                                    ? $"Heartbeat: still working ({heartbeatPercent}%)"
-                                    : $"Heartbeat: still working ({heartbeatPercent}%) - {heartbeatSummary}";
-
-                                await WithDbLockAsync(async () =>
-                                {
-                                    await WriteLogEntryAsync(
-                                        scopedDb,
-                                        projectId,
-                                        $"{role} Agent",
-                                        "info",
-                                        heartbeatMessage,
-                                        executionId: executionId);
-                                });
-
-                                lock (progressStateLock)
-                                {
-                                    lastProgressLogAtUtc = DateTime.UtcNow;
-                                }
-
-                                await PublishLogsUpdatedAsync();
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.LogWarning(
-                                    ex,
-                                    "Execution {ExecutionId}: heartbeat log write failed for role {Role} (non-fatal)",
-                                    executionId,
-                                    role);
-                            }
-                        }
-                    }, phaseHeartbeatCts.Token);
-
-                    PhaseResult result;
-                    try
-                    {
-                        result = await scopedPhaseRunner.RunPhaseAsync(
-                            role,
-                            userMessage,
-                            toolContext,
-                            model,
-                            maxTokens,
-                            onProgress,
-                            onToolCall,
-                            externalCancellation);
-                    }
-                    finally
-                    {
-                        phaseHeartbeatCts.Cancel();
-                        try
-                        {
-                            await heartbeatTask;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // Expected when the phase completes and the heartbeat loop is stopped.
-                        }
-                    }
+                    var result = await scopedPhaseRunner.RunPhaseAsync(
+                        role,
+                        userMessage,
+                        toolContext,
+                        model,
+                        maxTokens,
+                        onProgress,
+                        onToolCall,
+                        externalCancellation);
                     var phaseEnd = DateTime.UtcNow;
                     var rolePhaseOrder = Interlocked.Increment(ref phaseOrder) - 1;
 
@@ -1423,7 +1342,7 @@ public class AgentOrchestrationService(
         sb.AppendLine();
         sb.AppendLine("**Progress Reporting Requirements:**");
         sb.AppendLine("- Call `report_progress` frequently with `percent_complete` and `summary`.");
-        sb.AppendLine("- Send a progress update at least every 2-3 tool calls while working.");
+        sb.AppendLine("- Send a progress update after every meaningful tool call while working.");
         sb.AppendLine("- Include clear milestones (for example: analysis done, implementation started, tests passing).");
         sb.AppendLine("- Send a final `report_progress` update at 100% when your phase is complete.");
         sb.AppendLine();
