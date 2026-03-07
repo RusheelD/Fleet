@@ -108,8 +108,8 @@ public class SubscriptionService(
             Price: policy.Tier switch
             {
                 UserRoles.Free => "$0",
-                UserRoles.Basic => "$19",
-                UserRoles.Pro => "$49",
+                UserRoles.Basic => "$200",
+                UserRoles.Pro => "$1000",
                 _ => "$199",
             },
             Period: "/month",

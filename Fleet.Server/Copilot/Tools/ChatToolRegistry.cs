@@ -23,9 +23,13 @@ public class ChatToolRegistry
         _tools.TryGetValue(name, out var tool) ? tool : null;
 
     /// <summary>Convert tools to LLM definitions, optionally excluding write tools.</summary>
-    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(bool includeWriteTools = true, bool bulkOnly = false) =>
-        All.Where(t => includeWriteTools || !t.IsWriteTool)
+    public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(
+        bool includeWriteTools = true,
+        bool bulkOnly = false,
+        bool includeGlobalRepoTools = true) =>
+        All.Where(t => includeWriteTools || !t.IsWriteTool || AlwaysAvailableWriteTools.Contains(t.Name))
            .Where(t => !bulkOnly || !SingleItemWriteTools.Contains(t.Name))
+           .Where(t => includeGlobalRepoTools || !GlobalOnlyTools.Contains(t.Name))
            .Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema))
            .ToList();
 
@@ -39,5 +43,16 @@ public class ChatToolRegistry
         "create_work_item",
         "update_work_item",
         "delete_work_item",
+    };
+
+    private static readonly HashSet<string> GlobalOnlyTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "list_github_repos",
+        "create_project",
+    };
+
+    private static readonly HashSet<string> AlwaysAvailableWriteTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "create_project",
     };
 }

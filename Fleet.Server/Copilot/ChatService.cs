@@ -3,6 +3,7 @@ using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.Options;
 
@@ -15,9 +16,11 @@ public class ChatService(
     IAuthService authService,
     IOptions<LLMOptions> llmOptions,
     ILogger<ChatService> logger,
-    IUsageLedgerService? usageLedgerService = null) : IChatService
+    IUsageLedgerService? usageLedgerService = null,
+    IServerEventPublisher? eventPublisher = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
+    private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
 
     private static readonly Lazy<string> SystemPromptLazy = new(() =>
     {
@@ -101,6 +104,9 @@ public class ChatService(
             ["GenerateWorkItems"] = generateWorkItems
         });
 
+        if (generateWorkItems && IsGlobalScope(projectId))
+            throw new InvalidOperationException("Work-item generation is only available in project-scoped chat sessions.");
+
         logger.CopilotMessageSending(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging(), generateWorkItems);
         var config = llmOptions.Value;
 
@@ -118,6 +124,8 @@ public class ChatService(
             await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
             chargedWorkItemRun = true;
         }
+
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
 
         // 2. Load full session history for context
         var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
@@ -141,7 +149,8 @@ public class ChatService(
         //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
         var toolDefs = toolRegistry.ToLLMDefinitions(
             includeWriteTools: generateWorkItems,
-            bulkOnly: generateWorkItems);
+            bulkOnly: generateWorkItems,
+            includeGlobalRepoTools: IsGlobalScope(projectId));
 
         // 4. Auto-name the session before generation starts (fast Haiku call)
         if (generateWorkItems)
@@ -175,6 +184,7 @@ public class ChatService(
                 var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
                 await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                 return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
             }
@@ -185,6 +195,7 @@ public class ChatService(
                 var errorMsg = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantError);
                 await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                 return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
             }
@@ -235,6 +246,9 @@ public class ChatService(
                         ToolCallId = toolCall.Id,
                         ToolName = toolCall.Name,
                     });
+
+                    await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                    await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
                 }
 
                 if (totalToolCalls > config.MaxToolCallsTotal)
@@ -252,6 +266,7 @@ public class ChatService(
             logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
             await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
             return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
         }
 
@@ -261,6 +276,7 @@ public class ChatService(
             projectId, sessionId, "assistant",
             "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
         await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
         await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
         return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
     }
@@ -281,6 +297,80 @@ public class ChatService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to clear IsGenerating flag for session {SessionId}", sessionId.SanitizeForLogging());
+        }
+    }
+
+    private async Task PublishChatUpdatedAsync(int userId, string projectId, string sessionId)
+    {
+        if (_eventPublisher is null)
+            return;
+
+        try
+        {
+            if (IsGlobalScope(projectId))
+            {
+                await _eventPublisher.PublishUserEventAsync(
+                    userId,
+                    ServerEventTopics.ChatUpdated,
+                    new { projectId = (string?)null, sessionId });
+                return;
+            }
+
+            await _eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId });
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to publish chat update event for session {SessionId}", sessionId.SanitizeForLogging());
+        }
+    }
+
+    private async Task PublishWriteSideEffectsAsync(
+        int userId,
+        string projectId,
+        string sessionId,
+        string toolName,
+        bool isWriteTool)
+    {
+        if (!isWriteTool || _eventPublisher is null)
+            return;
+
+        try
+        {
+            if (IsGlobalScope(projectId))
+            {
+                if (string.Equals(toolName, "create_project", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _eventPublisher.PublishUserEventAsync(
+                        userId,
+                        ServerEventTopics.ProjectsUpdated,
+                        new { projectId = (string?)null, sessionId, toolName });
+                }
+
+                return;
+            }
+
+            await _eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, sessionId, toolName });
+
+            await _eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId, sessionId, toolName });
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(
+                ex,
+                "Failed to publish write side-effect events for tool {ToolName} in session {SessionId}",
+                toolName.SanitizeForLogging(),
+                sessionId.SanitizeForLogging());
         }
     }
 
@@ -383,11 +473,26 @@ public class ChatService(
 
     private async Task<string> BuildSystemPromptAsync(string projectId, string sessionId)
     {
+        var scopePrompt = IsGlobalScope(projectId)
+            ? """
+            ## Scope
+            You are in global workspace mode (no specific project is open).
+            You may read across the user's projects and repositories, but do not attempt to generate or modify work items.
+            """
+            : $"""
+            ## Scope
+            You are in project-scoped mode for project id '{projectId}'.
+            Keep all analysis and actions constrained to this active project.
+            """;
+
         var attachments = await chatSessionRepository.GetAttachmentsBySessionIdAsync(projectId, sessionId) ?? [];
         if (attachments.Count == 0)
-            return SystemPrompt;
+            return $"{SystemPrompt}\n\n{scopePrompt}";
 
         var builder = new System.Text.StringBuilder(SystemPrompt);
+        builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine(scopePrompt);
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine("## Uploaded Reference Documents");
@@ -486,4 +591,7 @@ public class ChatService(
         logger.CopilotAttachmentDeleting(attachmentId.SanitizeForLogging());
         return await chatSessionRepository.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
     }
+
+    private static bool IsGlobalScope(string projectId)
+        => string.IsNullOrWhiteSpace(projectId);
 }

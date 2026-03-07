@@ -42,6 +42,14 @@ public class ApiActionLoggingFilter(ILogger<ApiActionLoggingFilter> logger) : IA
 
         stopwatch.Stop();
 
+        if (executedContext.Exception is OperationCanceledException &&
+            !executedContext.ExceptionHandled &&
+            executedContext.HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.ActionCanceled(actionName.SanitizeForLogging(), stopwatch.ElapsedMilliseconds);
+            return;
+        }
+
         if (executedContext.Exception is not null && !executedContext.ExceptionHandled)
         {
             logger.ActionFailed(executedContext.Exception, actionName.SanitizeForLogging(), stopwatch.ElapsedMilliseconds);

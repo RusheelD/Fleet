@@ -1,5 +1,7 @@
+using Fleet.Server.Auth;
 using Fleet.Server.Controllers;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Fleet.Server.WorkItems;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -10,6 +12,8 @@ namespace Fleet.Server.Tests.Controllers;
 public class WorkItemsControllerTests
 {
     private Mock<IWorkItemService> _service = null!;
+    private Mock<IAuthService> _authService = null!;
+    private Mock<IServerEventPublisher> _eventPublisher = null!;
     private WorkItemsController _sut = null!;
 
     private const string ProjectId = "proj-1";
@@ -18,7 +22,10 @@ public class WorkItemsControllerTests
     public void Setup()
     {
         _service = new Mock<IWorkItemService>();
-        _sut = new WorkItemsController(_service.Object);
+        _authService = new Mock<IAuthService>();
+        _eventPublisher = new Mock<IServerEventPublisher>();
+        _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
+        _sut = new WorkItemsController(_service.Object, _authService.Object, _eventPublisher.Object);
     }
 
     [TestMethod]

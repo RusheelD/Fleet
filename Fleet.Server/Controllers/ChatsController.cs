@@ -1,6 +1,7 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Copilot;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,10 @@ namespace Fleet.Server.Controllers;
 [ApiController]
 [Route("api/projects/{projectId}/chat")]
 [ServiceFilter(typeof(ProjectOwnershipFilter))]
-public class ChatsController(IChatService chatService) : ControllerBase
+public class ChatsController(
+    IChatService chatService,
+    IAuthService authService,
+    IServerEventPublisher eventPublisher) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetChatData(string projectId)
@@ -30,6 +34,12 @@ public class ChatsController(IChatService chatService) : ControllerBase
     public async Task<IActionResult> CreateSession(string projectId, [FromBody] CreateSessionRequest request)
     {
         var session = await chatService.CreateSessionAsync(projectId, request.Title);
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.ChatUpdated,
+            new { projectId, sessionId = session.Id });
         return Created($"/api/projects/{projectId}/chat/sessions/{session.Id}", session);
     }
 
@@ -37,6 +47,15 @@ public class ChatsController(IChatService chatService) : ControllerBase
     public async Task<IActionResult> DeleteSession(string projectId, string sessionId)
     {
         var deleted = await chatService.DeleteSessionAsync(projectId, sessionId);
+        if (deleted)
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId });
+        }
         return deleted ? NoContent() : NotFound();
     }
 
@@ -44,6 +63,26 @@ public class ChatsController(IChatService chatService) : ControllerBase
     public async Task<IActionResult> SendMessage(string projectId, string sessionId, [FromBody] SendMessageRequest request)
     {
         var response = await chatService.SendMessageAsync(projectId, sessionId, request.Content, request.GenerateWorkItems);
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.ChatUpdated,
+            new { projectId, sessionId });
+
+        if (request.GenerateWorkItems)
+        {
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, sessionId });
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId });
+        }
+
         return Ok(response);
     }
 
@@ -73,6 +112,12 @@ public class ChatsController(IChatService chatService) : ControllerBase
         var content = await reader.ReadToEndAsync();
 
         var attachment = await chatService.UploadAttachmentAsync(projectId, sessionId, file.FileName, content);
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.ChatUpdated,
+            new { projectId, sessionId, attachmentId = attachment.Id });
         return Created($"/api/projects/{projectId}/chat/sessions/{sessionId}/attachments/{attachment.Id}", attachment);
     }
 
@@ -80,6 +125,15 @@ public class ChatsController(IChatService chatService) : ControllerBase
     public async Task<IActionResult> DeleteAttachment(string projectId, string sessionId, string attachmentId)
     {
         var deleted = await chatService.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
+        if (deleted)
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId, attachmentId });
+        }
         return deleted ? NoContent() : NotFound();
     }
 }

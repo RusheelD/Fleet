@@ -14,5 +14,7 @@ public record UpdateWorkItemRequest(
     string? AssignmentMode = null,
     int? AssignedAgentCount = null,
     string? AcceptanceCriteria = null,
-    string? LinkedPullRequestUrl = null
+    string? LinkedPullRequestUrl = null,
+    string? LastObservedPullRequestState = null,
+    string? LastObservedPullRequestUrl = null
 );

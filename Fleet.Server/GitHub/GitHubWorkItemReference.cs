@@ -9,5 +9,7 @@ public record GitHubWorkItemReference(
     string PullRequestTitle,
     bool IsFixReference,
     bool IsMerged,
-    DateTimeOffset UpdatedAt
+    DateTimeOffset UpdatedAt,
+    bool IsOpen = false,
+    bool IsDraft = false
 );

@@ -2,6 +2,7 @@ using Fleet.Server.Agents;
 using Fleet.Server.Auth;
 using Fleet.Server.Controllers;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 
@@ -13,6 +14,7 @@ public class AgentsControllerTests
     private Mock<IAgentService> _agentService = null!;
     private Mock<IAgentOrchestrationService> _orchestrationService = null!;
     private Mock<IAuthService> _authService = null!;
+    private Mock<IServerEventPublisher> _eventPublisher = null!;
     private AgentsController _sut = null!;
 
     private const string ProjectId = "proj-1";
@@ -24,8 +26,13 @@ public class AgentsControllerTests
         _agentService = new Mock<IAgentService>();
         _orchestrationService = new Mock<IAgentOrchestrationService>();
         _authService = new Mock<IAuthService>();
+        _eventPublisher = new Mock<IServerEventPublisher>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(UserId);
-        _sut = new AgentsController(_agentService.Object, _orchestrationService.Object, _authService.Object);
+        _sut = new AgentsController(
+            _agentService.Object,
+            _orchestrationService.Object,
+            _authService.Object,
+            _eventPublisher.Object);
     }
 
     [TestMethod]
@@ -178,6 +185,17 @@ public class AgentsControllerTests
             .ReturnsAsync(docs);
 
         var result = await _sut.GetExecutionDocumentation(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task ClearLogs_ReturnsOk()
+    {
+        _agentService.Setup(s => s.ClearLogsAsync(ProjectId))
+            .ReturnsAsync(5);
+
+        var result = await _sut.ClearLogs(ProjectId);
 
         Assert.IsInstanceOfType<OkObjectResult>(result);
     }

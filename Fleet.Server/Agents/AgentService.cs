@@ -18,4 +18,10 @@ public class AgentService(
         logger.AgentsLogsRetrieving(projectId.SanitizeForLogging());
         return await agentTaskRepository.GetLogsByProjectIdAsync(projectId);
     }
+
+    public async Task<int> ClearLogsAsync(string projectId)
+    {
+        logger.LogInformation("Clearing agent logs for project {ProjectId}", projectId.SanitizeForLogging());
+        return await agentTaskRepository.ClearLogsByProjectIdAsync(projectId);
+    }
 }

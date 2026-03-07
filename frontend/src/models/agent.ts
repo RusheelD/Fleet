@@ -14,7 +14,7 @@ export interface AgentExecution {
 
 export interface AgentInfo {
   role: string
-  status: 'running' | 'completed' | 'idle' | 'failed'
+  status: 'running' | 'completed' | 'idle' | 'failed' | 'cancelled'
   currentTask: string
   progress: number
 }
@@ -25,4 +25,5 @@ export interface LogEntry {
   level: 'info' | 'warn' | 'error' | 'success'
   message: string
   isDetailed: boolean
+  executionId?: string | null
 }

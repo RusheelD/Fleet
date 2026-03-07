@@ -15,7 +15,7 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
 
         return entities.Select(e => new AgentExecutionDto(
             e.Id, e.WorkItemId, e.WorkItemTitle, e.Status,
-            e.Agents.Select(a => new AgentInfoDto(a.Role, a.Status, a.CurrentTask, a.Progress)).ToArray(),
+            NormalizeAgentsForExecutionStatus(e).ToArray(),
             e.StartedAt, ComputeDuration(e), e.Progress, e.BranchName, e.PullRequestUrl, e.CurrentPhase
         )).ToList();
     }
@@ -25,9 +25,18 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         var entities = await context.LogEntries
             .AsNoTracking()
             .Where(l => l.ProjectId == projectId)
+            .OrderBy(l => l.Time)
+            .ThenBy(l => l.Id)
             .ToListAsync();
 
-        return entities.Select(l => new LogEntryDto(l.Time, l.Agent, l.Level, l.Message, l.IsDetailed)).ToList();
+        return entities.Select(l => new LogEntryDto(l.Time, l.Agent, l.Level, l.Message, l.IsDetailed, l.ExecutionId)).ToList();
+    }
+
+    public Task<int> ClearLogsByProjectIdAsync(string projectId)
+    {
+        return context.LogEntries
+            .Where(l => l.ProjectId == projectId)
+            .ExecuteDeleteAsync();
     }
 
     public async Task<IReadOnlyList<DashboardAgentDto>> GetDashboardAgentsByProjectIdAsync(string projectId)
@@ -114,5 +123,22 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         return elapsed.TotalMinutes < 1
             ? $"{elapsed.TotalSeconds:F0}s"
             : $"{elapsed.TotalMinutes:F1}m";
+    }
+
+    private static IEnumerable<AgentInfoDto> NormalizeAgentsForExecutionStatus(Data.Entities.AgentExecution execution)
+    {
+        var executionStatus = execution.Status ?? string.Empty;
+        var forceTerminal = executionStatus.Equals("failed", StringComparison.OrdinalIgnoreCase) ||
+                            executionStatus.Equals("cancelled", StringComparison.OrdinalIgnoreCase);
+
+        if (!forceTerminal)
+        {
+            return execution.Agents.Select(a => new AgentInfoDto(a.Role, a.Status, a.CurrentTask, a.Progress));
+        }
+
+        var terminalStatus = executionStatus.ToLowerInvariant();
+        var terminalTask = terminalStatus == "failed" ? "Failed" : "Cancelled";
+
+        return execution.Agents.Select(a => new AgentInfoDto(a.Role, terminalStatus, terminalTask, 0));
     }
 }

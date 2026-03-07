@@ -1,14 +1,13 @@
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Text,
     Button,
-    Tooltip,
 } from '@fluentui/react-components'
 import {
     RocketRegular,
     ChevronLeftRegular,
-    NavigationRegular,
 } from '@fluentui/react-icons'
 
 const useStyles = makeStyles({
@@ -21,6 +20,11 @@ const useStyles = makeStyles({
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         position: 'relative',
         backgroundColor: tokens.colorNeutralBackground2,
+    },
+    sidebarHeaderCollapsed: {
+        justifyContent: 'center',
+        padding: 0,
+        gap: 0,
     },
     brandIcon: {
         color: tokens.colorPaletteDarkOrangeForeground1,
@@ -38,11 +42,6 @@ const useStyles = makeStyles({
         marginLeft: 'auto',
         flexShrink: 0,
     },
-    collapsedToggle: {
-        position: 'absolute' as const,
-        left: '6px',
-        top: '10px',
-    },
 })
 
 interface SidebarHeaderProps {
@@ -54,10 +53,16 @@ export function SidebarHeader({ expanded, onToggle }: SidebarHeaderProps) {
     const styles = useStyles()
 
     return (
-        <div className={styles.sidebarHeader}>
-            <RocketRegular className={styles.brandIcon} />
-            {expanded && <Text className={styles.brandName}>Fleet</Text>}
+        <div className={mergeClasses(styles.sidebarHeader, !expanded && styles.sidebarHeaderCollapsed)}>
             {expanded ? (
+                <>
+                    <RocketRegular className={styles.brandIcon} />
+                    <Text className={styles.brandName}>Fleet</Text>
+                </>
+            ) : (
+                <RocketRegular className={styles.brandIcon} />
+            )}
+            {expanded && (
                 <Button
                     appearance="subtle"
                     size="small"
@@ -66,17 +71,6 @@ export function SidebarHeader({ expanded, onToggle }: SidebarHeaderProps) {
                     className={styles.collapseButton}
                     aria-label="Collapse sidebar"
                 />
-            ) : (
-                <Tooltip content="Expand sidebar" relationship="label" positioning="after">
-                    <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={<NavigationRegular />}
-                        onClick={onToggle}
-                        className={styles.collapsedToggle}
-                        aria-label="Expand sidebar"
-                    />
-                </Tooltip>
             )}
         </div>
     )

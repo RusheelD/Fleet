@@ -8,7 +8,6 @@ import {
     Badge,
 } from '@fluentui/react-components'
 import {
-    NavigationRegular,
     SearchRegular,
     GridRegular,
     ChatRegular,
@@ -55,9 +54,21 @@ const useStyles = makeStyles({
     tierBadge: {
         textTransform: 'uppercase',
         fontWeight: 600,
-        letterSpacing: '0.03em',
+        letterSpacing: '0.04em',
+        fontSize: '11px',
+        lineHeight: '16px',
+        minHeight: '22px',
         paddingTop: '2px',
         paddingBottom: '2px',
+        paddingLeft: '8px',
+        paddingRight: '8px',
+    },
+    tierBadgeCompact: {
+        minHeight: '20px',
+        paddingTop: '1px',
+        paddingBottom: '1px',
+        paddingLeft: '7px',
+        paddingRight: '7px',
     },
     notificationWrapper: {
         position: 'relative',
@@ -115,13 +126,11 @@ interface BreadcrumbEntry {
 
 interface TopBarProps {
     breadcrumbs: BreadcrumbEntry[]
-    sidebarExpanded: boolean
-    onExpandSidebar: () => void
     chatOpen?: boolean
     onToggleChat?: () => void
 }
 
-export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar, chatOpen, onToggleChat }: TopBarProps) {
+export function TopBar({ breadcrumbs, chatOpen, onToggleChat }: TopBarProps) {
     const styles = useStyles()
     const navigate = useNavigate()
     const { user } = useAuth()
@@ -135,15 +144,6 @@ export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar, chatOpen
     return (
         <div className={mergeClasses(styles.topBar, isCompact && styles.topBarCompact)}>
             <div className={styles.topBarLeft}>
-                {!sidebarExpanded && (
-                    <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={<NavigationRegular />}
-                        onClick={onExpandSidebar}
-                        aria-label="Expand sidebar"
-                    />
-                )}
                 <div className={mergeClasses(styles.breadcrumb, isCompact && styles.breadcrumbCompact)}>
                     {breadcrumbs.map((crumb, i) => (
                         <span key={i} className={styles.breadcrumbItem}>
@@ -165,7 +165,12 @@ export function TopBar({ breadcrumbs, sidebarExpanded, onExpandSidebar, chatOpen
                 </div>
             </div>
             <div className={mergeClasses(styles.topBarRight, isCompact && styles.topBarRightCompact)}>
-                <Badge appearance="outline" color="brand" size={isCompact ? 'tiny' : 'small'} className={styles.tierBadge}>
+                <Badge
+                    appearance="outline"
+                    color="brand"
+                    size="small"
+                    className={mergeClasses(styles.tierBadge, isCompact && styles.tierBadgeCompact)}
+                >
                     {tier}
                 </Badge>
                 <Tooltip content="Search" relationship="label">

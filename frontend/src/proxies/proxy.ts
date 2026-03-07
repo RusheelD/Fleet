@@ -30,6 +30,19 @@ async function buildHeaders(): Promise<HeadersInit> {
   return headers
 }
 
+export async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers ?? undefined)
+  const token = tokenGetter ? await tokenGetter() : undefined
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  return fetch(url, {
+    ...init,
+    headers,
+  })
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let body: unknown

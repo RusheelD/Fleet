@@ -3,11 +3,11 @@
 #   .\restart-fleet.ps1
 #   .\restart-fleet.ps1 -Background
 
-Clear-Host
-
 param(
     [switch]$Background
 )
+
+Clear-Host
 
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $killScript = Join-Path $scriptRoot "kill-fleet.ps1"

@@ -1,6 +1,7 @@
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Notifications;
@@ -8,6 +9,7 @@ namespace Fleet.Server.Notifications;
 public class NotificationService(
     INotificationRepository notificationRepository,
     FleetDbContext db,
+    IServerEventPublisher eventPublisher,
     ILogger<NotificationService> logger) : INotificationService
 {
     public Task<IReadOnlyList<NotificationEventDto>> GetRecentAsync(int userId, bool unreadOnly)
@@ -41,7 +43,19 @@ public class NotificationService(
             return null;
         }
 
-        return await notificationRepository.CreateAsync(userId, projectId, type, title, message, executionId);
+        var created = await notificationRepository.CreateAsync(userId, projectId, type, title, message, executionId);
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.NotificationsUpdated,
+            new
+            {
+                projectId,
+                type,
+                notificationId = created.Id,
+            });
+
+        return created;
     }
 
     private static bool IsNotificationEnabled(string type, UserPreferences? preferences)

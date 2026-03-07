@@ -10,6 +10,7 @@ using Fleet.Server.Data.Entities;
 using Fleet.Server.LLM;
 using Fleet.Server.Models;
 using Fleet.Server.Notifications;
+using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.WorkItems;
 using Microsoft.EntityFrameworkCore;
@@ -31,9 +32,19 @@ public class AgentOrchestrationService(
     ILogger<AgentOrchestrationService> logger,
     IModelCatalog modelCatalog,
     INotificationService notificationService,
+    IServerEventPublisher eventPublisher,
     IUsageLedgerService? usageLedgerService = null) : IAgentOrchestrationService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
+    private const int MaxAgentRetries = 2;
+    private static readonly HashSet<string> InPrOrBeyondStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "In-PR",
+        "In-PR (AI)",
+        "Resolved",
+        "Resolved (AI)",
+        "Closed",
+    };
 
     /// <summary>
     /// Tracks CancellationTokenSources for active executions so they can be cancelled/paused externally.
@@ -246,9 +257,15 @@ public class AgentOrchestrationService(
         var codingRunCharged = false;
         try
         {
-            // 1. Load the work item and ALL of its descendants (recursively)
+            // 1. Load the work item and actionable descendants (recursively).
             var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, workItemNumber)
                 ?? throw new InvalidOperationException($"Work item #{workItemNumber} not found in project {projectId}.");
+
+            if (IsInPrOrBeyond(workItem.State))
+            {
+                throw new InvalidOperationException(
+                    $"Work item #{workItemNumber} is already in '{workItem.State}' and cannot be executed.");
+            }
 
             var childWorkItems = new List<Models.WorkItemDto>();
             await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
@@ -330,6 +347,13 @@ public class AgentOrchestrationService(
             db.AgentExecutions.Add(execution);
             await db.SaveChangesAsync(cancellationToken);
 
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.AgentsUpdated,
+                new { projectId, executionId },
+                cancellationToken);
+
             // 9. Mark the work item as in-progress
             await workItemRepository.UpdateAsync(projectId, workItemNumber,
                 new UpdateWorkItemRequest(
@@ -337,9 +361,33 @@ public class AgentOrchestrationService(
                     State: "Planning (AI)", AssignedTo: null, Tags: null, IsAI: null,
                     ParentWorkItemNumber: null, LevelId: null));
 
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, workItemNumber },
+                cancellationToken);
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId },
+                cancellationToken);
+
             // 10. Write an initial log entry
-            await WriteLogEntryAsync(db, projectId, "System", "info",
-                $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}");
+            await WriteLogEntryAsync(
+                db,
+                projectId,
+                "System",
+                "info",
+                $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}",
+                executionId: executionId);
+
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.LogsUpdated,
+                new { projectId, executionId },
+                cancellationToken);
 
             // 11. Fire-and-forget the pipeline on a background thread
             var cts = new CancellationTokenSource();
@@ -555,8 +603,38 @@ public class AgentOrchestrationService(
         var scopedDb = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
         var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
         var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
+        var scopedNotificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var scopedUsageLedgerService = scope.ServiceProvider.GetRequiredService<IUsageLedgerService>();
+        var scopedEventPublisher = scope.ServiceProvider.GetRequiredService<IServerEventPublisher>();
 
         IRepoSandbox? sandbox = null;
+
+        Task PublishAgentsUpdatedAsync() =>
+            scopedEventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.AgentsUpdated,
+                new { projectId, executionId });
+
+        Task PublishLogsUpdatedAsync() =>
+            scopedEventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.LogsUpdated,
+                new { projectId, executionId });
+
+        Task PublishWorkItemsUpdatedAsync() =>
+            scopedEventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, workItemNumber = workItem.WorkItemNumber });
+
+        Task PublishProjectsUpdatedAsync() =>
+            scopedEventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId });
 
         try
         {
@@ -622,6 +700,8 @@ public class AgentOrchestrationService(
                     Title: null, Description: null, Priority: null, Difficulty: null,
                     State: "In Progress (AI)", AssignedTo: null, Tags: null, IsAI: null,
                     ParentWorkItemNumber: null, LevelId: null));
+            await PublishWorkItemsUpdatedAsync();
+            await PublishProjectsUpdatedAsync();
 
             foreach (var group in pipeline)
             {
@@ -640,6 +720,7 @@ public class AgentOrchestrationService(
                     await UpdateExecutionAsync(scopedDb, executionId, currentPhase,
                         (double)completedRoles / totalRoles);
                 });
+                await PublishAgentsUpdatedAsync();
 
                 var notes = new List<string>();
                 if (SteeringNotes.TryGetValue(executionId, out var queue))
@@ -655,9 +736,15 @@ public class AgentOrchestrationService(
                 {
                     await WithDbLockAsync(async () =>
                     {
-                        await WriteLogEntryAsync(scopedDb, projectId, "System", "info",
-                            $"Applied {notes.Count} steering note(s) before phase group {currentPhase}");
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Applied {notes.Count} steering note(s) before phase group {currentPhase}",
+                            executionId: executionId);
                     });
+                    await PublishLogsUpdatedAsync();
                 }
 
                 var priorOutputs = phaseOutputs.ToList();
@@ -680,6 +767,13 @@ public class AgentOrchestrationService(
 
                     var batchResults = await Task.WhenAll(batchTasks);
                     executionOrderResults.AddRange(batchResults);
+
+                    var failedRole = batchResults.FirstOrDefault(r => !r.Success);
+                    if (failedRole is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Agent {failedRole.Role} failed after {failedRole.AttemptsUsed} attempt(s): {failedRole.Error ?? "Unknown error"}");
+                    }
                 }
 
                 foreach (var role in rolesInGroup)
@@ -698,114 +792,194 @@ public class AgentOrchestrationService(
                 string steeringBlock,
                 int groupCompletedBase)
             {
-                await WithDbLockAsync(async () =>
-                {
-                    await SetAgentRunningAsync(scopedDb, executionId, role.ToString(),
-                        GetPhaseTaskDescription(role));
-
-                    await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info",
-                        $"Starting phase: {GetPhaseTaskDescription(role)}");
-                });
-
-                var userMessage = BuildPhaseMessage(role, workItemContext, priorOutputs);
+                var maxAttempts = MaxAgentRetries + 1;
+                var baseUserMessage = BuildPhaseMessage(role, workItemContext, priorOutputs);
                 if (!string.IsNullOrWhiteSpace(steeringBlock))
-                    userMessage += steeringBlock;
+                    baseUserMessage += steeringBlock;
 
-                logger.LogInformation("Execution {ExecutionId}: starting phase {Role}",
-                    executionId, role);
+                var priorAttempts = new List<PhaseResult>();
 
-                PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
+                for (var attempt = 1; attempt <= maxAttempts; attempt++)
                 {
+                    var isRetry = attempt > 1;
+
                     await WithDbLockAsync(async () =>
                     {
-                        var overallProgress = ((double)(groupCompletedBase + roleIndex) + estimatedProgress) / totalRoles;
+                        await SetAgentRunningAsync(scopedDb, executionId, role.ToString(),
+                            isRetry
+                                ? $"{GetPhaseTaskDescription(role)} (retry {attempt - 1}/{MaxAgentRetries})"
+                                : GetPhaseTaskDescription(role));
 
-                        var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
-                        if (exec is null) return;
+                        var startMessage = isRetry
+                            ? $"Retrying phase (attempt {attempt}/{maxAttempts})"
+                            : $"Starting phase: {GetPhaseTaskDescription(role)}";
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            $"{role} Agent",
+                            "info",
+                            startMessage,
+                            executionId: executionId);
+                    });
+                    await PublishAgentsUpdatedAsync();
+                    await PublishLogsUpdatedAsync();
 
-                        var clampedOverall = Math.Clamp(overallProgress, 0, 0.99);
-                        exec.Progress = Math.Max(exec.Progress, clampedOverall);
+                    var userMessage = BuildRetryAwarePhaseMessage(baseUserMessage, role, priorAttempts);
+                    logger.LogInformation(
+                        "Execution {ExecutionId}: starting phase {Role} attempt {Attempt}/{MaxAttempts}",
+                        executionId,
+                        role,
+                        attempt,
+                        maxAttempts);
 
-                        var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
-                        if (agent is not null)
+                    PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
+                    {
+                        await WithDbLockAsync(async () =>
                         {
-                            if (!string.IsNullOrWhiteSpace(summary))
-                                agent.CurrentTask = summary;
+                            var overallProgress = ((double)(groupCompletedBase + roleIndex) + estimatedProgress) / totalRoles;
 
-                            var clampedRoleProgress = Math.Clamp(estimatedProgress, 0, 0.99);
-                            agent.Progress = Math.Max(agent.Progress, clampedRoleProgress);
-                        }
+                            var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
+                            if (exec is null) return;
 
+                            var clampedOverall = Math.Clamp(overallProgress, 0, 0.99);
+                            exec.Progress = Math.Max(exec.Progress, clampedOverall);
+
+                            var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
+                            if (agent is not null)
+                            {
+                                if (!string.IsNullOrWhiteSpace(summary))
+                                    agent.CurrentTask = summary;
+
+                                var clampedRoleProgress = Math.Clamp(estimatedProgress, 0, 0.99);
+                                agent.Progress = Math.Max(agent.Progress, clampedRoleProgress);
+                            }
+
+                            await scopedDb.SaveChangesAsync();
+
+                            var pct = (int)Math.Round(estimatedProgress * 100);
+                            var logMessage = string.IsNullOrWhiteSpace(summary)
+                                ? $"Progress: {pct}%"
+                                : $"Progress: {pct}% - {summary}";
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                $"{role} Agent",
+                                "info",
+                                logMessage,
+                                executionId: executionId);
+                        });
+                        await PublishAgentsUpdatedAsync();
+                        await PublishLogsUpdatedAsync();
+                    };
+
+                    PhaseToolCallLogger onToolCall = async (toolName, resultSnippet) =>
+                    {
+                        await WithDbLockAsync(async () =>
+                        {
+                            var logMsg = $"Tool: {toolName} -> {resultSnippet}";
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                $"{role} Agent",
+                                "info",
+                                logMsg,
+                                isDetailed: true,
+                                executionId: executionId);
+                        });
+                        await PublishLogsUpdatedAsync();
+                    };
+
+                    var maxTokens = GetMaxTokensForRole(role);
+                    var phaseStart = DateTime.UtcNow;
+                    var result = await scopedPhaseRunner.RunPhaseAsync(
+                        role,
+                        userMessage,
+                        toolContext,
+                        model,
+                        maxTokens,
+                        onProgress,
+                        onToolCall,
+                        externalCancellation);
+                    var phaseEnd = DateTime.UtcNow;
+                    var rolePhaseOrder = Interlocked.Increment(ref phaseOrder) - 1;
+
+                    await WithDbLockAsync(async () =>
+                    {
+                        var phaseResultEntity = new AgentPhaseResult
+                        {
+                            Role = role.ToString(),
+                            Output = result.Output,
+                            ToolCallCount = result.ToolCallCount,
+                            Success = result.Success,
+                            Error = result.Error,
+                            StartedAt = phaseStart,
+                            CompletedAt = phaseEnd,
+                            PhaseOrder = rolePhaseOrder,
+                            ExecutionId = executionId,
+                        };
+                        scopedDb.AgentPhaseResults.Add(phaseResultEntity);
                         await scopedDb.SaveChangesAsync();
 
-                        var pct = (int)Math.Round(estimatedProgress * 100);
-                        var logMessage = string.IsNullOrWhiteSpace(summary)
-                            ? $"Progress: {pct}%"
-                            : $"Progress: {pct}% - {summary}";
-                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMessage);
+                        await UpdateAgentInfoAsync(scopedDb, executionId, role.ToString(),
+                            result.Success ? "completed" : "failed", result.ToolCallCount);
+
+                        if (result.Success)
+                        {
+                            var successMsg = attempt == 1
+                                ? $"Phase completed ({result.ToolCallCount} tool calls)"
+                                : $"Phase completed after retry ({attempt}/{maxAttempts}, {result.ToolCallCount} tool calls)";
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                $"{role} Agent",
+                                "success",
+                                successMsg,
+                                executionId: executionId);
+                        }
+                        else
+                        {
+                            var errorText = result.Error ?? "Unknown error";
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                $"{role} Agent",
+                                "error",
+                                $"Phase failed on attempt {attempt}/{maxAttempts}: {errorText}",
+                                executionId: executionId);
+
+                            logger.LogWarning(
+                                "Execution {ExecutionId}: phase {Role} failed on attempt {Attempt}/{MaxAttempts}: {Error}",
+                                executionId,
+                                role,
+                                attempt,
+                                maxAttempts,
+                                errorText);
+                        }
                     });
-                };
-
-                PhaseToolCallLogger onToolCall = async (toolName, resultSnippet) =>
-                {
-                    await WithDbLockAsync(async () =>
-                    {
-                        var logMsg = $"Tool: {toolName} -> {resultSnippet}";
-                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "info", logMsg, isDetailed: true);
-                    });
-                };
-
-                var maxTokens = GetMaxTokensForRole(role);
-                var phaseStart = DateTime.UtcNow;
-                var result = await scopedPhaseRunner.RunPhaseAsync(
-                    role,
-                    userMessage,
-                    toolContext,
-                    model,
-                    maxTokens,
-                    onProgress,
-                    onToolCall,
-                    externalCancellation);
-                var phaseEnd = DateTime.UtcNow;
-                var rolePhaseOrder = Interlocked.Increment(ref phaseOrder) - 1;
-
-                await WithDbLockAsync(async () =>
-                {
-                    var phaseResultEntity = new AgentPhaseResult
-                    {
-                        Role = role.ToString(),
-                        Output = result.Output,
-                        ToolCallCount = result.ToolCallCount,
-                        Success = result.Success,
-                        Error = result.Error,
-                        StartedAt = phaseStart,
-                        CompletedAt = phaseEnd,
-                        PhaseOrder = rolePhaseOrder,
-                        ExecutionId = executionId,
-                    };
-                    scopedDb.AgentPhaseResults.Add(phaseResultEntity);
-                    await scopedDb.SaveChangesAsync();
-
-                    await UpdateAgentInfoAsync(scopedDb, executionId, role.ToString(),
-                        result.Success ? "completed" : "failed", result.ToolCallCount);
+                    await PublishAgentsUpdatedAsync();
+                    await PublishLogsUpdatedAsync();
 
                     if (result.Success)
                     {
-                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "success",
-                            $"Phase completed ({result.ToolCallCount} tool calls)");
+                        var summarized = await SummarizePhaseOutputAsync(role, result.Output, externalCancellation);
+                        return new RolePhaseExecutionResult(
+                            role,
+                            true,
+                            summarized,
+                            null,
+                            attempt);
                     }
-                    else
-                    {
-                        await WriteLogEntryAsync(scopedDb, projectId, $"{role} Agent", "error",
-                            $"Phase failed: {result.Error ?? "Unknown error"}");
 
-                        logger.LogWarning("Execution {ExecutionId}: phase {Role} failed: {Error}",
-                            executionId, role, result.Error);
-                    }
-                });
+                    priorAttempts.Add(result);
+                }
 
-                var summarized = await SummarizePhaseOutputAsync(role, result.Output, externalCancellation);
-                return new RolePhaseExecutionResult(role, summarized);
+                var finalError = priorAttempts.LastOrDefault()?.Error ?? "Unknown error";
+                return new RolePhaseExecutionResult(
+                    role,
+                    false,
+                    string.Empty,
+                    finalError,
+                    maxAttempts);
             }
 
             // Pipeline complete — final commit + push so the draft PR has all changes
@@ -826,17 +1000,22 @@ public class AgentOrchestrationService(
             if (prNumber > 0)
             {
                 await MarkPullRequestReadyAsync(accessToken, repoFullName, prNumber, externalCancellation);
-                await notificationService.PublishAsync(
+                await scopedNotificationService.PublishAsync(
                     userId,
                     projectId,
                     "pr_ready",
                     $"PR ready for #{workItem.WorkItemNumber}",
                     prUrl ?? "A pull request is ready for review.",
-                    executionId);
+                        executionId);
             }
 
+            var prLifecycle = prNumber > 0
+                ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, prNumber, externalCancellation)
+                : null;
+
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
-            await notificationService.PublishAsync(
+            await PublishAgentsUpdatedAsync();
+            await scopedNotificationService.PublishAsync(
                 userId,
                 projectId,
                 "execution_completed",
@@ -844,16 +1023,44 @@ public class AgentOrchestrationService(
                 workItem.Title,
                 executionId);
 
-            // Update work item state to reflect AI completion
-            await scopedWorkItemRepo.UpdateAsync(projectId, workItem.WorkItemNumber,
-                new UpdateWorkItemRequest(
-                    Title: null, Description: null, Priority: null, Difficulty: null,
-                    State: workItem.IsAI ? "In-PR (AI)" : "In-PR", AssignedTo: null, Tags: null, IsAI: null,
-                    ParentWorkItemNumber: null, LevelId: null, LinkedPullRequestUrl: prUrl));
+            // Update the assigned work item and all included descendants so they share PR-linked status.
+            var workItemsToUpdate = childWorkItems
+                .Append(workItem)
+                .GroupBy(item => item.WorkItemNumber)
+                .Select(group => group.First());
 
-            await WriteLogEntryAsync(scopedDb, projectId, "System", "success",
+            foreach (var itemToUpdate in workItemsToUpdate)
+            {
+                var targetState = ResolveStateFromPullRequestLifecycle(itemToUpdate.IsAI, prLifecycle);
+                var observedPullRequestState = ResolveObservedPullRequestState(prLifecycle);
+                var updated = await scopedWorkItemRepo.UpdateAsync(projectId, itemToUpdate.WorkItemNumber,
+                    new UpdateWorkItemRequest(
+                        Title: null, Description: null, Priority: null, Difficulty: null,
+                        State: targetState, AssignedTo: null, Tags: null, IsAI: null,
+                        ParentWorkItemNumber: null, LevelId: null, LinkedPullRequestUrl: prUrl,
+                        LastObservedPullRequestState: observedPullRequestState,
+                        LastObservedPullRequestUrl: prUrl));
+
+                if (updated is null)
+                {
+                    logger.LogWarning(
+                        "Execution {ExecutionId}: failed to update work item #{WorkItemNumber} to PR-linked state",
+                        executionId,
+                        itemToUpdate.WorkItemNumber);
+                }
+            }
+
+            await PublishWorkItemsUpdatedAsync();
+            await PublishProjectsUpdatedAsync();
+            await WriteLogEntryAsync(
+                scopedDb,
+                projectId,
+                "System",
+                "success",
                 $"Execution {executionId} completed successfully" +
-                (prUrl is not null ? $" — PR: {prUrl}" : ""));
+                (prUrl is not null ? $" -- PR: {prUrl}" : ""),
+                executionId: executionId);
+            await PublishLogsUpdatedAsync();
 
             logger.LogInformation("Execution {ExecutionId}: pipeline completed successfully", executionId);
         }
@@ -866,11 +1073,18 @@ public class AgentOrchestrationService(
             try
             {
                 await FinalizeExecutionAsync(scopedDb, executionId, finalStatus);
-                await WriteLogEntryAsync(scopedDb, projectId, "System", "warn",
-                    $"Execution {executionId} was {finalStatus} by user");
+                await PublishAgentsUpdatedAsync();
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "warn",
+                    $"Execution {executionId} was {finalStatus} by user",
+                    executionId: executionId);
+                await PublishLogsUpdatedAsync();
                 if (finalStatus == "paused")
                 {
-                    await notificationService.PublishAsync(
+                    await scopedNotificationService.PublishAsync(
                         userId,
                         projectId,
                         "execution_needs_input",
@@ -890,7 +1104,7 @@ public class AgentOrchestrationService(
 
             try
             {
-                await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.Coding, externalCancellation);
+                await scopedUsageLedgerService.RefundRunAsync(userId, MonthlyRunType.Coding, externalCancellation);
             }
             catch (Exception refundEx)
             {
@@ -902,15 +1116,23 @@ public class AgentOrchestrationService(
             try
             {
                 await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
-                await WriteLogEntryAsync(scopedDb, projectId, "System", "error",
-                    $"Execution {executionId} failed: {ex.Message}");
-                await notificationService.PublishAsync(
+                await PublishAgentsUpdatedAsync();
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "error",
+                    $"Execution {executionId} failed: {ex.Message}",
+                    executionId: executionId);
+                await PublishLogsUpdatedAsync();
+                await scopedNotificationService.PublishAsync(
                     userId,
                     projectId,
                     "execution_failed",
                     $"Execution failed for #{workItem.WorkItemNumber}",
                     ex.Message,
                     executionId);
+                await PublishProjectsUpdatedAsync();
             }
             catch (Exception dbEx)
             {
@@ -931,7 +1153,8 @@ public class AgentOrchestrationService(
     }
 
     /// <summary>
-    /// Recursively collects all descendants of a work item (children, grandchildren, etc.).
+    /// Recursively collects actionable descendants of a work item (children, grandchildren, etc.).
+    /// Descendants already in PR or beyond are excluded from the agent context.
     /// </summary>
     private async Task CollectDescendantsAsync(string projectId, int[] childNumbers, List<Models.WorkItemDto> results)
     {
@@ -940,6 +1163,9 @@ public class AgentOrchestrationService(
             var child = await workItemRepository.GetByWorkItemNumberAsync(projectId, childNumber);
             if (child is null) continue;
 
+            if (IsInPrOrBeyond(child.State))
+                continue;
+
             results.Add(child);
 
             if (child.ChildWorkItemNumbers.Length > 0)
@@ -947,9 +1173,12 @@ public class AgentOrchestrationService(
         }
     }
 
+    private static bool IsInPrOrBeyond(string? state)
+        => !string.IsNullOrWhiteSpace(state) && InPrOrBeyondStates.Contains(state);
+
     /// <summary>
     /// Builds the work item context string that serves as the base input for all phases.
-    /// Includes the parent work item and all its descendants with full details.
+    /// Includes the parent work item and all included descendants with full details.
     /// </summary>
     private static string BuildWorkItemContext(Models.WorkItemDto workItem, List<Models.WorkItemDto> allDescendants)
     {
@@ -1047,16 +1276,35 @@ public class AgentOrchestrationService(
             sb.AppendLine();
         }
 
-        sb.AppendLine($"You are the **{role}** agent. Execute your role as described in your system prompt.");
-        sb.AppendLine("Use your tools to explore the repository, understand the codebase, and make the necessary changes.");
+        if (role == AgentRole.Manager)
+        {
+            sb.AppendLine("You are the **Manager** agent. Your job is orchestration only: setup, planning handoff, and coordination.");
+            sb.AppendLine("Use only read/orchestration tools to understand scope and produce a clear handoff to the Planner.");
+            sb.AppendLine("Do NOT implement code, do NOT modify files, do NOT run coding commands, and do NOT commit.");
+        }
+        else
+        {
+            sb.AppendLine($"You are the **{role}** agent. Execute your role as described in your system prompt.");
+            sb.AppendLine("Use your tools to explore the repository, understand the codebase, and make the necessary changes.");
+        }
         sb.AppendLine();
-        sb.AppendLine("**IMPORTANT — A draft PR is already open. Use `commit_and_push` frequently to save progress.**");
+        if (role == AgentRole.Manager)
+            sb.AppendLine("**IMPORTANT — Manager is orchestration-only. Do not call `commit_and_push`.**");
+        else
+            sb.AppendLine("**IMPORTANT — A draft PR is already open. Use `commit_and_push` frequently to save progress.**");
+        sb.AppendLine();
+        sb.AppendLine("**Progress Reporting Requirements:**");
+        sb.AppendLine("- Call `report_progress` frequently with `percent_complete` and `summary`.");
+        sb.AppendLine("- Send a progress update at least every 2-3 tool calls while working.");
+        sb.AppendLine("- Include clear milestones (for example: analysis done, implementation started, tests passing).");
+        sb.AppendLine("- Send a final `report_progress` update at 100% when your phase is complete.");
         sb.AppendLine();
         sb.AppendLine("**Speed & Cost Constraints:**");
         sb.AppendLine("- Be extremely concise in your reasoning and output. No filler, no restating the problem.");
         sb.AppendLine("- Return ONLY the essential information: files changed, key decisions, errors, and instructions for the next phase.");
         sb.AppendLine("- Do NOT echo file contents you read — summarize what you learned in 1-2 sentences.");
-        sb.AppendLine("- When writing code, write only the changed/new code — do not repeat unchanged sections.");
+        if (role != AgentRole.Manager)
+            sb.AppendLine("- When writing code, write only the changed/new code — do not repeat unchanged sections.");
         sb.AppendLine("- **Call multiple tools at once** whenever possible. For example, read 3-5 files in a single response instead of one at a time. This runs them in parallel and is MUCH faster.");
         sb.AppendLine("- Plan your exploration: list the directory first, then read all relevant files in one batch.");
         sb.AppendLine("- Prefer search_files over reading entire files when you only need to find specific patterns.");
@@ -1075,7 +1323,56 @@ public class AgentOrchestrationService(
         }).ToList();
     }
 
-    private sealed record RolePhaseExecutionResult(AgentRole Role, string SummarizedOutput);
+    private static string BuildRetryAwarePhaseMessage(
+        string baseUserMessage,
+        AgentRole role,
+        IReadOnlyList<PhaseResult> priorAttempts)
+    {
+        if (priorAttempts.Count == 0)
+            return baseUserMessage;
+
+        var sb = new StringBuilder(baseUserMessage);
+        sb.AppendLine();
+        sb.AppendLine("## Retry Context");
+        sb.AppendLine($"You are retrying the {role} phase after one or more failed attempts.");
+        sb.AppendLine("Preserve existing repository progress and fix the failures below.");
+        sb.AppendLine();
+
+        for (var i = 0; i < priorAttempts.Count; i++)
+        {
+            var attempt = priorAttempts[i];
+            sb.AppendLine($"### Failed Attempt {i + 1}");
+            sb.AppendLine($"- Error: {attempt.Error ?? "Unknown error"}");
+            if (!string.IsNullOrWhiteSpace(attempt.Output))
+            {
+                sb.AppendLine("- Output excerpt:");
+                sb.AppendLine(TrimRetryOutput(attempt.Output));
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("Focus on resolving the failure and completing this phase.");
+        return sb.ToString();
+    }
+
+    private static string TrimRetryOutput(string output, int maxChars = 2_000)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return "(no output captured)";
+
+        var normalized = output.Replace("\r\n", "\n").Trim();
+        if (normalized.Length <= maxChars)
+            return normalized;
+
+        return $"{normalized[..maxChars]}\n\n[truncated]";
+    }
+
+    private sealed record RolePhaseExecutionResult(
+        AgentRole Role,
+        bool Success,
+        string SummarizedOutput,
+        string? Error,
+        int AttemptsUsed);
 
     private static class ModelKeys
     {
@@ -1179,7 +1476,13 @@ public class AgentOrchestrationService(
     /// Writes a log entry to the database for real-time pipeline observability.
     /// </summary>
     private static async Task WriteLogEntryAsync(
-        FleetDbContext scopedDb, string projectId, string agent, string level, string message, bool isDetailed = false)
+        FleetDbContext scopedDb,
+        string projectId,
+        string agent,
+        string level,
+        string message,
+        bool isDetailed = false,
+        string? executionId = null)
     {
         scopedDb.LogEntries.Add(new LogEntry
         {
@@ -1188,6 +1491,7 @@ public class AgentOrchestrationService(
             Level = level,
             Message = message,
             IsDetailed = isDetailed,
+            ExecutionId = executionId,
             ProjectId = projectId,
         });
         await scopedDb.SaveChangesAsync();
@@ -1198,7 +1502,7 @@ public class AgentOrchestrationService(
     /// </summary>
     private static string GetPhaseTaskDescription(AgentRole role) => role switch
     {
-        AgentRole.Manager => "Coordinating execution strategy",
+        AgentRole.Manager => "Setting up execution and handing off to planning",
         AgentRole.Planner => "Creating implementation plan",
         AgentRole.Contracts => "Defining interfaces and contracts",
         AgentRole.Backend => "Implementing backend changes",
@@ -1343,6 +1647,17 @@ public class AgentOrchestrationService(
         if (errorMessage is not null && exec.Duration == string.Empty)
         {
             exec.Duration = errorMessage.Length > 500 ? errorMessage[..500] : errorMessage;
+        }
+
+        if (status is "failed" or "cancelled")
+        {
+            var terminalTask = status == "failed" ? "Failed" : "Cancelled";
+            foreach (var agent in exec.Agents)
+            {
+                agent.Status = status;
+                agent.CurrentTask = terminalTask;
+                agent.Progress = 0;
+            }
         }
 
         await scopedDb.SaveChangesAsync();
@@ -1598,6 +1913,11 @@ public class AgentOrchestrationService(
         HttpStatusCode StatusCode,
         string ResponseBody);
 
+    private sealed record PullRequestLifecycle(
+        bool IsOpen,
+        bool IsDraft,
+        bool IsMerged);
+
     /// <summary>
     /// Marks a draft pull request as ready for review.
     /// </summary>
@@ -1626,6 +1946,83 @@ public class AgentOrchestrationService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to mark PR #{PrNumber} as ready for review (non-fatal)", prNumber);
+        }
+    }
+
+    private static string ResolveStateFromPullRequestLifecycle(bool isAi, PullRequestLifecycle? lifecycle)
+    {
+        // User-requested mapping:
+        // draft -> in-progress, open -> in-pr, closed -> new, merged -> resolved
+        if (lifecycle?.IsMerged == true)
+            return isAi ? "Resolved (AI)" : "Resolved";
+
+        if (lifecycle?.IsOpen == true && lifecycle.IsDraft == false)
+            return isAi ? "In-PR (AI)" : "In-PR";
+
+        if (lifecycle?.IsOpen == true && lifecycle.IsDraft == true)
+            return isAi ? "In Progress (AI)" : "In Progress";
+
+        if (lifecycle is null)
+            return isAi ? "In Progress (AI)" : "In Progress";
+
+        return "New";
+    }
+
+    private static string ResolveObservedPullRequestState(PullRequestLifecycle? lifecycle)
+    {
+        if (lifecycle?.IsMerged == true)
+            return "merged";
+
+        if (lifecycle?.IsOpen == true && lifecycle.IsDraft == true)
+            return "draft";
+
+        if (lifecycle?.IsOpen == true)
+            return "open";
+
+        return "closed";
+    }
+
+    private async Task<PullRequestLifecycle?> GetPullRequestLifecycleAsync(
+        string accessToken,
+        string repoFullName,
+        int prNumber,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient("GitHub");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"https://api.github.com/repos/{repoFullName}/pulls/{prNumber}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Failed to read PR lifecycle for #{PrNumber}: status={StatusCode}",
+                    prNumber,
+                    response.StatusCode);
+                return null;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var json = JsonSerializer.Deserialize<JsonElement>(body);
+            var state = json.TryGetProperty("state", out var stateProp) ? stateProp.GetString() : null;
+            var isOpen = string.Equals(state, "open", StringComparison.OrdinalIgnoreCase);
+            var isDraft = json.TryGetProperty("draft", out var draftProp) &&
+                          draftProp.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                          draftProp.GetBoolean();
+            var isMerged = json.TryGetProperty("merged_at", out var mergedAtProp) &&
+                           mergedAtProp.ValueKind != JsonValueKind.Null;
+
+            return new PullRequestLifecycle(isOpen, isDraft, isMerged);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve PR lifecycle for #{PrNumber}", prNumber);
+            return null;
         }
     }
 
@@ -1694,6 +2091,7 @@ public class AgentOrchestrationService(
         return slug.Trim('-').Length > 50 ? slug[..50].TrimEnd('-') : slug.Trim('-');
     }
 }
+
 
 
 

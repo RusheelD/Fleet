@@ -6,6 +6,7 @@ import {
     Text,
     Badge,
     Input,
+    Checkbox,
     mergeClasses,
 } from '@fluentui/react-components'
 import {
@@ -35,7 +36,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
+        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -59,6 +60,12 @@ const useStyles = makeStyles({
             color: tokens.colorNeutralForeground1,
         },
     },
+    selectHeaderCell: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
     headerText: {
         fontSize: '11px',
         fontWeight: tokens.fontWeightSemibold,
@@ -74,7 +81,7 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
+        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -94,6 +101,11 @@ const useStyles = makeStyles({
         ':hover': {
             backgroundColor: tokens.colorBrandBackground2,
         },
+    },
+    selectCell: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 
     /* ── Work Item Type column ─────────────────────────────── */
@@ -191,9 +203,16 @@ const useStyles = makeStyles({
     /* ── Tags column ───────────────────────────────────────── */
     tagsCell: {
         display: 'flex',
-        gap: '4px',
+        gap: '6px',
         flexWrap: 'nowrap',
         overflow: 'hidden',
+    },
+    tagBadge: {
+        fontSize: '12px',
+        lineHeight: '18px',
+        fontWeight: tokens.fontWeightMedium,
+        paddingLeft: '8px',
+        paddingRight: '8px',
     },
 })
 
@@ -201,11 +220,23 @@ interface BacklogListProps {
     items: WorkItem[]
     levelMap?: Map<number, WorkItemLevel>
     selectedItemId?: number | null
+    selectedWorkItemNumbers?: Set<number>
     onItemClick?: (item: WorkItem) => void
+    onToggleSelection?: (itemNumber: number, selected: boolean) => void
+    onToggleSelectionForItems?: (itemNumbers: number[], selected: boolean) => void
     onTitleChange?: (itemId: number, newTitle: string) => void
 }
 
-export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTitleChange }: BacklogListProps) {
+export function BacklogList({
+    items,
+    levelMap,
+    selectedItemId,
+    selectedWorkItemNumbers,
+    onItemClick,
+    onToggleSelection,
+    onToggleSelectionForItems,
+    onTitleChange,
+}: BacklogListProps) {
     const styles = useStyles()
 
     /* ── Sorting ───────────────────────────────────────────── */
@@ -258,6 +289,24 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
         return sorted
     }, [items, sortKey, sortDir, getLevel])
 
+    const visibleWorkItemNumbers = useMemo(
+        () => sortedItems.map((item) => item.workItemNumber),
+        [sortedItems],
+    )
+
+    const selectedVisibleCount = useMemo(
+        () => visibleWorkItemNumbers.filter((itemNumber) => selectedWorkItemNumbers?.has(itemNumber)).length,
+        [visibleWorkItemNumbers, selectedWorkItemNumbers],
+    )
+
+    const areAllVisibleSelected =
+        visibleWorkItemNumbers.length > 0 &&
+        selectedVisibleCount === visibleWorkItemNumbers.length
+
+    const isVisibleSelectionMixed =
+        selectedVisibleCount > 0 &&
+        !areAllVisibleSelected
+
     /* ── Inline title editing ──────────────────────────────── */
     const [editingId, setEditingId] = useState<number | null>(null)
     const [editTitle, setEditTitle] = useState('')
@@ -298,6 +347,18 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
         <div className={styles.container}>
             {/* header */}
             <div className={styles.header}>
+                <div className={styles.selectHeaderCell}>
+                    <Checkbox
+                        aria-label="Select visible work items"
+                        checked={areAllVisibleSelected ? true : (isVisibleSelectionMixed ? 'mixed' : false)}
+                        onChange={(_event, data) => {
+                            onToggleSelectionForItems?.(
+                                visibleWorkItemNumbers,
+                                data.checked === true,
+                            )
+                        }}
+                    />
+                </div>
                 <div className={styles.headerCell} onClick={() => handleSort('type')}>
                     <Caption1 className={styles.headerText}>Type</Caption1>
                     <SortIndicator col="type" />
@@ -340,6 +401,13 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                             if (!isEditing) onItemClick?.(item)
                         }}
                     >
+                        <div className={styles.selectCell} onClick={(event) => event.stopPropagation()}>
+                            <Checkbox
+                                aria-label={`Select work item #${item.workItemNumber}`}
+                                checked={selectedWorkItemNumbers?.has(item.workItemNumber) ?? false}
+                                onChange={(_event, data) => onToggleSelection?.(item.workItemNumber, data.checked === true)}
+                            />
+                        </div>
                         {/* Work Item Type */}
                         <div className={styles.typeCell}>
                             <Text className={styles.typeName}>
@@ -408,7 +476,13 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
                         {/* Tags */}
                         <div className={styles.tagsCell}>
                             {item.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} appearance="tint" size="tiny" color="informative">
+                                <Badge
+                                    key={tag}
+                                    appearance="tint"
+                                    size="small"
+                                    color="informative"
+                                    className={styles.tagBadge}
+                                >
                                     {tag}
                                 </Badge>
                             ))}
@@ -419,4 +493,3 @@ export function BacklogList({ items, levelMap, selectedItemId, onItemClick, onTi
         </div>
     )
 }
-

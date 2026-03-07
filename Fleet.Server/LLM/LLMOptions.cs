@@ -14,7 +14,7 @@ public class LLMOptions
     public string GenerateModel { get; set; } = "gpt-5.2-codex";
     public int MaxToolLoops { get; set; } = 25;
     public int MaxToolCallsTotal { get; set; } = 50;
-    public int TimeoutSeconds { get; set; } = 180;
+    public int TimeoutSeconds { get; set; } = 1800;
     /// <summary>Timeout for work-item generation requests (longer because many tools may be called).</summary>
     public int GenerateTimeoutSeconds { get; set; } = 1800;
     /// <summary>Max tool loops for work-item generation (higher to allow many creates).</summary>

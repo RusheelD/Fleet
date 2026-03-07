@@ -45,6 +45,14 @@ export function updateWorkItem(projectId: string, workItemNumber: number, reques
   return put<WorkItem>(`/api/projects/${projectId}/work-items/${workItemNumber}`, request)
 }
 
+export function bulkUpdateWorkItems(
+  projectId: string,
+  workItemNumbers: number[],
+  request: UpdateWorkItemRequest,
+): Promise<WorkItem[]> {
+  return Promise.all(workItemNumbers.map((workItemNumber) => updateWorkItem(projectId, workItemNumber, request)))
+}
+
 export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {
   return del<void>(`/api/projects/${projectId}/work-items/${workItemNumber}`)
 }

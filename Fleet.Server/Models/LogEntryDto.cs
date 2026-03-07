@@ -5,5 +5,6 @@ public record LogEntryDto(
     string Agent,
     string Level,
     string Message,
-    bool IsDetailed = false
+    bool IsDetailed = false,
+    string? ExecutionId = null
 );

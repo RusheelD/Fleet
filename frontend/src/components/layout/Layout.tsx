@@ -5,6 +5,8 @@ import {
     mergeClasses,
     tokens,
     Text,
+    Button,
+    Tooltip,
 } from '@fluentui/react-components'
 import {
     FolderRegular,
@@ -14,12 +16,13 @@ import {
     BoardRegular,
     BotRegular,
     HomeFilled,
+    NavigationRegular,
 } from '@fluentui/react-icons'
 
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useCurrentProject, usePreferences, ChatGeneratingProvider } from '../../hooks'
+import { useCurrentProject, usePreferences, useServerEvents, ChatGeneratingProvider } from '../../hooks'
 
 import type { NavItemConfig } from '../../models'
 
@@ -106,6 +109,25 @@ const useStyles = makeStyles({
     sidebarFooterCompact: {
         padding: '0.25rem',
     },
+    collapsedTopSlot: {
+        marginTop: '0.375rem',
+        marginLeft: '0.375rem',
+        marginRight: '0.375rem',
+        display: 'flex',
+        justifyContent: 'center',
+    },
+    collapsedTopSlotCompact: {
+        marginTop: '0.25rem',
+        marginLeft: '0.25rem',
+        marginRight: '0.25rem',
+    },
+    collapsedExpandButton: {
+        width: '100%',
+        minHeight: '34px',
+    },
+    collapsedExpandButtonCompact: {
+        minHeight: '30px',
+    },
 
     /* ───── Main content area ───── */
     content: {
@@ -157,15 +179,16 @@ export function Layout() {
     const [chatOpen, setChatOpen] = useState(false)
 
     const { projectId, projectTitle } = useCurrentProject()
+    useServerEvents(projectId)
 
     // Open chat pane when navigated with { state: { openChat: true } }
     useEffect(() => {
-        if (location.state?.openChat && projectId) {
+        if (location.state?.openChat) {
             setChatOpen(true)
             // Clear the state so it doesn't re-trigger on back/forward navigation
             window.history.replaceState({}, '')
         }
-    }, [location.state, projectId])
+    }, [location.state])
 
     // Keep live layout state synced with the settings toggle.
     useEffect(() => {
@@ -286,9 +309,26 @@ export function Layout() {
                         onToggle={() => setSidebarExpanded((prev) => !prev)}
                     />
 
-                    {/* Project selector (when viewing a project) */}
-                    {slug && (
+                    {/* Project selector (expanded only) */}
+                    {sidebarExpanded && slug && (
                         <ProjectSelector projectName={projectTitle ?? slug} expanded={sidebarExpanded} />
+                    )}
+                    {!sidebarExpanded && (
+                        <div className={mergeClasses(styles.collapsedTopSlot, preferences?.compactMode && styles.collapsedTopSlotCompact)}>
+                            <Tooltip content="Expand sidebar" relationship="label" positioning="after">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<NavigationRegular />}
+                                    onClick={() => setSidebarExpanded(true)}
+                                    className={mergeClasses(
+                                        styles.collapsedExpandButton,
+                                        preferences?.compactMode && styles.collapsedExpandButtonCompact,
+                                    )}
+                                    aria-label="Expand sidebar"
+                                />
+                            </Tooltip>
+                        </div>
                     )}
 
                     {/* Global nav */}
@@ -345,17 +385,15 @@ export function Layout() {
                     <div className={styles.content}>
                         <TopBar
                             breadcrumbs={breadcrumbs}
-                            sidebarExpanded={sidebarExpanded}
-                            onExpandSidebar={() => setSidebarExpanded(true)}
                             chatOpen={chatOpen}
                             onToggleChat={() => setChatOpen((prev) => !prev)}
                         />
 
-                        <div className={chatOpen && projectId ? styles.contentWithChat : styles.mainContent}>
+                        <div className={chatOpen ? styles.contentWithChat : styles.mainContent}>
                             <div className={styles.mainContent}>
                                 <Outlet />
                             </div>
-                            {chatOpen && projectId && (
+                            {chatOpen && (
                                 <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
                                     <div
                                         className={mergeClasses(

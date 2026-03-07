@@ -19,6 +19,9 @@ public static partial class LogMessages
     [LoggerMessage(EventId = 1102, Level = LogLevel.Error, Message = "HTTP request failed. elapsedMs={elapsedMs} traceId={traceId}")]
     public static partial void HttpRequestFailed(this ILogger logger, Exception exception, long elapsedMs, string traceId);
 
+    [LoggerMessage(EventId = 1103, Level = LogLevel.Information, Message = "HTTP request canceled by client. elapsedMs={elapsedMs} traceId={traceId}")]
+    public static partial void HttpRequestCanceled(this ILogger logger, long elapsedMs, string traceId);
+
     [LoggerMessage(EventId = 1200, Level = LogLevel.Information, Message = "Action started. actionName={actionName} traceId={traceId}")]
     public static partial void ActionStarted(this ILogger logger, string actionName, string traceId);
 
@@ -27,6 +30,9 @@ public static partial class LogMessages
 
     [LoggerMessage(EventId = 1202, Level = LogLevel.Error, Message = "Action failed. actionName={actionName} elapsedMs={elapsedMs}")]
     public static partial void ActionFailed(this ILogger logger, Exception exception, string actionName, long elapsedMs);
+
+    [LoggerMessage(EventId = 1203, Level = LogLevel.Information, Message = "Action canceled by client. actionName={actionName} elapsedMs={elapsedMs}")]
+    public static partial void ActionCanceled(this ILogger logger, string actionName, long elapsedMs);
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Outbound HTTP started. method={method} target={target}")]
     public static partial void OutboundHttpStarted(this ILogger logger, string method, string target);

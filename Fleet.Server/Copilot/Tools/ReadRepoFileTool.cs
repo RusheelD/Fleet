@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fleet.Server.Connections;
+using Fleet.Server.Models;
 using Fleet.Server.Projects;
 
 namespace Fleet.Server.Copilot.Tools;
@@ -22,7 +23,8 @@ public class ReadRepoFileTool(
     public string Name => "read_repo_file";
 
     public string Description =>
-        "Read the content of a specific file from the project's connected GitHub repository. " +
+        "Read a specific file from a GitHub repository. In project-scoped chat it is locked to the active project's repository. " +
+        "In global chat provide 'repo' or a project selector. " +
         "Provide the file path relative to the repository root (e.g. 'src/App.tsx'). " +
         "Only text files up to 100 KB are supported.";
 
@@ -30,6 +32,18 @@ public class ReadRepoFileTool(
         {
             "type": "object",
             "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub repository full name in owner/repo format (global chat only)."
+                },
+                "projectId": {
+                    "type": "string",
+                    "description": "Project id to resolve repository from (global chat only)."
+                },
+                "projectSlug": {
+                    "type": "string",
+                    "description": "Project slug to resolve repository from (global chat only)."
+                },
                 "path": {
                     "type": "string",
                     "description": "File path relative to the repository root (e.g. 'README.md', 'src/main.tsx')."
@@ -42,15 +56,25 @@ public class ReadRepoFileTool(
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
         var args = JsonSerializer.Deserialize<JsonElement>(argumentsJson);
+        var repoArg = args.TryGetProperty("repo", out var repoProp) ? repoProp.GetString() : null;
+        var projectIdArg = args.TryGetProperty("projectId", out var projectIdProp) ? projectIdProp.GetString() : null;
+        var projectSlugArg = args.TryGetProperty("projectSlug", out var projectSlugProp) ? projectSlugProp.GetString() : null;
         if (!args.TryGetProperty("path", out var pathProp) || string.IsNullOrWhiteSpace(pathProp.GetString()))
             return "Error: 'path' parameter is required.";
 
         var filePath = pathProp.GetString()!.Trim('/');
 
-        // Resolve the project's repo
-        var repoFullName = await GetRepoFullNameAsync(context.ProjectId);
+        // Resolve the requested repo from scope + arguments.
+        var repoFullName = await ResolveRepoFullNameAsync(context, repoArg, projectIdArg, projectSlugArg);
         if (repoFullName is null)
-            return "This project does not have a connected GitHub repository.";
+        {
+            if (context.IsProjectScoped && !string.IsNullOrWhiteSpace(repoArg))
+                return "Project-scoped chat can only access the active project's repository.";
+
+            return context.IsProjectScoped
+                ? "This project does not have a connected GitHub repository."
+                : "Error: provide 'repo', 'projectId', or 'projectSlug' in global chat.";
+        }
 
         // Get the user's GitHub token
         if (!int.TryParse(context.UserId, out var userId))
@@ -104,11 +128,49 @@ public class ReadRepoFileTool(
         }
     }
 
-    private async Task<string?> GetRepoFullNameAsync(string projectId)
+    private async Task<string?> ResolveRepoFullNameAsync(
+        ChatToolContext context,
+        string? repoArg,
+        string? projectIdArg,
+        string? projectSlugArg)
     {
         var projects = await projectService.GetAllProjectsAsync();
-        var project = projects.FirstOrDefault(p => p.Id == projectId);
-        return string.IsNullOrWhiteSpace(project?.Repo) ? null : project.Repo;
+
+        if (context.IsProjectScoped)
+        {
+            var activeProject = projects.FirstOrDefault(p => p.Id == context.ProjectId);
+            var activeRepo = activeProject?.Repo;
+            if (string.IsNullOrWhiteSpace(activeRepo))
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(repoArg) &&
+                !string.Equals(activeRepo, repoArg, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return activeRepo;
+        }
+
+        if (!string.IsNullOrWhiteSpace(repoArg))
+            return repoArg;
+
+        var selectedProject = ResolveProject(projects, projectIdArg, projectSlugArg);
+        return string.IsNullOrWhiteSpace(selectedProject?.Repo) ? null : selectedProject.Repo;
+    }
+
+    private static ProjectDto? ResolveProject(
+        IReadOnlyList<ProjectDto> projects,
+        string? projectId,
+        string? projectSlug)
+    {
+        if (!string.IsNullOrWhiteSpace(projectId))
+            return projects.FirstOrDefault(project => project.Id == projectId);
+
+        if (!string.IsNullOrWhiteSpace(projectSlug))
+            return projects.FirstOrDefault(project => project.Slug.Equals(projectSlug, StringComparison.OrdinalIgnoreCase));
+
+        return null;
     }
 
     private static async Task<T?> FetchJsonAsync<T>(HttpClient client, string token, string url, CancellationToken ct)

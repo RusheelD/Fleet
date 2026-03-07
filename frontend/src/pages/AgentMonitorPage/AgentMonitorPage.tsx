@@ -20,14 +20,15 @@ import {
     PlayRegular,
     CheckmarkCircleRegular,
     ErrorCircleRegular,
+    DismissCircleRegular,
     SearchRegular,
     ArrowClockwiseRegular,
     RocketRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
-import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation } from '../../proxies'
-import { useCurrentProject, useChatGenerating, usePreferences } from '../../hooks'
+import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs } from '../../proxies'
+import { useCurrentProject, usePreferences } from '../../hooks'
 import { openExecutionDocumentation } from './executionDocs'
 
 const useStyles = makeStyles({
@@ -125,17 +126,17 @@ const useStyles = makeStyles({
 export function AgentMonitorPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
-    const { isGenerating } = useChatGenerating()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
-    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
+    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
     const startExecution = useStartExecution(projectId)
     const cancelExecution = useCancelExecution(projectId)
     const pauseExecution = usePauseExecution(projectId)
     const retryExecution = useRetryExecution(projectId)
     const fetchExecutionDocumentation = useExecutionDocumentation(projectId)
+    const clearLogs = useClearLogs(projectId)
     const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
@@ -148,11 +149,17 @@ export function AgentMonitorPage() {
     const running = allExecutions.filter((e) => e.status === 'running')
     const completed = allExecutions.filter((e) => e.status === 'completed')
     const failed = allExecutions.filter((e) => e.status === 'failed')
+    const cancelled = allExecutions.filter((e) => e.status === 'cancelled')
+    const activeAgentCount = running.reduce(
+        (acc, execution) => acc + execution.agents.filter((agent) => agent.status === 'running').length,
+        0,
+    )
 
     const filteredByTab =
         tab === 'active' ? running :
             tab === 'completed' ? completed :
                 tab === 'failed' ? failed :
+                    tab === 'cancelled' ? cancelled :
                     allExecutions
 
     const filteredExecutions = useMemo(() => {
@@ -259,6 +266,24 @@ export function AgentMonitorPage() {
         })
     }
 
+    const handleClearLogs = () => {
+        clearLogs.mutate(undefined, {
+            onSuccess: (result) => {
+                dispatchToast(
+                    <Toast><ToastTitle>Cleared {result.deletedCount} log entr{result.deletedCount === 1 ? 'y' : 'ies'}</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchLogs()
+            },
+            onError: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Failed to clear logs</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
     if (loadingExec || loadingLogs) {
         return (
             <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
@@ -303,24 +328,40 @@ export function AgentMonitorPage() {
                     iconClassName={styles.summaryIconWarning}
                     value={running.length}
                     label="Running"
+                    onClick={() => setTab('active')}
+                    isActive={tab === 'active'}
                 />
                 <SummaryCard
                     icon={<CheckmarkCircleRegular />}
                     iconClassName={styles.summaryIconSuccess}
                     value={completed.length}
                     label="Completed"
+                    onClick={() => setTab('completed')}
+                    isActive={tab === 'completed'}
                 />
                 <SummaryCard
                     icon={<ErrorCircleRegular />}
                     iconClassName={styles.summaryIconDanger}
                     value={failed.length}
                     label="Failed"
+                    onClick={() => setTab('failed')}
+                    isActive={tab === 'failed'}
+                />
+                <SummaryCard
+                    icon={<DismissCircleRegular />}
+                    iconClassName={styles.summaryIconDanger}
+                    value={cancelled.length}
+                    label="Cancelled"
+                    onClick={() => setTab('cancelled')}
+                    isActive={tab === 'cancelled'}
                 />
                 <SummaryCard
                     icon={<BotRegular />}
                     iconClassName={styles.summaryIconBrand}
-                    value={allExecutions.reduce((acc, e) => acc + e.agents.filter((a) => a.status === 'running').length, 0)}
+                    value={activeAgentCount}
                     label="Active Agents"
+                    onClick={() => setTab('active')}
+                    isActive={tab === 'active'}
                 />
             </div>
 
@@ -333,6 +374,7 @@ export function AgentMonitorPage() {
                 <Tab value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
                 <Tab value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
                 <Tab value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>
+                <Tab value="cancelled" icon={<DismissCircleRegular />}>Cancelled ({cancelled.length})</Tab>
                 <Tab value="all">All ({allExecutions.length})</Tab>
             </TabList>
 
@@ -352,7 +394,13 @@ export function AgentMonitorPage() {
                     </div>
                 </div>
 
-                <LogPanel logs={allLogs} onRefresh={() => void refetchLogs()} />
+                <LogPanel
+                    logs={allLogs}
+                    executions={allExecutions}
+                    onRefresh={() => void refetchLogs()}
+                    onClear={handleClearLogs}
+                    isClearing={clearLogs.isPending}
+                />
             </div>
 
             <StartExecutionDialog

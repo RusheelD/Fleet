@@ -410,9 +410,11 @@ public class RepoSandbox : IRepoSandbox
         if (!fullPath.StartsWith(_repoRoot, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException($"Path escapes the sandbox: {relativePath}");
 
-        // Block access to .git directory
+        // Block access to the .git directory only (allow files like .gitignore).
         var repoRelPath = Path.GetRelativePath(_repoRoot, fullPath);
-        if (repoRelPath.StartsWith(".git", StringComparison.OrdinalIgnoreCase))
+        var normalizedRepoRelPath = repoRelPath.Replace('\\', '/');
+        if (normalizedRepoRelPath.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+            normalizedRepoRelPath.StartsWith(".git/", StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Access to .git directory is not allowed.");
 
         return fullPath;

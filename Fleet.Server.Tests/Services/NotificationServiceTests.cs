@@ -1,6 +1,7 @@
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Notifications;
+using Fleet.Server.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -49,7 +50,11 @@ public class NotificationServiceTests
         _dbContext.SaveChanges();
 
         _repository = new NotificationRepository(_dbContext);
-        _sut = new NotificationService(_repository, _dbContext, Mock.Of<ILogger<NotificationService>>());
+        _sut = new NotificationService(
+            _repository,
+            _dbContext,
+            Mock.Of<IServerEventPublisher>(),
+            Mock.Of<ILogger<NotificationService>>());
     }
 
     [TestMethod]

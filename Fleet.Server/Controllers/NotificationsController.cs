@@ -1,5 +1,6 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Notifications;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,8 @@ namespace Fleet.Server.Controllers;
 [Route("api/[controller]")]
 public class NotificationsController(
     INotificationService notificationService,
-    IAuthService authService) : ControllerBase
+    IAuthService authService,
+    IServerEventPublisher eventPublisher) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetNotifications([FromQuery] bool unreadOnly = false)
@@ -25,6 +27,10 @@ public class NotificationsController(
     {
         var userId = await authService.GetCurrentUserIdAsync();
         await notificationService.MarkAsReadAsync(userId, notificationId);
+        await eventPublisher.PublishUserEventAsync(
+            userId,
+            ServerEventTopics.NotificationsUpdated,
+            new { notificationId });
         return NoContent();
     }
 
@@ -33,6 +39,10 @@ public class NotificationsController(
     {
         var userId = await authService.GetCurrentUserIdAsync();
         await notificationService.MarkAllAsReadAsync(userId);
+        await eventPublisher.PublishUserEventAsync(
+            userId,
+            ServerEventTopics.NotificationsUpdated,
+            new { allRead = true });
         return NoContent();
     }
 }

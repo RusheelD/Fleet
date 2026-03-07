@@ -1,5 +1,6 @@
 using Fleet.Server.Agents;
 using Fleet.Server.Auth;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,8 @@ namespace Fleet.Server.Controllers;
 public class AgentsController(
     IAgentService agentService,
     IAgentOrchestrationService orchestrationService,
-    IAuthService authService) : ControllerBase
+    IAuthService authService,
+    IServerEventPublisher eventPublisher) : ControllerBase
 {
     [HttpGet("executions")]
     public async Task<IActionResult> GetExecutions(string projectId)
@@ -28,6 +30,19 @@ public class AgentsController(
         return Ok(logs);
     }
 
+    [HttpDelete("logs")]
+    public async Task<IActionResult> ClearLogs(string projectId)
+    {
+        var deletedCount = await agentService.ClearLogsAsync(projectId);
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.LogsUpdated,
+            new { projectId, deletedCount });
+        return Ok(new { deletedCount });
+    }
+
     /// <summary>
     /// Starts an agent execution pipeline for a work item.
     /// </summary>
@@ -37,6 +52,21 @@ public class AgentsController(
         var userId = await authService.GetCurrentUserIdAsync();
         var executionId = await orchestrationService.StartExecutionAsync(
             projectId, request.WorkItemNumber, userId);
+
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId });
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.WorkItemsUpdated,
+            new { projectId, workItemNumber = request.WorkItemNumber });
+        await eventPublisher.PublishUserEventAsync(
+            userId,
+            ServerEventTopics.ProjectsUpdated,
+            new { projectId });
 
         return Accepted(new { executionId });
     }
@@ -60,6 +90,12 @@ public class AgentsController(
     {
         var cancelled = await orchestrationService.CancelExecutionAsync(projectId, executionId);
         if (!cancelled) return NotFound();
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId, status = "cancelled" });
         return Ok(new { executionId, status = "cancelled" });
     }
 
@@ -71,6 +107,12 @@ public class AgentsController(
     {
         var paused = await orchestrationService.PauseExecutionAsync(projectId, executionId);
         if (!paused) return NotFound();
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId, status = "paused" });
         return Ok(new { executionId, status = "paused" });
     }
 
@@ -85,6 +127,12 @@ public class AgentsController(
 
         var accepted = await orchestrationService.SteerExecutionAsync(projectId, executionId, request.Note);
         if (!accepted) return NotFound();
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId, status = "steering_note_added" });
         return Accepted(new { executionId, status = "steering_note_added" });
     }
 
@@ -105,6 +153,21 @@ public class AgentsController(
         var newExecutionId = await orchestrationService.RetryExecutionAsync(projectId, executionId, userId);
         if (newExecutionId is null)
             return NotFound();
+
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId = newExecutionId, retriedFromExecutionId = executionId });
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.WorkItemsUpdated,
+            new { projectId });
+        await eventPublisher.PublishUserEventAsync(
+            userId,
+            ServerEventTopics.ProjectsUpdated,
+            new { projectId });
 
         return Accepted(new { executionId = newExecutionId });
     }

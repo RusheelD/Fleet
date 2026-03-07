@@ -1,15 +1,20 @@
 using System.Text.Json;
+using Fleet.Server.Models;
+using Fleet.Server.Projects;
 using Fleet.Server.WorkItems;
 
 namespace Fleet.Server.Copilot.Tools;
 
-/// <summary>Lists work items for the current project, with optional state filter.</summary>
-public class ListWorkItemsTool(IWorkItemService workItemService) : IChatTool
+/// <summary>Lists work items in the active project or across user projects (global scope).</summary>
+public class ListWorkItemsTool(
+    IWorkItemService workItemService,
+    IProjectService projectService) : IChatTool
 {
     public string Name => "list_work_items";
 
     public string Description =>
-        "List work items in the current project. Optionally filter by state (e.g., 'New', 'Active', 'In Progress', 'In-PR', 'Resolved', 'Closed'). Returns id, title, state, priority, assignedTo, and tags.";
+        "List work items. In project-scoped chat, returns only the active project's items. " +
+        "In global chat, optionally filter by projectId/projectSlug, otherwise returns items across all projects.";
 
     public string ParametersJsonSchema => """
         {
@@ -18,6 +23,14 @@ public class ListWorkItemsTool(IWorkItemService workItemService) : IChatTool
                 "state": {
                     "type": "string",
                     "description": "Optional filter: only return work items with this state."
+                },
+                "projectId": {
+                    "type": "string",
+                    "description": "Optional project id filter (global chat only)."
+                },
+                "projectSlug": {
+                    "type": "string",
+                    "description": "Optional project slug filter (global chat only)."
                 },
                 "limit": {
                     "type": "integer",
@@ -31,44 +44,86 @@ public class ListWorkItemsTool(IWorkItemService workItemService) : IChatTool
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
         var args = ParseArgs(argumentsJson);
-        var items = await workItemService.GetByProjectIdAsync(context.ProjectId);
+        var projects = await ResolveProjectsAsync(context, args);
+        if (projects.Count == 0)
+            return "No projects found for the requested scope.";
 
-        IEnumerable<object> result = items.Select(i => new
+        var records = new List<FlattenedWorkItem>();
+        foreach (var project in projects)
         {
-            Id = i.WorkItemNumber,
-            i.Title,
-            i.State,
-            i.Priority,
-            i.AssignedTo,
-            i.Tags,
-            i.IsAI,
-        });
+            var items = await workItemService.GetByProjectIdAsync(project.Id);
+            records.AddRange(items.Select(item => new FlattenedWorkItem(project, item)));
+        }
 
         if (!string.IsNullOrWhiteSpace(args.State))
-            result = result.Where(i => ((string)((dynamic)i).State).Equals(args.State, StringComparison.OrdinalIgnoreCase));
+        {
+            records = records
+                .Where(record => record.Item.State.Equals(args.State, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
 
-        var materialised = result.Take(args.Limit).ToList();
+        var materialized = records
+            .OrderByDescending(record => record.Item.WorkItemNumber)
+            .Take(args.Limit)
+            .Select(record => new
+            {
+                ProjectId = record.Project.Id,
+                ProjectSlug = record.Project.Slug,
+                ProjectTitle = record.Project.Title,
+                Id = record.Item.WorkItemNumber,
+                record.Item.Title,
+                record.Item.State,
+                record.Item.Priority,
+                record.Item.AssignedTo,
+                record.Item.Tags,
+                record.Item.IsAI,
+            })
+            .ToList();
 
-        return materialised.Count == 0
+        return materialized.Count == 0
             ? "No work items found matching the criteria."
-            : JsonSerializer.Serialize(materialised, new JsonSerializerOptions { WriteIndented = true });
+            : JsonSerializer.Serialize(materialized, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private async Task<List<ProjectDto>> ResolveProjectsAsync(ChatToolContext context, ListWorkItemsArgs args)
+    {
+        var projects = await projectService.GetAllProjectsAsync();
+
+        if (context.IsProjectScoped)
+            return projects.Where(project => project.Id == context.ProjectId).ToList();
+
+        if (!string.IsNullOrWhiteSpace(args.ProjectId))
+            return projects.Where(project => string.Equals(project.Id, args.ProjectId, StringComparison.Ordinal)).ToList();
+
+        if (!string.IsNullOrWhiteSpace(args.ProjectSlug))
+            return projects.Where(project => string.Equals(project.Slug, args.ProjectSlug, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        return projects.ToList();
     }
 
     private static ListWorkItemsArgs ParseArgs(string json)
     {
         try
         {
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            var state = root.TryGetProperty("state", out var s) ? s.GetString() : null;
-            var limit = root.TryGetProperty("limit", out var l) && l.TryGetInt32(out var lv) ? lv : 20;
-            return new ListWorkItemsArgs(state, limit);
+
+            var state = root.TryGetProperty("state", out var stateEl) ? stateEl.GetString() : null;
+            var projectId = root.TryGetProperty("projectId", out var projectIdEl) ? projectIdEl.GetString() : null;
+            var projectSlug = root.TryGetProperty("projectSlug", out var projectSlugEl) ? projectSlugEl.GetString() : null;
+            var limit = root.TryGetProperty("limit", out var limitEl) && limitEl.TryGetInt32(out var limitValue)
+                ? limitValue
+                : 20;
+
+            return new ListWorkItemsArgs(state, projectId, projectSlug, Math.Clamp(limit, 1, 200));
         }
         catch
         {
-            return new ListWorkItemsArgs(null, 20);
+            return new ListWorkItemsArgs(null, null, null, 20);
         }
     }
 
-    private record ListWorkItemsArgs(string? State, int Limit);
+    private sealed record ListWorkItemsArgs(string? State, string? ProjectId, string? ProjectSlug, int Limit);
+
+    private sealed record FlattenedWorkItem(ProjectDto Project, WorkItemDto Item);
 }

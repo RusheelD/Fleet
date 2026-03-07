@@ -115,6 +115,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         {
             builder.HasKey(l => l.Id);
             builder.Property(l => l.Id).ValueGeneratedOnAdd();
+            builder.HasIndex(l => new { l.ProjectId, l.ExecutionId });
 
             builder.HasOne(l => l.Project)
                 .WithMany(p => p.LogEntries)
@@ -138,6 +139,8 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         modelBuilder.Entity<ChatSession>(builder =>
         {
             builder.HasKey(s => s.Id);
+            builder.Property(s => s.OwnerId).IsRequired();
+            builder.HasIndex(s => new { s.OwnerId, s.ProjectId });
 
             builder.HasOne(s => s.Project)
                 .WithMany(p => p.ChatSessions)

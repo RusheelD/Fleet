@@ -16,5 +16,7 @@ public record WorkItemDto(
     string AssignmentMode = "auto",
     int? AssignedAgentCount = null,
     string AcceptanceCriteria = "",
-    string? LinkedPullRequestUrl = null
+    string? LinkedPullRequestUrl = null,
+    string? LastObservedPullRequestState = null,
+    string? LastObservedPullRequestUrl = null
 );

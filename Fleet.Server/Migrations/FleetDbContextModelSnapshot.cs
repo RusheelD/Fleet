@@ -199,8 +199,11 @@ namespace Fleet.Server.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("ProjectId")
+                    b.Property<string>("OwnerId")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProjectId")
                         .HasColumnType("text");
 
                     b.Property<string>("Timestamp")
@@ -214,6 +217,8 @@ namespace Fleet.Server.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("OwnerId", "ProjectId");
 
                     b.ToTable("ChatSessions");
                 });
@@ -298,6 +303,9 @@ namespace Fleet.Server.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("ExecutionId")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDetailed")
                         .HasColumnType("boolean");
 
@@ -318,6 +326,8 @@ namespace Fleet.Server.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ExecutionId");
 
                     b.HasIndex("ProjectId");
 
@@ -571,6 +581,12 @@ namespace Fleet.Server.Migrations
                     b.Property<bool>("IsAI")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LastObservedPullRequestState")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastObservedPullRequestUrl")
+                        .HasColumnType("text");
+
                     b.Property<int?>("LevelId")
                         .HasColumnType("integer");
 
@@ -733,8 +749,7 @@ namespace Fleet.Server.Migrations
                     b.HasOne("Fleet.Server.Data.Entities.Project", "Project")
                         .WithMany("ChatSessions")
                         .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Project");
                 });

@@ -1,6 +1,8 @@
 using Fleet.Server.Controllers;
 using Fleet.Server.Copilot;
 using Fleet.Server.Models;
+using Fleet.Server.Auth;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -11,6 +13,8 @@ namespace Fleet.Server.Tests.Controllers;
 public class ChatsControllerTests
 {
     private Mock<IChatService> _chatService = null!;
+    private Mock<IAuthService> _authService = null!;
+    private Mock<IServerEventPublisher> _eventPublisher = null!;
     private ChatsController _sut = null!;
 
     private const string ProjectId = "proj-1";
@@ -20,7 +24,10 @@ public class ChatsControllerTests
     public void Setup()
     {
         _chatService = new Mock<IChatService>();
-        _sut = new ChatsController(_chatService.Object);
+        _authService = new Mock<IAuthService>();
+        _eventPublisher = new Mock<IServerEventPublisher>();
+        _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
+        _sut = new ChatsController(_chatService.Object, _authService.Object, _eventPublisher.Object);
     }
 
     // ── GetChatData ──────────────────────────────────────

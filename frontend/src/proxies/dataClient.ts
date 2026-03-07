@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { useMemo } from 'react'
 import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug,
-  getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem,
+  getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
+  getExecutions, getLogs, clearLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
@@ -20,6 +20,11 @@ import type {
 import type { UserProfile, UserPreferences } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
+const WORK_ITEMS_POLL_MS = 15000
+const EXECUTIONS_POLL_MS = 10000
+const LOGS_POLL_MS = 10000
+const CHAT_DATA_POLL_MS = 10000
+const CHAT_MESSAGES_POLL_MS = 5000
 
 export type DataResult<T> = Pick<UseQueryResult<T>, 'data' | 'error' | 'isError' | 'isLoading' | 'status'>
 
@@ -40,6 +45,11 @@ export const useDataQuery = <TData>(
   }
 ) => {
   const queryClient = useQueryClient()
+  const hasRequiredParam = (param: unknown | undefined) => {
+    if (param === undefined || param === null) return false
+    if (typeof param === 'string') return param.trim().length > 0
+    return true
+  }
 
   const allParams = [...requiredParams, ...(optionalParams ?? [])]
   const allParamsString = JSON.stringify(allParams)
@@ -53,7 +63,7 @@ export const useDataQuery = <TData>(
     queryKey,
     queryFn: queryFunction,
     placeholderData: (queryOptions?.useCachedDataAsPlaceholder ?? true) ? (prev) => prev : undefined,
-    enabled: requiredParams.every(p => p !== undefined && p !== null) && (queryOptions?.enableFetch ?? true),
+    enabled: requiredParams.every(hasRequiredParam) && (queryOptions?.enableFetch ?? true),
     staleTime: queryOptions?.staleTime ?? FIVE_MINUTES_IN_MILLISECONDS,
     refetchOnMount: queryOptions?.refetchOnMount,
     refetchOnWindowFocus: queryOptions?.refetchOnWindowFocus ?? false,
@@ -134,7 +144,7 @@ export function useDeleteProject() {
 
 export function useWorkItems(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('work-items', () => getWorkItems(projectId!), [projectId], [], {
-    refetchInterval: options?.pollingInterval,
+    refetchInterval: options?.pollingInterval ?? WORK_ITEMS_POLL_MS,
   })
 }
 
@@ -147,11 +157,25 @@ export function useWorkItemLevels(projectId: string | undefined) {
 // ── Agents ────────────────────────────────────────────────
 
 export function useExecutions(projectId: string | undefined) {
-  return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], { refetchInterval: 5_000 })
+  return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], {
+    refetchInterval: EXECUTIONS_POLL_MS,
+  })
 }
 
 export function useLogs(projectId: string | undefined) {
-  return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], { refetchInterval: 5_000 })
+  return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], {
+    refetchInterval: LOGS_POLL_MS,
+  })
+}
+
+export function useClearLogs(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => clearLogs(projectId!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['logs'] })
+    },
+  })
 }
 
 export function useStartExecution(projectId: string | undefined) {
@@ -195,12 +219,14 @@ export function usePauseExecution(projectId: string | undefined) {
 // ── Chat ──────────────────────────────────────────────────
 
 export function useChatData(projectId: string | undefined) {
-  return useDataQuery('chat-data', () => getChatData(projectId!), [projectId])
+  return useDataQuery('chat-data', () => getChatData(projectId), [], [projectId], {
+    refetchInterval: CHAT_DATA_POLL_MS,
+  })
 }
 
 export function useChatMessages(projectId: string | undefined, sessionId: string | undefined, options?: { pollingInterval?: number | false }) {
-  return useDataQuery('chat-messages', () => getMessages(projectId!, sessionId!), [projectId, sessionId], [], {
-    refetchInterval: options?.pollingInterval,
+  return useDataQuery('chat-messages', () => getMessages(projectId, sessionId!), [sessionId], [projectId], {
+    refetchInterval: options?.pollingInterval ?? CHAT_MESSAGES_POLL_MS,
   })
 }
 
@@ -287,7 +313,7 @@ export function useGitHubRepos(enabled = true) {
 }
 
 export function useNotifications(unreadOnly = false) {
-  return useDataQuery('notifications', () => getNotifications(unreadOnly), [], [unreadOnly], { refetchInterval: 10_000 })
+  return useDataQuery('notifications', () => getNotifications(unreadOnly), [], [unreadOnly])
 }
 
 export function useMarkNotificationAsRead() {
@@ -382,9 +408,21 @@ export function useDeleteWorkItemLevel(projectId: string | undefined) {
 export function useCreateChatSession(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (title: string) => createChatSession(projectId!, title),
+    mutationFn: (title: string) => createChatSession(projectId, title),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
+export function useBulkUpdateWorkItems(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workItemNumbers, data }: { workItemNumbers: number[]; data: UpdateWorkItemRequest }) =>
+      bulkUpdateWorkItems(projectId!, workItemNumbers, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
     },
   })
 }
@@ -392,7 +430,7 @@ export function useCreateChatSession(projectId: string | undefined) {
 export function useDeleteSession(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (sessionId: string) => deleteChatSession(projectId!, sessionId),
+    mutationFn: (sessionId: string) => deleteChatSession(projectId, sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
     },
@@ -403,7 +441,7 @@ export function useSendMessage(projectId: string | undefined, sessionId: string 
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ content, generateWorkItems }: { content: string; generateWorkItems?: boolean }) =>
-      sendChatMessage(projectId!, sessionId!, content, generateWorkItems),
+      sendChatMessage(projectId, sessionId!, content, generateWorkItems),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
@@ -414,13 +452,13 @@ export function useSendMessage(projectId: string | undefined, sessionId: string 
 // ── Attachment Hooks ──────────────────────────────────────
 
 export function useAttachments(projectId: string | undefined, sessionId: string | undefined) {
-  return useDataQuery('chat-attachments', () => getAttachments(projectId!, sessionId!), [projectId, sessionId])
+  return useDataQuery('chat-attachments', () => getAttachments(projectId, sessionId!), [sessionId], [projectId])
 }
 
 export function useUploadAttachment(projectId: string | undefined, sessionId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => uploadAttachment(projectId!, sessionId!, file),
+    mutationFn: (file: File) => uploadAttachment(projectId, sessionId!, file),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
     },
@@ -430,7 +468,7 @@ export function useUploadAttachment(projectId: string | undefined, sessionId: st
 export function useDeleteAttachment(projectId: string | undefined, sessionId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (attachmentId: string) => deleteAttachment(projectId!, sessionId!, attachmentId),
+    mutationFn: (attachmentId: string) => deleteAttachment(projectId, sessionId!, attachmentId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
     },

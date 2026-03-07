@@ -3,10 +3,11 @@ import {
     Caption1,
     Text,
     Card,
+    tokens,
     mergeClasses,
 } from '@fluentui/react-components'
 import { usePreferences } from '../../hooks'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 
 const useStyles = makeStyles({
     summaryCard: {
@@ -45,6 +46,17 @@ const useStyles = makeStyles({
     captionBlock: {
         display: 'block' as const,
     },
+    summaryCardInteractive: {
+        cursor: 'pointer',
+        userSelect: 'none',
+        ':hover': {
+            backgroundColor: tokens.colorNeutralBackground1Hover,
+        },
+    },
+    summaryCardActive: {
+        backgroundColor: tokens.colorBrandBackground2,
+        boxShadow: `inset 0 0 0 1px ${tokens.colorBrandStroke1}`,
+    },
 })
 
 interface SummaryCardProps {
@@ -52,15 +64,41 @@ interface SummaryCardProps {
     iconClassName?: string
     value: number
     label: string
+    onClick?: () => void
+    isActive?: boolean
 }
 
-export function SummaryCard({ icon, iconClassName, value, label }: SummaryCardProps) {
+export function SummaryCard({ icon, iconClassName, value, label, onClick, isActive = false }: SummaryCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
+    const isInteractive = Boolean(onClick)
+
+    const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (!onClick) {
+            return
+        }
+
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onClick()
+        }
+    }
 
     return (
-        <Card className={mergeClasses(styles.summaryCard, isCompact && styles.summaryCardCompact)}>
+        <Card
+            className={mergeClasses(
+                styles.summaryCard,
+                isCompact && styles.summaryCardCompact,
+                isInteractive && styles.summaryCardInteractive,
+                isActive && styles.summaryCardActive,
+            )}
+            onClick={onClick}
+            onKeyDown={handleKeyDown}
+            role={isInteractive ? 'button' : undefined}
+            tabIndex={isInteractive ? 0 : undefined}
+            aria-pressed={isInteractive ? isActive : undefined}
+        >
             <span className={mergeClasses(styles.summaryIcon, isCompact && styles.summaryIconCompact, iconClassName)}>
                 {icon}
             </span>

@@ -303,10 +303,10 @@ public static class FleetDbSeeder
     private static void SeedChatSessions(FleetDbContext context)
     {
         context.ChatSessions.AddRange(
-            new ChatSession { Id = "c1", Title = "Product Spec Discussion", LastMessage = "I've generated 12 work items based on your specification...", Timestamp = "2 hours ago", IsActive = true, ProjectId = "1" },
-            new ChatSession { Id = "c2", Title = "Auth Implementation Plan", LastMessage = "The OAuth flow should follow these steps...", Timestamp = "1 day ago", IsActive = false, ProjectId = "1" },
-            new ChatSession { Id = "c3", Title = "Database Schema Design", LastMessage = "Here's the proposed PostgreSQL schema...", Timestamp = "3 days ago", IsActive = false, ProjectId = "1" },
-            new ChatSession { Id = "c4", Title = "API Endpoint Planning", LastMessage = "I recommend the following REST endpoints...", Timestamp = "1 week ago", IsActive = false, ProjectId = "1" }
+            new ChatSession { Id = "c1", OwnerId = "default", Title = "Product Spec Discussion", LastMessage = "I've generated 12 work items based on your specification...", Timestamp = "2 hours ago", IsActive = true, ProjectId = "1" },
+            new ChatSession { Id = "c2", OwnerId = "default", Title = "Auth Implementation Plan", LastMessage = "The OAuth flow should follow these steps...", Timestamp = "1 day ago", IsActive = false, ProjectId = "1" },
+            new ChatSession { Id = "c3", OwnerId = "default", Title = "Database Schema Design", LastMessage = "Here's the proposed PostgreSQL schema...", Timestamp = "3 days ago", IsActive = false, ProjectId = "1" },
+            new ChatSession { Id = "c4", OwnerId = "default", Title = "API Endpoint Planning", LastMessage = "I recommend the following REST endpoints...", Timestamp = "1 week ago", IsActive = false, ProjectId = "1" }
         );
     }
 
@@ -407,17 +407,17 @@ public static class FleetDbSeeder
                 },
                 new PlanData
                 {
-                    Name = "Pro", Icon = "diamond", Price = "$29", Period = "/month",
+                    Name = "Basic", Icon = "diamond", Price = "$200", Period = "/month",
                     Description = "For serious builders shipping fast",
                     Features = ["5 concurrent agents per task", "10 total agents", "Higher monthly credits", "Base + Mid-tier AI models", "Unlimited projects", "Priority support"],
-                    ButtonLabel = "Upgrade to Pro", IsCurrent = false, ButtonAppearance = "primary",
+                    ButtonLabel = "Upgrade to Basic", IsCurrent = false, ButtonAppearance = "primary",
                 },
                 new PlanData
                 {
-                    Name = "Team", Icon = "sparkle", Price = "$99", Period = "/month",
+                    Name = "Pro", Icon = "sparkle", Price = "$1000", Period = "/month",
                     Description = "Maximum power for teams and enterprises",
                     Features = ["10 concurrent agents per task", "25 total agents", "Highest monthly credits", "All AI models including premium", "Unlimited projects", "Priority support", "Team collaboration (coming soon)"],
-                    ButtonLabel = "Upgrade to Team", IsCurrent = false, ButtonAppearance = "primary",
+                    ButtonLabel = "Upgrade to Pro", IsCurrent = false, ButtonAppearance = "primary",
                 },
             ],
         });

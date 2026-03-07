@@ -3,6 +3,7 @@ namespace Fleet.Server.Data.Entities;
 public class ChatSession
 {
     public string Id { get; set; } = string.Empty;
+    public string OwnerId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string LastMessage { get; set; } = string.Empty;
     public string Timestamp { get; set; } = string.Empty;
@@ -11,9 +12,9 @@ public class ChatSession
     /// <summary>True while a generate-work-items request is in-flight for this session.</summary>
     public bool IsGenerating { get; set; }
 
-    // Foreign key
-    public string ProjectId { get; set; } = string.Empty;
-    public Project Project { get; set; } = null!;
+    // Foreign key (null for global chat sessions)
+    public string? ProjectId { get; set; }
+    public Project? Project { get; set; }
 
     // Navigation
     public List<ChatMessage> Messages { get; set; } = [];

@@ -14,6 +14,16 @@ var azureOpenAiModel =
     builder.Configuration["Secrets:AzureOpenAiModel"] ??
     builder.Configuration["LLM:Model"];
 
+var llmTimeoutSeconds =
+    builder.Configuration["Secrets:AzureOpenAiTimeoutSeconds"] ??
+    builder.Configuration["LLM:TimeoutSeconds"] ??
+    "1800";
+
+var llmGenerateTimeoutSeconds =
+    builder.Configuration["Secrets:AzureOpenAiGenerateTimeoutSeconds"] ??
+    builder.Configuration["LLM:GenerateTimeoutSeconds"] ??
+    llmTimeoutSeconds;
+
 var githubClientSecret =
     builder.Configuration["Secrets:GitHubClientSecret"] ??
     builder.Configuration["GitHub:ClientSecret"] ??
@@ -49,6 +59,9 @@ if (!string.IsNullOrWhiteSpace(azureOpenAiModel))
     server.WithEnvironment("LLM__Model", azureOpenAiModel);
     server.WithEnvironment("LLM__GenerateModel", azureOpenAiModel);
 }
+
+server.WithEnvironment("LLM__TimeoutSeconds", llmTimeoutSeconds);
+server.WithEnvironment("LLM__GenerateTimeoutSeconds", llmGenerateTimeoutSeconds);
 
 if (!string.IsNullOrWhiteSpace(githubClientSecret))
 {

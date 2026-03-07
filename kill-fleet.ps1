@@ -13,8 +13,8 @@ foreach ($p in $native) {
 # Kill dotnet-hosted Fleet processes (common when launched via `dotnet run`)
 $dotnetFleet = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" |
 Where-Object {
-    ($_.CommandLine -match 'Fleet\\Fleet\.AppHost') -or
-    ($_.CommandLine -match 'Fleet\\Fleet\.Server')
+    ($_.CommandLine -match 'Fleet\.AppHost') -or
+    ($_.CommandLine -match 'Fleet\.Server')
 }
 
 foreach ($p in $dotnetFleet) {

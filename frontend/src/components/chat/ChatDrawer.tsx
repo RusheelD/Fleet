@@ -61,7 +61,7 @@ const useStyles = makeStyles({
 })
 
 interface ChatDrawerProps {
-    projectId: string
+    projectId?: string
     onClose: () => void
 }
 
@@ -80,9 +80,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
-    const { data: messages } = useChatMessages(projectId, activeSession, {
-        pollingInterval: isThinking ? 3_000 : false,
-    })
+    const { data: messages } = useChatMessages(projectId, activeSession)
     const createSessionMutation = useCreateChatSession(projectId)
     const deleteSessionMutation = useDeleteSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
@@ -146,10 +144,16 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     }, [serverMessages, optimisticMessages])
     const suggestions = chatData?.suggestions ?? []
     const currentUserIdentity = resolveChatUserIdentity(user?.displayName, user?.email)
+    const allowGenerateWorkItems = Boolean(projectId)
 
-    // Auto-select first session when chat data loads
+    // Auto-select/reset active session when scope/session list changes.
     useEffect(() => {
-        if (!activeSession && sessions.length > 0) {
+        if (sessions.length === 0) {
+            setActiveSession(undefined)
+            return
+        }
+
+        if (!activeSession || !sessions.some(s => s.id === activeSession)) {
             setActiveSession(sessions[0].id)
         }
     }, [activeSession, sessions])
@@ -208,6 +212,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const handleSend = (generateWorkItems = false) => {
         const userContent = message.trim()
         if (isThinking || createSessionMutation.isPending) return
+        if (generateWorkItems && !allowGenerateWorkItems) return
         if (!userContent && !generateWorkItems) return
 
         // Auto-create a session if none exists, then send
@@ -305,8 +310,9 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                 value={message}
                 onChange={setMessage}
                 onSend={() => handleSend(false)}
-                onGenerate={() => handleSend(true)}
+                onGenerate={allowGenerateWorkItems ? () => handleSend(true) : undefined}
                 onFileSelect={handleFileSelect}
+                allowGenerate={allowGenerateWorkItems}
                 disabled={isThinking || createSessionMutation.isPending}
                 uploading={uploadMutation.isPending}
             />

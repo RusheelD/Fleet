@@ -3,6 +3,7 @@ using Fleet.Server.Copilot;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Models;
+using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,6 +18,7 @@ public class ChatServiceTests
     private Mock<ILLMClient> _llmClient = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IUsageLedgerService> _usageLedgerService = null!;
+    private Mock<IServerEventPublisher> _eventPublisher = null!;
     private Mock<ILogger<ChatService>> _logger = null!;
     private ChatToolRegistry _toolRegistry = null!;
     private IOptions<LLMOptions> _llmOptions = null!;
@@ -33,6 +35,7 @@ public class ChatServiceTests
         _llmClient = new Mock<ILLMClient>();
         _authService = new Mock<IAuthService>();
         _usageLedgerService = new Mock<IUsageLedgerService>();
+        _eventPublisher = new Mock<IServerEventPublisher>();
         _logger = new Mock<ILogger<ChatService>>();
 
         // Empty tool registry (no tools registered)
@@ -53,6 +56,10 @@ public class ChatServiceTests
             .Returns(Task.CompletedTask);
         _usageLedgerService.Setup(s => s.RefundRunAsync(It.IsAny<int>(), It.IsAny<MonthlyRunType>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _eventPublisher.Setup(s => s.PublishProjectEventAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _eventPublisher.Setup(s => s.PublishUserEventAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _sut = new ChatService(
             _chatRepo.Object,
@@ -61,7 +68,8 @@ public class ChatServiceTests
             _authService.Object,
             _llmOptions,
             _logger.Object,
-            _usageLedgerService.Object);
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
     }
 
     // ── GetChatDataAsync ─────────────────────────────────────
@@ -199,6 +207,15 @@ public class ChatServiceTests
         Assert.AreEqual("Hi there!", result.AssistantMessage.Content);
         Assert.AreEqual(0, result.ToolEvents.Length);
         Assert.IsNull(result.Error);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GlobalScopeGenerate_ThrowsInvalidOperation()
+    {
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+            _sut.SendMessageAsync(string.Empty, SessionId, "Hello", generateWorkItems: true));
+
+        _chatRepo.Verify(r => r.AddMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     [TestMethod]
@@ -456,6 +473,84 @@ public class ChatServiceTests
         Assert.IsNotNull(capturedRequest);
         Assert.IsTrue(capturedRequest.SystemPrompt.Contains("spec.md"));
         Assert.IsTrue(capturedRequest.SystemPrompt.Contains("Build authentication module."));
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_WithWriteTool_PublishesStreamingEvents()
+    {
+        var writeTool = new Mock<IChatTool>();
+        writeTool.Setup(t => t.Name).Returns("bulk_update_work_items");
+        writeTool.Setup(t => t.Description).Returns("Bulk update work items");
+        writeTool.Setup(t => t.ParametersJsonSchema).Returns("{}");
+        writeTool.Setup(t => t.IsWriteTool).Returns(true);
+        writeTool.Setup(t => t.ExecuteAsync(It.IsAny<string>(), It.IsAny<ChatToolContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Updated 1 work item.");
+
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool.Object]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Done", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done"))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall> { new("call-1", "bulk_update_work_items", "{}") };
+        var callCount = 0;
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                callCount++;
+                return callCount == 1
+                    ? new LLMResponse(null, toolCalls)
+                    : new LLMResponse("Done", null);
+            });
+
+        await sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+
+        _eventPublisher.Verify(
+            p => p.PublishProjectEventAsync(
+                UserId,
+                ProjectId,
+                ServerEventTopics.ChatUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+
+        _eventPublisher.Verify(
+            p => p.PublishProjectEventAsync(
+                UserId,
+                ProjectId,
+                ServerEventTopics.WorkItemsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+
+        _eventPublisher.Verify(
+            p => p.PublishUserEventAsync(
+                UserId,
+                ServerEventTopics.ProjectsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 }
 

@@ -11,6 +11,7 @@ using Fleet.Server.LLM;
 using Fleet.Server.Logging;
 using Fleet.Server.Notifications;
 using Fleet.Server.Projects;
+using Fleet.Server.Realtime;
 using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
@@ -185,22 +186,54 @@ builder.Services.Configure<ModelCatalogOptions>(builder.Configuration
     .GetSection($"{LLMOptions.SectionName}:{ModelCatalogOptions.SectionName}"));
 builder.Services.AddSingleton<IModelCatalog, ModelCatalog>();
 
-// Named HttpClient for LLM with extended timeouts (tool-calling loops can take time)
+var configuredLlmTimeoutSeconds = builder.Configuration.GetValue<int?>("LLM:TimeoutSeconds") ?? 1800;
+var llmRequestTimeout = TimeSpan.FromSeconds(Math.Max(600, configuredLlmTimeoutSeconds));
+var llmAttemptTimeout = TimeSpan.FromSeconds(Math.Clamp(configuredLlmTimeoutSeconds / 3, 300, 1800));
+var llmCircuitBreakerSamplingDuration = TimeSpan.FromSeconds(Math.Max(300, (int)Math.Ceiling(llmAttemptTimeout.TotalSeconds * 2)));
+
+builder.Services.PostConfigureAll<Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions>(options =>
+{
+    var attemptTimeout = options.AttemptTimeout.Timeout;
+    if (attemptTimeout <= TimeSpan.Zero || attemptTimeout == Timeout.InfiniteTimeSpan)
+    {
+        return;
+    }
+
+    var minimumSamplingDuration = TimeSpan.FromSeconds(Math.Ceiling(attemptTimeout.TotalSeconds * 2));
+    if (options.CircuitBreaker.SamplingDuration < minimumSamplingDuration)
+    {
+        options.CircuitBreaker.SamplingDuration = minimumSamplingDuration;
+    }
+});
+
+// Named HttpClient for LLM with extended timeouts (agent phases can run 10-30 minutes)
 builder.Services.AddHttpClient("LLM")
-    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(3))
+    .ConfigureHttpClient(client => client.Timeout = llmRequestTimeout)
     .AddStandardResilienceHandler(options =>
     {
-        options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(3);
-        options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(2);
+        options.TotalRequestTimeout.Timeout = llmRequestTimeout;
+        options.AttemptTimeout.Timeout = llmAttemptTimeout;
         options.Retry.MaxRetryAttempts = 2;
-        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(5);
+        options.CircuitBreaker.SamplingDuration = llmCircuitBreakerSamplingDuration;
     });
 
 builder.Services.AddSingleton<ILLMClient, AzureOpenAiClient>();
 
 // Chat tools (registered individually, collected by ChatToolRegistry)
 builder.Services.AddScoped<IChatTool, GetProjectInfoTool>();
+builder.Services.AddScoped<IChatTool, ListProjectsTool>();
+builder.Services.AddScoped<IChatTool, ListGitHubReposTool>();
+builder.Services.AddScoped<IChatTool, GetProjectDashboardTool>();
 builder.Services.AddScoped<IChatTool, ListWorkItemsTool>();
+builder.Services.AddScoped<IChatTool, ListWorkItemLevelsTool>();
+builder.Services.AddScoped<IChatTool, ListAgentExecutionsTool>();
+builder.Services.AddScoped<IChatTool, ListAgentLogsTool>();
+builder.Services.AddScoped<IChatTool, ListNotificationsTool>();
+builder.Services.AddScoped<IChatTool, GetSubscriptionTool>();
+builder.Services.AddScoped<IChatTool, SearchWorkspaceTool>();
+builder.Services.AddScoped<IChatTool, GetGitHubRepoStatsTool>();
+builder.Services.AddScoped<IChatTool, ListGitHubWorkItemReferencesTool>();
+builder.Services.AddScoped<IChatTool, CreateProjectTool>();
 builder.Services.AddScoped<IChatTool, CreateWorkItemTool>();
 builder.Services.AddScoped<IChatTool, UpdateWorkItemTool>();
 builder.Services.AddScoped<IChatTool, DeleteWorkItemTool>();
@@ -249,6 +282,7 @@ builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IUsageLedgerService, UsageLedgerService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddSingleton<IServerEventPublisher, ServerEventPublisher>();
 
 // Repositories
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();

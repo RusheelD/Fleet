@@ -131,6 +131,14 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             entity.LinkedPullRequestUrl = string.IsNullOrWhiteSpace(request.LinkedPullRequestUrl)
                 ? null
                 : request.LinkedPullRequestUrl.Trim();
+        if (request.LastObservedPullRequestState is not null)
+            entity.LastObservedPullRequestState = string.IsNullOrWhiteSpace(request.LastObservedPullRequestState)
+                ? null
+                : request.LastObservedPullRequestState.Trim().ToLowerInvariant();
+        if (request.LastObservedPullRequestUrl is not null)
+            entity.LastObservedPullRequestUrl = string.IsNullOrWhiteSpace(request.LastObservedPullRequestUrl)
+                ? null
+                : request.LastObservedPullRequestUrl.Trim();
 
         // ParentWorkItemNumber: 0 = clear (set to null), null = don't change, >0 = set by resolving WorkItemNumber
         if (request.ParentWorkItemNumber is not null)
@@ -178,7 +186,9 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         string.IsNullOrWhiteSpace(w.AssignmentMode) ? (w.IsAI ? "auto" : "manual") : w.AssignmentMode,
         w.AssignedAgentCount,
         w.AcceptanceCriteria,
-        w.LinkedPullRequestUrl
+        w.LinkedPullRequestUrl,
+        w.LastObservedPullRequestState,
+        w.LastObservedPullRequestUrl
     );
 
     private static string NormalizeAssignmentMode(string? requestedMode, bool isAi) => requestedMode?.ToLowerInvariant() switch

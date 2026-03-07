@@ -46,6 +46,11 @@ public class RequestLoggingMiddleware(
                 stopwatch.ElapsedMilliseconds,
                 traceId);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            logger.HttpRequestCanceled(stopwatch.ElapsedMilliseconds, traceId);
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();

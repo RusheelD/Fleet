@@ -31,14 +31,29 @@ public class AgentPhaseRunner(
         _ => 150,  // Backend, Frontend, Testing, Styling
     };
 
-    /// <summary>Timeout per phase (30 minutes).</summary>
-    private static readonly TimeSpan PhaseTimeout = TimeSpan.FromMinutes(30);
+    /// <summary>Returns the timeout for a given phase role (10-30 minutes).</summary>
+    private static TimeSpan GetPhaseTimeout(AgentRole role) => role switch
+    {
+        AgentRole.Backend => TimeSpan.FromMinutes(30),
+        AgentRole.Frontend => TimeSpan.FromMinutes(30),
+        AgentRole.Consolidation => TimeSpan.FromMinutes(20),
+        AgentRole.Contracts => TimeSpan.FromMinutes(15),
+        AgentRole.Testing => TimeSpan.FromMinutes(15),
+        AgentRole.Styling => TimeSpan.FromMinutes(15),
+        AgentRole.Manager => TimeSpan.FromMinutes(10),
+        AgentRole.Planner => TimeSpan.FromMinutes(10),
+        AgentRole.Review => TimeSpan.FromMinutes(10),
+        AgentRole.Documentation => TimeSpan.FromMinutes(10),
+        _ => TimeSpan.FromMinutes(15),
+    };
 
     /// <summary>
     /// Max characters per tool result for agent phases. Lower than the interactive
     /// chat limit to keep context windows lean and inference fast.
     /// </summary>
     private const int AgentMaxToolOutputLength = 12_000;
+    private const int EstimatedProgressCeilingPercent = 95;
+    private const int FallbackProgressCadenceToolCalls = 3;
 
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
@@ -55,8 +70,7 @@ public class AgentPhaseRunner(
             role, toolContext.ExecutionId, model);
 
         var systemPrompt = promptLoader.GetPrompt(role);
-        var config = llmOptions.Value;
-        var toolDefs = toolRegistry.ToLLMDefinitions();
+        var toolDefs = toolRegistry.ToLLMDefinitions(role);
 
         var messages = new List<LLMMessage>
         {
@@ -65,12 +79,68 @@ public class AgentPhaseRunner(
 
         var totalToolCalls = 0;
         var maxToolCalls = GetMaxToolCalls(role);
+        var phaseTimeout = GetPhaseTimeout(role);
+        var lastReportedPercent = 0;
+        var nonProgressToolCallsSinceLastReport = 0;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(PhaseTimeout);
+        cts.CancelAfter(phaseTimeout);
+
+        async Task ReportProgressAsync(int percent, string summary, bool force = false)
+        {
+            if (onProgress is null)
+            {
+                return;
+            }
+
+            var clampedPercent = Math.Clamp(percent, 0, 100);
+            if (force)
+            {
+                if (clampedPercent < lastReportedPercent)
+                {
+                    clampedPercent = lastReportedPercent;
+                }
+            }
+            else
+            {
+                if (lastReportedPercent >= EstimatedProgressCeilingPercent)
+                {
+                    return;
+                }
+
+                clampedPercent = Math.Clamp(clampedPercent, lastReportedPercent + 1, EstimatedProgressCeilingPercent);
+            }
+
+            if (!force && clampedPercent <= lastReportedPercent)
+            {
+                return;
+            }
+
+            lastReportedPercent = clampedPercent;
+            try
+            {
+                await onProgress(clampedPercent / 100.0, summary);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role);
+            }
+        }
+
+        int EstimateProgressPercentFromToolCalls()
+        {
+            if (maxToolCalls <= 0)
+            {
+                return Math.Clamp(lastReportedPercent + 1, 1, EstimatedProgressCeilingPercent);
+            }
+
+            var estimated = (int)Math.Round((double)totalToolCalls / maxToolCalls * 100.0);
+            return Math.Clamp(estimated, Math.Max(1, lastReportedPercent + 1), EstimatedProgressCeilingPercent);
+        }
 
         try
         {
+            await ReportProgressAsync(1, "Starting phase", force: true);
             for (var loop = 0; loop < MaxToolLoops; loop++)
             {
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
@@ -84,9 +154,9 @@ public class AgentPhaseRunner(
                 }
                 catch (OperationCanceledException)
                 {
-                    logger.LogWarning("Phase {Role} timed out after {Timeout}", role, PhaseTimeout);
+                    logger.LogWarning("Phase {Role} timed out after {Timeout}", role, phaseTimeout);
                     return new PhaseResult(role, string.Empty, totalToolCalls, false,
-                        $"Phase timed out after {PhaseTimeout.TotalMinutes} minutes.");
+                        $"Phase timed out after {phaseTimeout.TotalMinutes} minutes.");
                 }
 
                 // If the model returned tool calls, execute them
@@ -117,7 +187,7 @@ public class AgentPhaseRunner(
                         // ── Parallel execution for read-only batches ──
                         var tasks = response.ToolCalls.Select(async toolCall =>
                         {
-                            var result = await ExecuteToolAsync(toolCall, toolContext, cts.Token);
+                            var result = await ExecuteToolAsync(role, toolCall, toolContext, cts.Token);
                             return (toolCall, result);
                         }).ToList();
 
@@ -145,17 +215,23 @@ public class AgentPhaseRunner(
                             }
                         }
 
-                        // Report progress once for the whole parallel batch
-                        if (onProgress is not null)
+                        foreach (var (toolCall, _) in results)
                         {
-                            foreach (var (toolCall, toolResult) in results)
+                            if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
                             {
-                                if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                                var percent = ParseProgressPercent(toolCall.ArgumentsJson);
+                                var summary = ParseProgressSummary(toolCall.ArgumentsJson);
+                                await ReportProgressAsync(percent, summary);
+                                nonProgressToolCallsSinceLastReport = 0;
+                            }
+                            else
+                            {
+                                nonProgressToolCallsSinceLastReport++;
+                                if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
                                 {
-                                    var percent = ParseProgressPercent(toolCall.ArgumentsJson);
-                                    var summary = ParseProgressSummary(toolCall.ArgumentsJson);
-                                    try { await onProgress(percent / 100.0, summary); }
-                                    catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role); }
+                                    var estimatedPercent = EstimateProgressPercentFromToolCalls();
+                                    await ReportProgressAsync(estimatedPercent, $"Working ({totalToolCalls} tool calls)");
+                                    nonProgressToolCallsSinceLastReport = 0;
                                 }
                             }
                         }
@@ -173,7 +249,7 @@ public class AgentPhaseRunner(
                                 break;
                             }
 
-                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, cts.Token);
+                            var toolResult = await ExecuteToolAsync(role, toolCall, toolContext, cts.Token);
 
                             messages.Add(new LLMMessage
                             {
@@ -191,12 +267,22 @@ public class AgentPhaseRunner(
                                 catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
                             }
 
-                            if (onProgress is not null && toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                            if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
                             {
                                 var percent = ParseProgressPercent(toolCall.ArgumentsJson);
                                 var summary = ParseProgressSummary(toolCall.ArgumentsJson);
-                                try { await onProgress(percent / 100.0, summary); }
-                                catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: progress callback failed (non-fatal)", role); }
+                                await ReportProgressAsync(percent, summary);
+                                nonProgressToolCallsSinceLastReport = 0;
+                            }
+                            else
+                            {
+                                nonProgressToolCallsSinceLastReport++;
+                                if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
+                                {
+                                    var estimatedPercent = EstimateProgressPercentFromToolCalls();
+                                    await ReportProgressAsync(estimatedPercent, $"Working ({totalToolCalls} tool calls)");
+                                    nonProgressToolCallsSinceLastReport = 0;
+                                }
                             }
                         }
                     }
@@ -212,6 +298,7 @@ public class AgentPhaseRunner(
                 logger.LogInformation("Phase {Role} completed: {Loops} loops, {ToolCalls} tool calls",
                     role, loop + 1, totalToolCalls);
 
+                await ReportProgressAsync(100, "Phase completed", force: true);
                 return new PhaseResult(role, output, totalToolCalls, true);
             }
 
@@ -228,8 +315,14 @@ public class AgentPhaseRunner(
     }
 
     private async Task<string> ExecuteToolAsync(
-        LLMToolCall toolCall, AgentToolContext context, CancellationToken ct)
+        AgentRole role, LLMToolCall toolCall, AgentToolContext context, CancellationToken ct)
     {
+        if (!toolRegistry.IsToolAllowed(role, toolCall.Name))
+        {
+            logger.LogWarning("Tool {ToolName} is not allowed for role {Role}", toolCall.Name, role);
+            return $"Error: tool '{toolCall.Name}' is not allowed for role '{role}'.";
+        }
+
         var tool = toolRegistry.Get(toolCall.Name);
         if (tool is null)
         {

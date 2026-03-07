@@ -133,12 +133,13 @@ interface ChatInputProps {
     onChange: (value: string) => void
     onSend?: () => void
     onGenerate?: () => void
+    allowGenerate?: boolean
     onFileSelect?: (file: File) => void
     disabled?: boolean
     uploading?: boolean
 }
 
-export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, disabled, uploading }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate = true, onFileSelect, disabled, uploading }: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
@@ -146,6 +147,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
     const hasText = value.trim().length > 0
+    const canGenerate = allowGenerate && typeof onGenerate === 'function'
 
     const autoResize = useCallback(() => {
         const el = textareaRef.current
@@ -190,44 +192,58 @@ export function ChatInput({ value, onChange, onSend, onGenerate, onFileSelect, d
                     }}
                 />
                 <div className={styles.sendGroup}>
-                    <Button
-                        appearance="primary"
-                        icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
-                        disabled={(!hasText && !onGenerate) || disabled}
-                        className={styles.sendButton}
-                        size={isCompact ? 'small' : 'medium'}
-                        onClick={hasText ? onSend : onGenerate}
-                    >
-                        {hasText ? 'Send' : 'Generate'}
-                    </Button>
-                    <Menu>
-                        <MenuTrigger disableButtonEnhancement>
+                    {canGenerate ? (
+                        <>
                             <Button
                                 appearance="primary"
-                                icon={<ChevronDownRegular />}
+                                icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
                                 disabled={disabled}
-                                className={styles.menuButton}
+                                className={styles.sendButton}
                                 size={isCompact ? 'small' : 'medium'}
-                            />
-                        </MenuTrigger>
-                        <MenuPopover>
-                            <MenuList>
-                                <MenuItem
-                                    icon={<SendRegular />}
-                                    disabled={!hasText}
-                                    onClick={onSend}
-                                >
-                                    Send
-                                </MenuItem>
-                                <MenuItem
-                                    icon={<TaskListAddRegular />}
-                                    onClick={onGenerate}
-                                >
-                                    {hasText ? 'Send & Generate' : 'Generate Work Items'}
-                                </MenuItem>
-                            </MenuList>
-                        </MenuPopover>
-                    </Menu>
+                                onClick={hasText ? onSend : onGenerate}
+                            >
+                                {hasText ? 'Send' : 'Generate'}
+                            </Button>
+                            <Menu>
+                                <MenuTrigger disableButtonEnhancement>
+                                    <Button
+                                        appearance="primary"
+                                        icon={<ChevronDownRegular />}
+                                        disabled={disabled}
+                                        className={styles.menuButton}
+                                        size={isCompact ? 'small' : 'medium'}
+                                    />
+                                </MenuTrigger>
+                                <MenuPopover>
+                                    <MenuList>
+                                        <MenuItem
+                                            icon={<SendRegular />}
+                                            disabled={!hasText}
+                                            onClick={onSend}
+                                        >
+                                            Send
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<TaskListAddRegular />}
+                                            onClick={onGenerate}
+                                        >
+                                            {hasText ? 'Send & Generate' : 'Generate Work Items'}
+                                        </MenuItem>
+                                    </MenuList>
+                                </MenuPopover>
+                            </Menu>
+                        </>
+                    ) : (
+                        <Button
+                            appearance="primary"
+                            icon={<SendRegular />}
+                            disabled={!hasText || disabled}
+                            size={isCompact ? 'small' : 'medium'}
+                            onClick={onSend}
+                        >
+                            Send
+                        </Button>
+                    )}
                 </div>
             </div>
             <div className={styles.inputActions}>

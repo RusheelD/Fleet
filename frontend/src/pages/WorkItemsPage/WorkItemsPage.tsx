@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -17,6 +17,8 @@ import {
     Checkbox,
     Text,
     Divider,
+    Dropdown,
+    Option,
 } from '@fluentui/react-components'
 import {
     SearchRegular,
@@ -29,9 +31,10 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
-import { useWorkItems, useWorkItemLevels, useUpdateWorkItem } from '../../proxies'
-import { useCurrentProject, useChatGenerating, usePreferences } from '../../hooks'
+import { useWorkItems, useWorkItemLevels, useUpdateWorkItem, useBulkUpdateWorkItems } from '../../proxies'
+import { useCurrentProject, usePreferences } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
+import type { UpdateWorkItemRequest } from '../../proxies'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
 
@@ -103,6 +106,22 @@ const useStyles = makeStyles({
         minWidth: '200px',
         flexWrap: 'wrap',
     },
+    bulkActions: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS,
+        flexWrap: 'wrap',
+    },
+    bulkLabel: {
+        color: tokens.colorNeutralForeground2,
+        whiteSpace: 'nowrap',
+    },
+    bulkStateDropdown: {
+        minWidth: '170px',
+    },
+    bulkAssigneeInput: {
+        width: '210px',
+    },
     searchInput: {
         maxWidth: '280px',
         minWidth: '210px',
@@ -139,6 +158,39 @@ const useStyles = makeStyles({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
+    filterTriggerButton: {
+        minWidth: 'unset',
+        width: '28px',
+        height: '28px',
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+        borderTopStyle: 'none',
+        borderRightStyle: 'none',
+        borderBottomStyle: 'none',
+        borderLeftStyle: 'none',
+        backgroundColor: 'transparent',
+        boxShadow: 'none',
+        color: tokens.colorNeutralForeground3,
+        ':hover': {
+            borderTopStyle: 'none',
+            borderRightStyle: 'none',
+            borderBottomStyle: 'none',
+            borderLeftStyle: 'none',
+            backgroundColor: tokens.colorNeutralBackground1Hover,
+        },
+        ':active': {
+            borderTopStyle: 'none',
+            borderRightStyle: 'none',
+            borderBottomStyle: 'none',
+            borderLeftStyle: 'none',
+            backgroundColor: tokens.colorNeutralBackground1Pressed,
+        },
+    },
+    filterTriggerActive: {
+        color: tokens.colorBrandForeground1,
+    },
 })
 
 const ALL_STATES: WorkItemState[] = ['New', 'Active', 'Planning (AI)', 'In Progress', 'In Progress (AI)', 'In-PR', 'In-PR (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
@@ -159,10 +211,9 @@ function isFiltered(filters: WorkItemFilters): boolean {
 export function WorkItemsPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
-    const { isGenerating } = useChatGenerating()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
-    const { data: workItems, isLoading } = useWorkItems(projectId, { pollingInterval: isGenerating ? 15_000 : false })
+    const { data: workItems, isLoading } = useWorkItems(projectId)
     const { data: levels } = useWorkItemLevels(projectId)
     const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -170,8 +221,12 @@ export function WorkItemsPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null)
     const [filters, setFilters] = useState<WorkItemFilters>(EMPTY_FILTERS)
+    const [selectedWorkItemNumbers, setSelectedWorkItemNumbers] = useState<Set<number>>(new Set())
+    const [bulkState, setBulkState] = useState<WorkItemState | ''>('')
+    const [bulkAssignee, setBulkAssignee] = useState('')
 
     const updateMutation = useUpdateWorkItem(projectId)
+    const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
 
     const handleReparent = useCallback((itemId: number, newParentId: number | null) => {
         // Send 0 to clear parent (backend treats 0 as 'set to null')
@@ -181,6 +236,56 @@ export function WorkItemsPage() {
     const handleTitleChange = useCallback((itemId: number, newTitle: string) => {
         updateMutation.mutate({ workItemNumber: itemId, data: { title: newTitle } })
     }, [updateMutation])
+
+    useEffect(() => {
+        const available = new Set((workItems ?? []).map((item) => item.workItemNumber))
+        setSelectedWorkItemNumbers((previous) => {
+            if (previous.size === 0) {
+                return previous
+            }
+
+            const next = new Set<number>()
+            for (const itemNumber of previous) {
+                if (available.has(itemNumber)) {
+                    next.add(itemNumber)
+                }
+            }
+
+            return next.size === previous.size ? previous : next
+        })
+    }, [workItems])
+
+    const toggleSelection = useCallback((itemNumber: number, selected: boolean) => {
+        setSelectedWorkItemNumbers((previous) => {
+            const next = new Set(previous)
+            if (selected) {
+                next.add(itemNumber)
+            } else {
+                next.delete(itemNumber)
+            }
+
+            return next
+        })
+    }, [])
+
+    const toggleSelectionForItems = useCallback((itemNumbers: number[], selected: boolean) => {
+        setSelectedWorkItemNumbers((previous) => {
+            const next = new Set(previous)
+            for (const itemNumber of itemNumbers) {
+                if (selected) {
+                    next.add(itemNumber)
+                } else {
+                    next.delete(itemNumber)
+                }
+            }
+
+            return next
+        })
+    }, [])
+
+    const clearSelection = useCallback(() => {
+        setSelectedWorkItemNumbers(new Set())
+    }, [])
 
     const levelMap = useMemo(() => {
         const map = new Map<number, WorkItemLevel>()
@@ -222,6 +327,43 @@ export function WorkItemsPage() {
     }, [workItems, searchQuery, filters])
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
+    const selectedCount = selectedWorkItemNumbers.size
+    const canApplyBulkChanges = selectedCount > 0 && (bulkState !== '' || bulkAssignee.trim().length > 0)
+
+    const handleApplyBulkChanges = useCallback(() => {
+        if (!canApplyBulkChanges) {
+            return
+        }
+
+        const request: UpdateWorkItemRequest = {}
+        if (bulkState) {
+            request.state = bulkState
+        }
+        if (bulkAssignee.trim().length > 0) {
+            request.assignedTo = bulkAssignee.trim()
+        }
+
+        bulkUpdateMutation.mutate(
+            {
+                workItemNumbers: Array.from(selectedWorkItemNumbers),
+                data: request,
+            },
+            {
+                onSuccess: () => {
+                    clearSelection()
+                    setBulkState('')
+                    setBulkAssignee('')
+                },
+            },
+        )
+    }, [
+        bulkAssignee,
+        bulkState,
+        bulkUpdateMutation,
+        canApplyBulkChanges,
+        clearSelection,
+        selectedWorkItemNumbers,
+    ])
 
     if (isLoading) {
         return (
@@ -274,11 +416,16 @@ export function WorkItemsPage() {
                             />
                             <Popover withArrow>
                                 <PopoverTrigger disableButtonEnhancement>
-                                    <ToolbarButton icon={<FilterRegular />}
-                                        appearance={isFiltered(filters) ? 'primary' : undefined}
-                                    >
-                                        Filter{isFiltered(filters) ? ' (active)' : ''}
-                                    </ToolbarButton>
+                                    <ToolbarButton
+                                        className={mergeClasses(
+                                            styles.filterTriggerButton,
+                                            isFiltered(filters) && styles.filterTriggerActive,
+                                        )}
+                                        icon={<FilterRegular />}
+                                        appearance="transparent"
+                                        aria-label={isFiltered(filters) ? 'Filters active' : 'Filters'}
+                                        title={isFiltered(filters) ? 'Filters active' : 'Filters'}
+                                    />
                                 </PopoverTrigger>
                                 <PopoverSurface className={styles.filterSurface}>
                                     <div className={styles.filterHeader}>
@@ -352,6 +499,58 @@ export function WorkItemsPage() {
                             </Popover>
                             <ToolbarDivider />
                             <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
+                            {selectedCount > 0 && (
+                                <>
+                                    <ToolbarDivider />
+                                    <div className={styles.bulkActions}>
+                                        <Text size={200} className={styles.bulkLabel}>
+                                            {selectedCount} selected
+                                        </Text>
+                                        <Dropdown
+                                            className={styles.bulkStateDropdown}
+                                            size="small"
+                                            placeholder="State"
+                                            selectedOptions={bulkState ? [bulkState] : []}
+                                            onOptionSelect={(_event, data) => {
+                                                setBulkState((data.optionValue as WorkItemState | undefined) ?? '')
+                                            }}
+                                        >
+                                            <Option value="">No state change</Option>
+                                            {ALL_STATES.map((state) => (
+                                                <Option key={state} value={state}>{state}</Option>
+                                            ))}
+                                        </Dropdown>
+                                        <Input
+                                            className={styles.bulkAssigneeInput}
+                                            size="small"
+                                            appearance="outline"
+                                            placeholder="Assign to..."
+                                            value={bulkAssignee}
+                                            onChange={(_event, data) => setBulkAssignee(data.value)}
+                                        />
+                                        <Button
+                                            appearance="primary"
+                                            size="small"
+                                            disabled={!canApplyBulkChanges || bulkUpdateMutation.isPending}
+                                            onClick={handleApplyBulkChanges}
+                                        >
+                                            Apply
+                                        </Button>
+                                        <Button
+                                            appearance="subtle"
+                                            size="small"
+                                            disabled={bulkUpdateMutation.isPending}
+                                            onClick={() => {
+                                                clearSelection()
+                                                setBulkState('')
+                                                setBulkAssignee('')
+                                            }}
+                                        >
+                                            Clear Selection
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
                         </Toolbar>
                     </div>
                 </div>
@@ -361,7 +560,10 @@ export function WorkItemsPage() {
                         items={items}
                         levelMap={levelMap}
                         selectedItemId={selectedItem?.workItemNumber}
+                        selectedWorkItemNumbers={selectedWorkItemNumbers}
                         onItemClick={setSelectedItem}
+                        onToggleSelection={toggleSelection}
+                        onToggleSelectionForItems={toggleSelectionForItems}
                         onReparent={handleReparent}
                         onTitleChange={handleTitleChange}
                     />
@@ -371,7 +573,10 @@ export function WorkItemsPage() {
                         items={items}
                         levelMap={levelMap}
                         selectedItemId={selectedItem?.workItemNumber}
+                        selectedWorkItemNumbers={selectedWorkItemNumbers}
                         onItemClick={setSelectedItem}
+                        onToggleSelection={toggleSelection}
+                        onToggleSelectionForItems={toggleSelectionForItems}
                         onTitleChange={handleTitleChange}
                     />
                 )}
@@ -384,9 +589,13 @@ export function WorkItemsPage() {
                 )}
             </div>
 
-            <CreateWorkItemDialog projectId={projectId ?? ''} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
-            <WorkItemDetailDialog projectId={projectId ?? ''} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
-            <ManageLevelsDialog projectId={projectId ?? ''} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />
+            {projectId && (
+                <>
+                    <CreateWorkItemDialog projectId={projectId} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+                    <WorkItemDetailDialog projectId={projectId} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
+                    <ManageLevelsDialog projectId={projectId} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />
+                </>
+            )}
         </div>
     )
 }

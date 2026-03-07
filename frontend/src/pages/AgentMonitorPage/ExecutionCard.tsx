@@ -184,6 +184,9 @@ const useStyles = makeStyles({
     stepIconFailed: {
         color: tokens.colorPaletteRedForeground1,
     },
+    stepIconCancelled: {
+        color: tokens.colorNeutralForeground3,
+    },
     stepIconIdle: {
         color: tokens.colorNeutralForeground4,
     },
@@ -276,6 +279,8 @@ function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
             return <Spinner size="extra-tiny" />
         case 'failed':
             return <DismissCircleFilled className={`${styles.stepIcon} ${styles.stepIconFailed}`} />
+        case 'cancelled':
+            return <DismissCircleFilled className={`${styles.stepIcon} ${styles.stepIconCancelled}`} />
         default:
             return <CircleRegular className={`${styles.stepIcon} ${styles.stepIconIdle}`} />
     }
@@ -309,7 +314,16 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
         }
     }
 
-    const agents = execution.agents
+    const agents = (
+        execution.status === 'failed' || execution.status === 'cancelled'
+            ? execution.agents.map((agent) => ({
+                ...agent,
+                status: execution.status,
+                currentTask: execution.status === 'failed' ? 'Failed' : 'Cancelled',
+                progress: 0,
+            }))
+            : execution.agents
+    ) as AgentInfo[]
 
     return (
         <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact)}>
@@ -370,7 +384,15 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
             <ProgressBar
                 value={execution.progress}
                 thickness={isCompact ? 'medium' : 'large'}
-                color={execution.status === 'failed' ? 'error' : execution.status === 'completed' ? 'success' : 'brand'}
+                color={
+                    execution.status === 'failed'
+                        ? 'error'
+                        : execution.status === 'cancelled'
+                            ? 'warning'
+                            : execution.status === 'completed'
+                                ? 'success'
+                                : 'brand'
+                }
             />
 
             <Divider className={isCompact ? styles.compactDivider : undefined} />

@@ -18,6 +18,8 @@ public class WorkItem
     public int? AssignedAgentCount { get; set; }
     public string AcceptanceCriteria { get; set; } = string.Empty;
     public string? LinkedPullRequestUrl { get; set; }
+    public string? LastObservedPullRequestState { get; set; }
+    public string? LastObservedPullRequestUrl { get; set; }
 
     // Stored as PostgreSQL text[] array — native array support
     public List<string> Tags { get; set; } = [];

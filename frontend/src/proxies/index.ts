@@ -1,13 +1,14 @@
-export { ApiError, setTokenGetter, get, post, put, del, postForm } from './proxy'
+export { ApiError, setTokenGetter, fetchWithAuth, get, post, put, del, postForm } from './proxy'
 export { getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug } from './projectsProxy'
 export type { CreateProjectRequest, UpdateProjectRequest } from './projectsProxy'
-export { getWorkItems, createWorkItem, updateWorkItem, deleteWorkItem } from './workItemsProxy'
+export { getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem } from './workItemsProxy'
 export type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsProxy'
 export { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
 export type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
 export {
   getExecutions,
   getLogs,
+  clearLogs,
   startExecution,
   getExecutionStatus,
   cancelExecution,
@@ -35,6 +36,7 @@ export {
   useWorkItemLevels,
   useExecutions,
   useLogs,
+  useClearLogs,
   useStartExecution,
   useCancelExecution,
   usePauseExecution,
@@ -52,6 +54,7 @@ export {
   useGitHubRepos,
   useCreateWorkItem,
   useUpdateWorkItem,
+  useBulkUpdateWorkItems,
   useDeleteWorkItem,
   useCreateWorkItemLevel,
   useUpdateWorkItemLevel,

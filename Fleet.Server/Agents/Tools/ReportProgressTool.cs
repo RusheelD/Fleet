@@ -13,8 +13,9 @@ public class ReportProgressTool : IAgentTool
 
     public string Description =>
         "Report your estimated completion percentage (0-100). " +
-        "Call this periodically (every few tool calls) so the user can see live progress. " +
-        "Be honest and realistic — estimate based on how much of your task is actually done.";
+        "Call this frequently (at least every 2-3 tool calls) so the user can see live progress. " +
+        "Use concise milestone summaries and send 100% when your phase is complete. " +
+        "Be honest and realistic - estimate based on how much of your task is actually done.";
 
     public string ParametersJsonSchema => """
         {
@@ -36,7 +37,7 @@ public class ReportProgressTool : IAgentTool
         """;
 
     /// <summary>
-    /// This tool is read-only — it doesn't modify files or external state.
+    /// This tool is read-only - it does not modify files or external state.
     /// The actual progress update is handled by the phase runner via the callback.
     /// </summary>
     public bool IsReadOnly => true;

@@ -1,5 +1,7 @@
+using Fleet.Server.Auth;
 using Fleet.Server.Models;
 using Fleet.Server.Projects;
+using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -9,7 +11,10 @@ namespace Fleet.Server.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
-public class ProjectsController(IProjectService projectService) : ControllerBase
+public class ProjectsController(
+    IProjectService projectService,
+    IAuthService authService,
+    IServerEventPublisher eventPublisher) : ControllerBase
 {
     [HttpGet]
     [OutputCache(Duration = 5)]
@@ -66,6 +71,11 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
                 request.CommitAuthorMode,
                 request.CommitAuthorName,
                 request.CommitAuthorEmail);
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId = project.Id });
             return Created($"/api/projects/{project.Id}", project);
         }
         catch (InvalidOperationException ex)
@@ -95,6 +105,11 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
                 request.CommitAuthorName,
                 request.CommitAuthorEmail);
             if (project is null) return NotFound();
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId });
             return Ok(project);
         }
         catch (InvalidOperationException ex)
@@ -114,6 +129,11 @@ public class ProjectsController(IProjectService projectService) : ControllerBase
     {
         var deleted = await projectService.DeleteProjectAsync(projectId);
         if (!deleted) return NotFound();
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishUserEventAsync(
+            userId,
+            ServerEventTopics.ProjectsUpdated,
+            new { projectId });
         return NoContent();
     }
 }

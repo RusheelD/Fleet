@@ -7,6 +7,7 @@ import {
     Badge,
     Button,
     Input,
+    Checkbox,
     mergeClasses,
 } from '@fluentui/react-components'
 import {
@@ -36,7 +37,7 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
+        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -57,11 +58,16 @@ const useStyles = makeStyles({
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
     },
+    selectHeaderCell: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '110px 3fr 120px 55px 70px 150px 150px',
+        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -85,6 +91,11 @@ const useStyles = makeStyles({
     },
     rowDragging: {
         opacity: 0.4,
+    },
+    selectCell: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 
     /* ── Drop indicators ───────────────────────────────────── */
@@ -188,16 +199,45 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
-        flexGrow: 1,
+        flexGrow: 0,
+        flexShrink: 1,
         minWidth: 0,
+        maxWidth: '100%',
     },
     titleInput: {
         flexGrow: 1,
         minWidth: 0,
     },
-    childCount: {
+    childCountChip: {
         flexShrink: 0,
-        marginLeft: '4px',
+        marginLeft: '6px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '20px',
+        minWidth: '22px',
+        paddingLeft: '6px',
+        paddingRight: '6px',
+        borderRadius: '999px',
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
+        backgroundColor: tokens.colorNeutralBackground2,
+    },
+    childCountNumber: {
+        fontSize: '12px',
+        fontWeight: tokens.fontWeightSemibold,
+        color: tokens.colorNeutralForeground1,
+        lineHeight: '1',
     },
 
     /* ── State column ──────────────────────────────────────── */
@@ -248,9 +288,16 @@ const useStyles = makeStyles({
     /* ── Tags column ───────────────────────────────────────── */
     tagsCell: {
         display: 'flex',
-        gap: '4px',
+        gap: '6px',
         flexWrap: 'nowrap',
         overflow: 'hidden',
+    },
+    tagBadge: {
+        fontSize: '12px',
+        lineHeight: '18px',
+        fontWeight: tokens.fontWeightMedium,
+        paddingLeft: '8px',
+        paddingRight: '8px',
     },
 })
 
@@ -258,12 +305,25 @@ interface BacklogTreeTableProps {
     items: WorkItem[]
     levelMap?: Map<number, WorkItemLevel>
     selectedItemId?: number | null
+    selectedWorkItemNumbers?: Set<number>
     onItemClick?: (item: WorkItem) => void
+    onToggleSelection?: (itemNumber: number, selected: boolean) => void
+    onToggleSelectionForItems?: (itemNumbers: number[], selected: boolean) => void
     onReparent?: (itemId: number, newParentId: number | null) => void
     onTitleChange?: (itemId: number, newTitle: string) => void
 }
 
-export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick, onReparent, onTitleChange }: BacklogTreeTableProps) {
+export function BacklogTreeTable({
+    items,
+    levelMap,
+    selectedItemId,
+    selectedWorkItemNumbers,
+    onItemClick,
+    onToggleSelection,
+    onToggleSelectionForItems,
+    onReparent,
+    onTitleChange,
+}: BacklogTreeTableProps) {
     const styles = useStyles()
 
     /* ── Build tree structure ──────────────────────────────── */
@@ -466,6 +526,24 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
         return rows
     }, [roots, childrenMap, expanded])
 
+    const visibleWorkItemNumbers = useMemo(
+        () => visibleRows.map(({ item }) => item.workItemNumber),
+        [visibleRows],
+    )
+
+    const selectedVisibleCount = useMemo(
+        () => visibleWorkItemNumbers.filter((itemNumber) => selectedWorkItemNumbers?.has(itemNumber)).length,
+        [visibleWorkItemNumbers, selectedWorkItemNumbers],
+    )
+
+    const areAllVisibleSelected =
+        visibleWorkItemNumbers.length > 0 &&
+        selectedVisibleCount === visibleWorkItemNumbers.length
+
+    const isVisibleSelectionMixed =
+        selectedVisibleCount > 0 &&
+        !areAllVisibleSelected
+
     /* ── Resolve level info ────────────────────────────────── */
     const getLevel = (item: WorkItem): WorkItemLevel | undefined =>
         item.levelId != null ? levelMap?.get(item.levelId) : undefined
@@ -483,6 +561,18 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
         <div className={styles.container}>
             {/* header */}
             <div className={styles.header}>
+                <div className={styles.selectHeaderCell}>
+                    <Checkbox
+                        aria-label="Select visible work items"
+                        checked={areAllVisibleSelected ? true : (isVisibleSelectionMixed ? 'mixed' : false)}
+                        onChange={(_event, data) => {
+                            onToggleSelectionForItems?.(
+                                visibleWorkItemNumbers,
+                                data.checked === true,
+                            )
+                        }}
+                    />
+                </div>
                 <Caption1 className={styles.headerText}>Type</Caption1>
                 <Caption1 className={styles.headerText}>Title</Caption1>
                 <Caption1 className={styles.headerText}>State</Caption1>
@@ -499,6 +589,7 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                 const isDragging = item.workItemNumber === draggedId
                 const dropClass = getDropClass(item.workItemNumber)
                 const isEditing = editingId === item.workItemNumber
+                const childCount = childrenMap.get(item.workItemNumber)?.length ?? 0
 
                 return (
                     <div
@@ -520,6 +611,13 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         onDrop={handleDrop}
                         onDragEnd={() => { handleDragEnd(); setDraggableRowId(null) }}
                     >
+                        <div className={styles.selectCell} onClick={(event) => event.stopPropagation()}>
+                            <Checkbox
+                                aria-label={`Select work item #${item.workItemNumber}`}
+                                checked={selectedWorkItemNumbers?.has(item.workItemNumber) ?? false}
+                                onChange={(_event, data) => onToggleSelection?.(item.workItemNumber, data.checked === true)}
+                            />
+                        </div>
                         {/* Work Item Type */}
                         <div className={styles.typeCell}>
                             <span
@@ -579,10 +677,13 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                                 </Text>
                             )}
 
-                            {hasChildren && !isEditing && (
-                                <Badge className={styles.childCount} appearance="tint" size="tiny" color="informative">
-                                    {childrenMap.get(item.workItemNumber)?.length ?? 0}
-                                </Badge>
+                            {hasChildren && !isEditing && childCount > 0 && (
+                                <span
+                                    className={styles.childCountChip}
+                                    title={`${childCount} ${childCount === 1 ? 'child' : 'children'}`}
+                                >
+                                    <span className={styles.childCountNumber}>{childCount}</span>
+                                </span>
                             )}
                         </div>
 
@@ -615,7 +716,13 @@ export function BacklogTreeTable({ items, levelMap, selectedItemId, onItemClick,
                         {/* Tags */}
                         <div className={styles.tagsCell}>
                             {item.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} appearance="tint" size="tiny" color="informative">
+                                <Badge
+                                    key={tag}
+                                    appearance="tint"
+                                    size="small"
+                                    color="informative"
+                                    className={styles.tagBadge}
+                                >
                                     {tag}
                                 </Badge>
                             ))}

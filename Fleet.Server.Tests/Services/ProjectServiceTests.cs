@@ -36,6 +36,8 @@ public class ProjectServiceTests
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(UserId);
         _gitHubApi.Setup(g => g.GetWorkItemReferencesAsync(It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new List<GitHubWorkItemReference>());
+        _gitHubApi.Setup(g => g.GetPullRequestLifecycleByUrlAsync(It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync((GitHubPullRequestLifecycle?)null);
 
         _sut = new ProjectService(
             _projectRepo.Object,
@@ -367,7 +369,7 @@ public class ProjectServiceTests
         _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
             .ReturnsAsync(new List<GitHubWorkItemReference>
             {
-                new(7, "https://github.com/owner/repo/pull/22", "Improve task 7", false, false, DateTimeOffset.UtcNow),
+                new(7, "https://github.com/owner/repo/pull/22", "Improve task 7", false, false, DateTimeOffset.UtcNow, true, false),
             });
         _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
             .ReturnsAsync(new GitHubRepoStats(1, 0, 5, []));
@@ -379,6 +381,43 @@ public class ProjectServiceTests
             It.Is<UpdateWorkItemRequest>(u =>
                 u.State == "In-PR (AI)" &&
                 u.LinkedPullRequestUrl == "https://github.com/owner/repo/pull/22")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetDashboardAsync_DraftReference_MovesWorkItemToInProgress()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+
+        var workItems = new List<WorkItemDto>
+        {
+            new(11, "Task 11", "Active", 2, 3, "Fleet AI", [], true, "desc", null, [], null),
+        };
+        _workItemRepo.Setup(r => r.GetByProjectIdAsync("p1")).ReturnsAsync(workItems);
+        _workItemRepo.Setup(r => r.UpdateAsync("p1", 11, It.IsAny<UpdateWorkItemRequest>()))
+            .ReturnsAsync((string projectId, int workItemNumber, UpdateWorkItemRequest req) =>
+                new WorkItemDto(11, "Task 11", req.State ?? "Active", 2, 3, "Fleet AI", [], true, "desc", null, [], null, "auto", null, "", req.LinkedPullRequestUrl));
+
+        _agentTaskRepo.Setup(r => r.GetDashboardAgentsByProjectIdAsync("p1"))
+            .ReturnsAsync(new List<DashboardAgentDto>());
+        _agentTaskRepo.Setup(r => r.GetAgentSummaryByProjectIdAsync("p1"))
+            .ReturnsAsync(new AgentSummaryDto(1, 0));
+        _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new List<GitHubWorkItemReference>
+            {
+                new(11, "https://github.com/owner/repo/pull/23", "Draft task 11", false, false, DateTimeOffset.UtcNow, true, true),
+            });
+        _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new GitHubRepoStats(1, 0, 5, []));
+
+        var result = await _sut.GetDashboardAsync("p1");
+
+        Assert.IsNotNull(result);
+        _workItemRepo.Verify(r => r.UpdateAsync("p1", 11,
+            It.Is<UpdateWorkItemRequest>(u =>
+                u.State == "In Progress (AI)" &&
+                u.LinkedPullRequestUrl == "https://github.com/owner/repo/pull/23")), Times.Once);
     }
 
     [TestMethod]
@@ -416,6 +455,148 @@ public class ProjectServiceTests
             It.Is<UpdateWorkItemRequest>(u =>
                 u.State == "Resolved" &&
                 u.LinkedPullRequestUrl == "https://github.com/owner/repo/pull/42")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetDashboardAsync_ClosedUnmergedReference_MovesWorkItemToNew()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+
+        var workItems = new List<WorkItemDto>
+        {
+            new(12, "Task 12", "In-PR", 2, 3, "You", [], false, "desc", null, [], null),
+        };
+        _workItemRepo.Setup(r => r.GetByProjectIdAsync("p1")).ReturnsAsync(workItems);
+        _workItemRepo.Setup(r => r.UpdateAsync("p1", 12, It.IsAny<UpdateWorkItemRequest>()))
+            .ReturnsAsync((string projectId, int workItemNumber, UpdateWorkItemRequest req) =>
+                new WorkItemDto(12, "Task 12", req.State ?? "In-PR", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", req.LinkedPullRequestUrl));
+
+        _agentTaskRepo.Setup(r => r.GetDashboardAgentsByProjectIdAsync("p1"))
+            .ReturnsAsync(new List<DashboardAgentDto>());
+        _agentTaskRepo.Setup(r => r.GetAgentSummaryByProjectIdAsync("p1"))
+            .ReturnsAsync(new AgentSummaryDto(1, 0));
+        _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new List<GitHubWorkItemReference>
+            {
+                new(12, "https://github.com/owner/repo/pull/24", "Closed task 12", false, false, DateTimeOffset.UtcNow, false, false),
+            });
+        _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new GitHubRepoStats(0, 1, 8, []));
+
+        var result = await _sut.GetDashboardAsync("p1");
+
+        Assert.IsNotNull(result);
+        _workItemRepo.Verify(r => r.UpdateAsync("p1", 12,
+            It.Is<UpdateWorkItemRequest>(u =>
+                u.State == "New" &&
+                u.LinkedPullRequestUrl == "https://github.com/owner/repo/pull/24")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetDashboardAsync_ClosedLinkedPullRequest_UsesLifecycleFallbackAndMovesToNew()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+
+        var workItems = new List<WorkItemDto>
+        {
+            new(18, "Task 18", "In-PR", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", "https://github.com/owner/repo/pull/88/"),
+        };
+        _workItemRepo.Setup(r => r.GetByProjectIdAsync("p1")).ReturnsAsync(workItems);
+        _workItemRepo.Setup(r => r.UpdateAsync("p1", 18, It.IsAny<UpdateWorkItemRequest>()))
+            .ReturnsAsync((string projectId, int workItemNumber, UpdateWorkItemRequest req) =>
+                new WorkItemDto(18, "Task 18", req.State ?? "In-PR", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", req.LinkedPullRequestUrl));
+
+        _agentTaskRepo.Setup(r => r.GetDashboardAgentsByProjectIdAsync("p1"))
+            .ReturnsAsync(new List<DashboardAgentDto>());
+        _agentTaskRepo.Setup(r => r.GetAgentSummaryByProjectIdAsync("p1"))
+            .ReturnsAsync(new AgentSummaryDto(1, 0));
+        _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new List<GitHubWorkItemReference>());
+        _gitHubApi.Setup(r => r.GetPullRequestLifecycleByUrlAsync(UserId, "https://github.com/owner/repo/pull/88"))
+            .ReturnsAsync(new GitHubPullRequestLifecycle("https://github.com/owner/repo/pull/88", false, false, false));
+        _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new GitHubRepoStats(0, 0, 8, []));
+
+        var result = await _sut.GetDashboardAsync("p1");
+
+        Assert.IsNotNull(result);
+        _workItemRepo.Verify(r => r.UpdateAsync("p1", 18,
+            It.Is<UpdateWorkItemRequest>(u =>
+                u.State == "New" &&
+                u.LinkedPullRequestUrl == "https://github.com/owner/repo/pull/88")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetDashboardAsync_ManualOverride_WithSameObservedPrLifecycle_DoesNotForceState()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+
+        var workItems = new List<WorkItemDto>
+        {
+            new(33, "Task 33", "In Progress", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", "https://github.com/owner/repo/pull/333", "open", "https://github.com/owner/repo/pull/333"),
+        };
+        _workItemRepo.Setup(r => r.GetByProjectIdAsync("p1")).ReturnsAsync(workItems);
+
+        _agentTaskRepo.Setup(r => r.GetDashboardAgentsByProjectIdAsync("p1"))
+            .ReturnsAsync(new List<DashboardAgentDto>());
+        _agentTaskRepo.Setup(r => r.GetAgentSummaryByProjectIdAsync("p1"))
+            .ReturnsAsync(new AgentSummaryDto(1, 0));
+        _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new List<GitHubWorkItemReference>
+            {
+                new(33, "https://github.com/owner/repo/pull/333", "Task 33 update", false, false, DateTimeOffset.UtcNow, true, false),
+            });
+        _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new GitHubRepoStats(1, 0, 5, []));
+
+        var result = await _sut.GetDashboardAsync("p1");
+
+        Assert.IsNotNull(result);
+        _workItemRepo.Verify(r => r.UpdateAsync("p1", 33, It.IsAny<UpdateWorkItemRequest>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task GetDashboardAsync_ManualOverride_WhenObservedPrLifecycleChanges_UpdatesState()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+
+        var workItems = new List<WorkItemDto>
+        {
+            new(34, "Task 34", "In Progress", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", "https://github.com/owner/repo/pull/334", "open", "https://github.com/owner/repo/pull/334"),
+        };
+        _workItemRepo.Setup(r => r.GetByProjectIdAsync("p1")).ReturnsAsync(workItems);
+        _workItemRepo.Setup(r => r.UpdateAsync("p1", 34, It.IsAny<UpdateWorkItemRequest>()))
+            .ReturnsAsync((string projectId, int workItemNumber, UpdateWorkItemRequest req) =>
+                new WorkItemDto(34, "Task 34", req.State ?? "In Progress", 2, 3, "You", [], false, "desc", null, [], null, "manual", null, "", req.LinkedPullRequestUrl, req.LastObservedPullRequestState, req.LastObservedPullRequestUrl));
+
+        _agentTaskRepo.Setup(r => r.GetDashboardAgentsByProjectIdAsync("p1"))
+            .ReturnsAsync(new List<DashboardAgentDto>());
+        _agentTaskRepo.Setup(r => r.GetAgentSummaryByProjectIdAsync("p1"))
+            .ReturnsAsync(new AgentSummaryDto(1, 0));
+        _gitHubApi.Setup(r => r.GetWorkItemReferencesAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new List<GitHubWorkItemReference>
+            {
+                new(34, "https://github.com/owner/repo/pull/334", "Task 34 update", false, false, DateTimeOffset.UtcNow, false, false),
+            });
+        _gitHubApi.Setup(r => r.GetRepoStatsAsync(UserId, "owner/repo"))
+            .ReturnsAsync(new GitHubRepoStats(0, 1, 5, []));
+
+        var result = await _sut.GetDashboardAsync("p1");
+
+        Assert.IsNotNull(result);
+        _workItemRepo.Verify(r => r.UpdateAsync("p1", 34,
+            It.Is<UpdateWorkItemRequest>(u =>
+                u.State == "New" &&
+                u.LastObservedPullRequestState == "closed" &&
+                u.LastObservedPullRequestUrl == "https://github.com/owner/repo/pull/334")), Times.Once);
     }
 
     private void SetupDashboardDependencies(string projectId, string repo)

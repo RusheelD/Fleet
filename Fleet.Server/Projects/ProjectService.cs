@@ -282,31 +282,91 @@ public class ProjectService(
             return workItems;
         }
 
-        if (references.Count == 0)
-            return workItems;
-
         var anyUpdates = false;
         var byWorkItemNumber = workItems.ToDictionary(w => w.WorkItemNumber);
+        var latestReferenceByUrl = new Dictionary<string, GitHubWorkItemReference>(StringComparer.OrdinalIgnoreCase);
+        var latestReferenceByWorkItem = new Dictionary<int, GitHubWorkItemReference>();
 
-        foreach (var group in references.GroupBy(r => r.WorkItemNumber))
+        foreach (var reference in references)
         {
-            if (!byWorkItemNumber.TryGetValue(group.Key, out var workItem))
+            var normalizedReferenceUrl = NormalizePullRequestUrl(reference.PullRequestUrl);
+            if (normalizedReferenceUrl is null)
                 continue;
 
-            var selectedReference = group
-                .OrderByDescending(r => r.IsFixReference && r.IsMerged)
-                .ThenByDescending(r => r.IsFixReference)
-                .ThenByDescending(r => r.UpdatedAt)
-                .First();
+            var normalizedReference = reference with { PullRequestUrl = normalizedReferenceUrl };
+            if (!latestReferenceByUrl.TryGetValue(normalizedReferenceUrl, out var existingByUrl) ||
+                IsReferenceBetter(normalizedReference, existingByUrl))
+            {
+                latestReferenceByUrl[normalizedReferenceUrl] = normalizedReference;
+            }
 
-            var targetState = ResolveStateFromReference(workItem, selectedReference);
-            var normalizedPrUrl = string.IsNullOrWhiteSpace(selectedReference.PullRequestUrl)
-                ? null
-                : selectedReference.PullRequestUrl;
-            var stateChanged = !string.Equals(workItem.State, targetState, StringComparison.Ordinal);
-            var linkChanged = !string.Equals(workItem.LinkedPullRequestUrl, normalizedPrUrl, StringComparison.Ordinal);
-            if (!stateChanged && !linkChanged)
+            if (!latestReferenceByWorkItem.TryGetValue(normalizedReference.WorkItemNumber, out var existingByWorkItem) ||
+                IsReferenceBetter(normalizedReference, existingByWorkItem))
+            {
+                latestReferenceByWorkItem[normalizedReference.WorkItemNumber] = normalizedReference;
+            }
+        }
+
+        var lifecycleByUrl = new Dictionary<string, GitHubPullRequestLifecycle?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var workItem in byWorkItemNumber.Values.ToList())
+        {
+            string? observedUrl = null;
+            string? observedState = null;
+            string? targetState = null;
+
+            if (latestReferenceByWorkItem.TryGetValue(workItem.WorkItemNumber, out var selectedReference))
+            {
+                observedUrl = NormalizePullRequestUrl(selectedReference.PullRequestUrl);
+                observedState = ResolveObservedPullRequestState(selectedReference);
+                targetState = ResolveStateFromReference(workItem, selectedReference);
+            }
+            else
+            {
+                var normalizedLinkedPrUrl = NormalizePullRequestUrl(workItem.LinkedPullRequestUrl);
+                if (normalizedLinkedPrUrl is null)
+                    continue;
+
+                if (latestReferenceByUrl.TryGetValue(normalizedLinkedPrUrl, out var linkedReference))
+                {
+                    observedUrl = NormalizePullRequestUrl(linkedReference.PullRequestUrl);
+                    observedState = ResolveObservedPullRequestState(linkedReference);
+                    targetState = ResolveStateFromReference(workItem, linkedReference);
+                }
+                else
+                {
+                    if (!lifecycleByUrl.TryGetValue(normalizedLinkedPrUrl, out var lifecycle))
+                    {
+                        lifecycle = await gitHubApiService.GetPullRequestLifecycleByUrlAsync(userId, normalizedLinkedPrUrl);
+                        lifecycleByUrl[normalizedLinkedPrUrl] = lifecycle;
+                    }
+
+                    if (lifecycle is null)
+                        continue;
+
+                    observedUrl = NormalizePullRequestUrl(lifecycle.PullRequestUrl) ?? normalizedLinkedPrUrl;
+                    observedState = ResolveObservedPullRequestState(lifecycle);
+                    targetState = ResolveStateFromLifecycle(workItem, lifecycle);
+                }
+            }
+
+            if (observedState is null || targetState is null)
                 continue;
+
+            var normalizedObservedState = NormalizeObservedPullRequestState(workItem.LastObservedPullRequestState);
+            var normalizedObservedUrl = NormalizePullRequestUrl(workItem.LastObservedPullRequestUrl);
+            var observedStateChanged = !string.Equals(normalizedObservedState, observedState, StringComparison.OrdinalIgnoreCase);
+            var observedUrlChanged = !string.Equals(normalizedObservedUrl, observedUrl, StringComparison.Ordinal);
+            var lifecycleChanged = observedStateChanged || observedUrlChanged;
+
+            // Respect manual overrides: only auto-change item status when PR lifecycle changed.
+            var stateChanged = lifecycleChanged &&
+                               !string.Equals(workItem.State, targetState, StringComparison.Ordinal);
+            var linkChanged = !string.Equals(workItem.LinkedPullRequestUrl, observedUrl, StringComparison.Ordinal);
+            if (!stateChanged && !linkChanged && !lifecycleChanged)
+                continue;
+
+            var persistedObservedState = lifecycleChanged ? observedState : null;
+            var persistedObservedUrl = lifecycleChanged ? observedUrl : null;
 
             await workItemRepository.UpdateAsync(project.Id, workItem.WorkItemNumber,
                 new UpdateWorkItemRequest(
@@ -320,12 +380,16 @@ public class ProjectService(
                     IsAI: null,
                     ParentWorkItemNumber: null,
                     LevelId: null,
-                    LinkedPullRequestUrl: linkChanged ? normalizedPrUrl ?? string.Empty : null));
+                    LinkedPullRequestUrl: linkChanged ? observedUrl ?? string.Empty : null,
+                    LastObservedPullRequestState: persistedObservedState,
+                    LastObservedPullRequestUrl: persistedObservedUrl));
 
-            byWorkItemNumber[group.Key] = workItem with
+            byWorkItemNumber[workItem.WorkItemNumber] = workItem with
             {
                 State = stateChanged ? targetState : workItem.State,
-                LinkedPullRequestUrl = linkChanged ? normalizedPrUrl : workItem.LinkedPullRequestUrl,
+                LinkedPullRequestUrl = linkChanged ? observedUrl : workItem.LinkedPullRequestUrl,
+                LastObservedPullRequestState = lifecycleChanged ? observedState : workItem.LastObservedPullRequestState,
+                LastObservedPullRequestUrl = lifecycleChanged ? observedUrl : workItem.LastObservedPullRequestUrl,
             };
             anyUpdates = true;
         }
@@ -344,21 +408,93 @@ public class ProjectService(
            state.Equals("In-PR", StringComparison.OrdinalIgnoreCase) ||
            state.Equals("In-PR (AI)", StringComparison.OrdinalIgnoreCase);
 
+    private static int GetPullRequestLifecycleRank(GitHubWorkItemReference reference)
+    {
+        if (reference.IsMerged)
+            return 4;
+
+        if (reference.IsOpen && !reference.IsDraft)
+            return 3;
+
+        if (reference.IsOpen && reference.IsDraft)
+            return 2;
+
+        return 1;
+    }
+
+    private static bool IsReferenceBetter(GitHubWorkItemReference candidate, GitHubWorkItemReference current)
+    {
+        var candidateRank = GetPullRequestLifecycleRank(candidate);
+        var currentRank = GetPullRequestLifecycleRank(current);
+        if (candidateRank != currentRank)
+            return candidateRank > currentRank;
+
+        if (candidate.IsFixReference != current.IsFixReference)
+            return candidate.IsFixReference;
+
+        return candidate.UpdatedAt > current.UpdatedAt;
+    }
+
+    private static string ResolveObservedPullRequestState(GitHubWorkItemReference reference)
+    {
+        if (reference.IsMerged) return "merged";
+        if (reference.IsOpen && reference.IsDraft) return "draft";
+        if (reference.IsOpen) return "open";
+        return "closed";
+    }
+
+    private static string ResolveObservedPullRequestState(GitHubPullRequestLifecycle lifecycle)
+    {
+        if (lifecycle.IsMerged) return "merged";
+        if (lifecycle.IsOpen && lifecycle.IsDraft) return "draft";
+        if (lifecycle.IsOpen) return "open";
+        return "closed";
+    }
+
     private static string ResolveStateFromReference(WorkItemDto workItem, GitHubWorkItemReference reference)
     {
-        if (workItem.State.Equals("Closed", StringComparison.OrdinalIgnoreCase))
-            return workItem.State;
-
-        if (reference.IsFixReference && reference.IsMerged)
+        // User-requested mapping:
+        // draft -> in-progress, open -> in-pr, closed -> new, merged -> resolved
+        if (reference.IsMerged)
             return workItem.IsAI ? "Resolved (AI)" : "Resolved";
 
-        if (workItem.State.Equals("Resolved", StringComparison.OrdinalIgnoreCase) ||
-            workItem.State.Equals("Resolved (AI)", StringComparison.OrdinalIgnoreCase))
-        {
-            return workItem.State;
-        }
+        if (reference.IsOpen && !reference.IsDraft)
+            return workItem.IsAI ? "In-PR (AI)" : "In-PR";
 
-        return workItem.IsAI ? "In-PR (AI)" : "In-PR";
+        if (reference.IsOpen && reference.IsDraft)
+            return workItem.IsAI ? "In Progress (AI)" : "In Progress";
+
+        return "New";
+    }
+
+    private static string ResolveStateFromLifecycle(WorkItemDto workItem, GitHubPullRequestLifecycle lifecycle)
+    {
+        if (lifecycle.IsMerged)
+            return workItem.IsAI ? "Resolved (AI)" : "Resolved";
+
+        if (lifecycle.IsOpen && !lifecycle.IsDraft)
+            return workItem.IsAI ? "In-PR (AI)" : "In-PR";
+
+        if (lifecycle.IsOpen && lifecycle.IsDraft)
+            return workItem.IsAI ? "In Progress (AI)" : "In Progress";
+
+        return "New";
+    }
+
+    private static string? NormalizePullRequestUrl(string? pullRequestUrl)
+    {
+        if (string.IsNullOrWhiteSpace(pullRequestUrl))
+            return null;
+
+        return pullRequestUrl.Trim().TrimEnd('/');
+    }
+
+    private static string? NormalizeObservedPullRequestState(string? observedPullRequestState)
+    {
+        if (string.IsNullOrWhiteSpace(observedPullRequestState))
+            return null;
+
+        return observedPullRequestState.Trim().ToLowerInvariant();
     }
 
     private static string FormatRelativeTime(DateTimeOffset timestamp)
