@@ -53,7 +53,7 @@ public class AgentPhaseRunner(
     /// </summary>
     private const int AgentMaxToolOutputLength = 12_000;
     private const int EstimatedProgressCeilingPercent = 95;
-    private const int FallbackProgressCadenceToolCalls = 3;
+    private const int FallbackProgressCadenceToolCalls = 1;
 
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
@@ -230,7 +230,9 @@ public class AgentPhaseRunner(
                                 if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
                                 {
                                     var estimatedPercent = EstimateProgressPercentFromToolCalls();
-                                    await ReportProgressAsync(estimatedPercent, $"Working ({totalToolCalls} tool calls)");
+                                    await ReportProgressAsync(
+                                        estimatedPercent,
+                                        $"Working via {toolCall.Name} ({totalToolCalls} tool calls)");
                                     nonProgressToolCallsSinceLastReport = 0;
                                 }
                             }
@@ -280,7 +282,9 @@ public class AgentPhaseRunner(
                                 if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
                                 {
                                     var estimatedPercent = EstimateProgressPercentFromToolCalls();
-                                    await ReportProgressAsync(estimatedPercent, $"Working ({totalToolCalls} tool calls)");
+                                    await ReportProgressAsync(
+                                        estimatedPercent,
+                                        $"Working via {toolCall.Name} ({totalToolCalls} tool calls)");
                                     nonProgressToolCallsSinceLastReport = 0;
                                 }
                             }
