@@ -28,7 +28,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
 import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs } from '../../proxies'
-import { useCurrentProject, usePreferences } from '../../hooks'
+import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { openExecutionDocumentation } from './executionDocs'
 
 const useStyles = makeStyles({
@@ -49,6 +49,14 @@ const useStyles = makeStyles({
     headerActions: {
         display: 'flex',
         gap: '0.5rem',
+        width: '100%',
+    },
+    headerActionsMobile: {
+        width: '100%',
+    },
+    actionsToolbar: {
+        display: 'flex',
+        flexWrap: 'wrap',
         width: '100%',
     },
     summaryRow: {
@@ -121,13 +129,19 @@ const useStyles = makeStyles({
         maxWidth: '200px',
         minWidth: '160px',
     },
+    searchInputMobile: {
+        maxWidth: 'unset',
+        minWidth: '140px',
+    },
 })
 
 export function AgentMonitorPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
     const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
@@ -286,21 +300,21 @@ export function AgentMonitorPage() {
 
     if (loadingExec || loadingLogs) {
         return (
-            <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
+            <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
                 <Spinner label="Loading agent data..." />
             </div>
         )
     }
 
     return (
-        <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
+        <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
             <Toaster toasterId={toasterId} />
             <PageHeader
                 title="Agent Monitor"
                 subtitle="Track agent executions and view real-time logs"
                 actions={
-                    <div className={styles.headerActions}>
-                        <Toolbar>
+                    <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
+                        <Toolbar className={styles.actionsToolbar}>
                             <ToolbarButton
                                 icon={<RocketRegular />}
                                 onClick={() => setDialogOpen(true)}
@@ -308,7 +322,7 @@ export function AgentMonitorPage() {
                                 Start Execution
                             </ToolbarButton>
                             <Input
-                                className={mergeClasses(styles.searchInput, isCompact && styles.searchInputCompact)}
+                                className={mergeClasses(styles.searchInput, isDense && styles.searchInputCompact, isMobile && styles.searchInputMobile)}
                                 placeholder="Search executions..."
                                 size="small"
                                 appearance="underline"
@@ -322,7 +336,7 @@ export function AgentMonitorPage() {
                 }
             />
 
-            <div className={mergeClasses(styles.summaryRow, isCompact && styles.summaryRowCompact)}>
+            <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact)}>
                 <SummaryCard
                     icon={<PlayRegular />}
                     iconClassName={styles.summaryIconWarning}
@@ -368,8 +382,8 @@ export function AgentMonitorPage() {
             <TabList
                 selectedValue={tab}
                 onTabSelect={(_e, data) => setTab(data.value as string)}
-                className={mergeClasses(styles.tabListSpacing, isCompact && styles.tabListSpacingCompact)}
-                size={isCompact ? 'small' : 'medium'}
+                className={mergeClasses(styles.tabListSpacing, isDense && styles.tabListSpacingCompact)}
+                size={isDense ? 'small' : 'medium'}
             >
                 <Tab value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
                 <Tab value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
@@ -378,9 +392,9 @@ export function AgentMonitorPage() {
                 <Tab value="all">All ({allExecutions.length})</Tab>
             </TabList>
 
-            <div className={mergeClasses(styles.mainContent, isCompact && styles.mainContentCompact)}>
+            <div className={mergeClasses(styles.mainContent, isDense && styles.mainContentCompact)}>
                 <div className={styles.executionPanel}>
-                    <div className={mergeClasses(styles.executionList, isCompact && styles.executionListCompact)}>
+                    <div className={mergeClasses(styles.executionList, isDense && styles.executionListCompact)}>
                         {filteredExecutions.map((execution) => (
                             <ExecutionCard
                                 key={execution.id}

@@ -26,7 +26,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { ProjectCard, ProjectRow, NewProjectDialog } from './'
 import { useProjects, useExportProjects, useImportProjects } from '../../proxies'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 import type { ProjectData } from '../../models'
 
 const SORT_OPTIONS = ['Last activity', 'Name', 'Work items', 'Agents'] as const
@@ -48,11 +48,20 @@ const useStyles = makeStyles({
         height: '100%',
         overflow: 'auto',
     },
+    pageMobile: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
+    },
     headerActions: {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
         flexWrap: 'wrap',
+    },
+    headerActionsMobile: {
+        width: '100%',
     },
     toolbar: {
         display: 'flex',
@@ -77,6 +86,14 @@ const useStyles = makeStyles({
         borderLeftColor: tokens.colorNeutralStroke2,
         backgroundColor: tokens.colorNeutralBackground1,
     },
+    toolbarMobile: {
+        marginBottom: '0.875rem',
+        paddingTop: '0.375rem',
+        paddingBottom: '0.375rem',
+        paddingLeft: '0.375rem',
+        paddingRight: '0.375rem',
+        gap: '0.5rem',
+    },
     toolbarLeft: {
         display: 'flex',
         alignItems: 'center',
@@ -84,17 +101,33 @@ const useStyles = makeStyles({
         flex: 1,
         minWidth: '200px',
     },
+    toolbarLeftMobile: {
+        minWidth: 0,
+        width: '100%',
+    },
     searchInput: {
         maxWidth: '300px',
         flex: 1,
     },
+    searchInputMobile: {
+        maxWidth: 'unset',
+        minWidth: 0,
+    },
     sortDropdown: {
         minWidth: '140px',
+    },
+    sortDropdownMobile: {
+        minWidth: '120px',
+        flexShrink: 0,
     },
     projectGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
         gap: '1.125rem',
+    },
+    projectGridMobile: {
+        gridTemplateColumns: '1fr',
+        gap: '0.75rem',
     },
     projectList: {
         display: 'flex',
@@ -133,14 +166,16 @@ export function ProjectsPage() {
     const exportProjectsMutation = useExportProjects()
     const importProjectsMutation = useImportProjects()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const importFileInputRef = useRef<HTMLInputElement | null>(null)
 
     const [searchQuery, setSearchQuery] = useState('')
     const [sortKey, setSortKey] = useState<SortKey>('Last activity')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [newProjectOpen, setNewProjectOpen] = useState(false)
-    const effectiveViewMode: 'grid' | 'list' = isCompact ? 'list' : viewMode
+    const effectiveViewMode: 'grid' | 'list' = isMobile ? 'grid' : (isCompact ? 'list' : viewMode)
 
     const filteredProjects = useMemo(() => {
         const list = projects ?? []
@@ -194,19 +229,19 @@ export function ProjectsPage() {
 
     if (isLoading) {
         return (
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
                 <Spinner label="Loading projects..." />
             </div>
         )
     }
 
     return (
-        <div className={styles.page}>
+        <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
             <PageHeader
                 title="Projects"
                 subtitle="Manage your projects and track AI agent progress"
                 actions={
-                    <div className={styles.headerActions}>
+                    <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <input
                             ref={importFileInputRef}
                             type="file"
@@ -241,10 +276,10 @@ export function ProjectsPage() {
                 }
             />
 
-            <div className={styles.toolbar}>
-                <div className={styles.toolbarLeft}>
+            <div className={mergeClasses(styles.toolbar, isMobile && styles.toolbarMobile)}>
+                <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
                     <Input
-                        className={styles.searchInput}
+                        className={mergeClasses(styles.searchInput, isMobile && styles.searchInputMobile)}
                         contentBefore={<SearchRegular />}
                         placeholder="Search projects..."
                         size="medium"
@@ -253,7 +288,7 @@ export function ProjectsPage() {
                     />
                     <Dropdown
                         placeholder="Sort by"
-                        className={styles.sortDropdown}
+                        className={mergeClasses(styles.sortDropdown, isMobile && styles.sortDropdownMobile)}
                         value={sortKey}
                         onOptionSelect={(_e, data) => setSortKey((data.optionText ?? 'Last activity') as SortKey)}
                     >
@@ -263,7 +298,7 @@ export function ProjectsPage() {
                     </Dropdown>
                 </div>
                 <Toolbar>
-                    {!isCompact && (
+                    {!isDense && (
                         <>
                             <ToolbarButton
                                 icon={<GridRegular />}
@@ -292,7 +327,7 @@ export function ProjectsPage() {
             </div>
 
             {effectiveViewMode === 'grid' ? (
-                <div className={styles.projectGrid}>
+                <div className={mergeClasses(styles.projectGrid, isMobile && styles.projectGridMobile)}>
                     {filteredProjects.map((project) => (
                         <ProjectCard
                             key={project.id}

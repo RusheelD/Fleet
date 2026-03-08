@@ -9,7 +9,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
 import { useSubscription } from '../../proxies'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -70,19 +70,21 @@ const useStyles = makeStyles({
 export function SubscriptionPage() {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const { data: subscription, isLoading } = useSubscription()
 
     if (isLoading || !subscription) {
         return (
-            <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
+            <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
                 <Spinner label="Loading subscription..." />
             </div>
         )
     }
 
     return (
-        <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
+        <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
             <PageHeader
                 title="Subscription"
                 subtitle="Manage your plan, usage, and billing"
@@ -90,9 +92,9 @@ export function SubscriptionPage() {
 
             <CurrentPlanBanner currentPlan={subscription.currentPlan} />
 
-            <div className={mergeClasses(styles.usageSection, isCompact && styles.usageSectionCompact)}>
+            <div className={mergeClasses(styles.usageSection, isDense && styles.usageSectionCompact)}>
                 <Title3>This Month&apos;s Usage</Title3>
-                <div className={mergeClasses(styles.usageGrid, isCompact && styles.usageGridCompact)}>
+                <div className={mergeClasses(styles.usageGrid, isDense && styles.usageGridCompact)}>
                     {subscription.usage.map((meter) => (
                         <UsageMeter
                             key={meter.label}
@@ -106,18 +108,18 @@ export function SubscriptionPage() {
                 </div>
             </div>
 
-            <Divider className={mergeClasses(styles.dividerSpacing, isCompact && styles.dividerSpacingCompact)} />
+            <Divider className={mergeClasses(styles.dividerSpacing, isDense && styles.dividerSpacingCompact)} />
 
-            <div className={isCompact ? styles.planSectionCompact : undefined}>
+            <div className={isDense ? styles.planSectionCompact : undefined}>
                 <Title3>Available Plans</Title3>
-                <div className={isCompact ? styles.planSectionSubtextCompact : undefined} style={!isCompact ? { marginTop: '0.25rem' } : undefined}>
+                <div className={isDense ? styles.planSectionSubtextCompact : undefined} style={!isDense ? { marginTop: '0.25rem' } : undefined}>
                     <Text>
                         Pricing scales based on agents and simultaneous agents purchased. All plans include the same core features.
                     </Text>
                 </div>
             </div>
 
-            <div className={mergeClasses(styles.plansGrid, isCompact && styles.plansGridCompact)}>
+            <div className={mergeClasses(styles.plansGrid, isDense && styles.plansGridCompact)}>
                 {subscription.plans.map((plan) => (
                     <PlanCard key={plan.name} plan={plan} />
                 ))}

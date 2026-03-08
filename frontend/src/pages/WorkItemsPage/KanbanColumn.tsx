@@ -23,6 +23,10 @@ const useStyles = makeStyles({
         maxWidth: '240px',
         gap: '0.375rem',
     },
+    boardColumnMobile: {
+        minWidth: '100%',
+        maxWidth: '100%',
+    },
     columnHeader: {
         display: 'flex',
         alignItems: 'center',
@@ -78,6 +82,10 @@ const useStyles = makeStyles({
     cardListCompact: {
         gap: '0.375rem',
     },
+    cardListMobile: {
+        maxHeight: 'unset',
+        overflow: 'visible',
+    },
 })
 
 interface KanbanColumnProps {
@@ -85,24 +93,26 @@ interface KanbanColumnProps {
     items: WorkItem[]
     levelMap?: Map<number, WorkItemLevel>
     onItemClick?: (item: WorkItem) => void
+    mobile?: boolean
 }
 
-export function KanbanColumn({ state, items, levelMap, onItemClick }: KanbanColumnProps) {
+export function KanbanColumn({ state, items, levelMap, onItemClick, mobile = false }: KanbanColumnProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || mobile
 
     return (
-        <div className={mergeClasses(styles.boardColumn, isCompact && styles.boardColumnCompact)}>
-            <div className={mergeClasses(styles.columnHeader, isCompact && styles.columnHeaderCompact)}>
+        <div className={mergeClasses(styles.boardColumn, isDense && styles.boardColumnCompact, mobile && styles.boardColumnMobile)}>
+            <div className={mergeClasses(styles.columnHeader, isDense && styles.columnHeaderCompact)}>
                 <div className={styles.columnTitle}>
-                    <Title3 className={mergeClasses(styles.columnTitleText, isCompact && styles.columnTitleTextCompact)}>
+                    <Title3 className={mergeClasses(styles.columnTitleText, isDense && styles.columnTitleTextCompact)}>
                         {state}
                     </Title3>
                     <Text className={styles.columnCount}>{items.length}</Text>
                 </div>
             </div>
-            <div className={mergeClasses(styles.cardList, isCompact && styles.cardListCompact)}>
+            <div className={mergeClasses(styles.cardList, isDense && styles.cardListCompact, mobile && styles.cardListMobile)}>
                 {items.map((item) => (
                     <WorkItemCard key={item.workItemNumber} item={item} levelMap={levelMap} onItemClick={onItemClick} />
                 ))}

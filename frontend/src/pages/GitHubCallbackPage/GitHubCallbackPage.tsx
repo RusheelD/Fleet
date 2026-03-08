@@ -23,6 +23,13 @@ const useStyles = makeStyles({
         alignItems: 'center',
         height: '100vh',
         padding: '2rem',
+        '@media (max-width: 900px)': {
+            alignItems: 'flex-start',
+            paddingTop: '1rem',
+            paddingBottom: '1rem',
+            paddingLeft: '0.75rem',
+            paddingRight: '0.75rem',
+        },
     },
     card: {
         padding: '2rem',
@@ -32,6 +39,10 @@ const useStyles = makeStyles({
         gap: '1rem',
         maxWidth: '400px',
         width: '100%',
+        '@media (max-width: 900px)': {
+            padding: '1.25rem 1rem',
+            marginTop: '0.5rem',
+        },
     },
     icon: {
         fontSize: '48px',

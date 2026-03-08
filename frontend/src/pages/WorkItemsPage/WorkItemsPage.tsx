@@ -41,7 +41,7 @@ import {
     useExportWorkItems,
     useImportWorkItems,
 } from '../../proxies'
-import { useCurrentProject, usePreferences } from '../../hooks'
+import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
 import {
@@ -82,10 +82,20 @@ const useStyles = makeStyles({
         minWidth: 0,
         backgroundColor: tokens.colorNeutralBackground3,
     },
+    pageMobile: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
+    },
     headerActions: {
         display: 'flex',
         gap: tokens.spacingHorizontalS,
         alignItems: 'center',
+        flexWrap: 'wrap',
+    },
+    headerActionsMobile: {
+        width: '100%',
     },
     toolbarRow: {
         display: 'flex',
@@ -113,6 +123,14 @@ const useStyles = makeStyles({
         borderLeftColor: tokens.colorNeutralStroke2,
         backgroundColor: tokens.colorNeutralBackground1,
     },
+    toolbarRowMobile: {
+        marginBottom: tokens.spacingVerticalS,
+        gap: tokens.spacingHorizontalS,
+        paddingTop: tokens.spacingVerticalXXS,
+        paddingBottom: tokens.spacingVerticalXXS,
+        paddingLeft: tokens.spacingHorizontalXS,
+        paddingRight: tokens.spacingHorizontalXS,
+    },
     toolbarLeft: {
         display: 'flex',
         alignItems: 'center',
@@ -121,11 +139,18 @@ const useStyles = makeStyles({
         minWidth: '200px',
         flexWrap: 'wrap',
     },
+    toolbarLeftMobile: {
+        minWidth: 0,
+        width: '100%',
+    },
     bulkActions: {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
         flexWrap: 'wrap',
+    },
+    bulkActionsMobile: {
+        width: '100%',
     },
     bulkLabel: {
         color: tokens.colorNeutralForeground2,
@@ -134,13 +159,26 @@ const useStyles = makeStyles({
     bulkStateDropdown: {
         minWidth: '170px',
     },
+    bulkStateDropdownMobile: {
+        minWidth: '140px',
+        flex: '1 1 140px',
+    },
     bulkAssigneeInput: {
         width: '210px',
+    },
+    bulkAssigneeInputMobile: {
+        width: '100%',
+        flex: '1 1 180px',
+        minWidth: '140px',
     },
     searchInput: {
         maxWidth: '280px',
         minWidth: '210px',
         flex: 1,
+    },
+    searchInputMobile: {
+        maxWidth: 'unset',
+        minWidth: '140px',
     },
     boardContainer: {
         flex: 1,
@@ -154,6 +192,11 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalS,
         paddingTop: 0,
         paddingBottom: tokens.spacingVerticalS,
+    },
+    boardContainerMobile: {
+        flexDirection: 'column',
+        overflowX: 'hidden',
+        overflowY: 'auto',
     },
     filterSurface: {
         padding: '0.875rem',
@@ -301,10 +344,12 @@ export function WorkItemsPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const { data: workItems, isLoading } = useWorkItems(projectId)
     const { data: levels } = useWorkItemLevels(projectId)
-    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
+    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>(isMobile ? 'board' : 'backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
@@ -350,6 +395,12 @@ export function WorkItemsPage() {
             return next.size === previous.size ? previous : next
         })
     }, [workItems])
+
+    useEffect(() => {
+        if (isMobile && viewMode === 'backlog') {
+            setViewMode('board')
+        }
+    }, [isMobile, viewMode])
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -572,7 +623,7 @@ export function WorkItemsPage() {
 
     if (isLoading) {
         return (
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
                 <Spinner label="Loading work items..." />
             </div>
         )
@@ -580,12 +631,12 @@ export function WorkItemsPage() {
 
     return (
         <div className={styles.root}>
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
                 <PageHeader
                     title="Work Items"
                     subtitle="Manage your backlog, track progress, and assign agents"
                     actions={
-                        <div className={styles.headerActions}>
+                        <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                             <input
                                 ref={importFileInputRef}
                                 type="file"
@@ -620,21 +671,21 @@ export function WorkItemsPage() {
                     }
                 />
 
-                <div className={styles.toolbarRow}>
-                    <div className={styles.toolbarLeft}>
+                <div className={mergeClasses(styles.toolbarRow, isMobile && styles.toolbarRowMobile)}>
+                    <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
                         <TabList
                             selectedValue={viewMode}
                             onTabSelect={(_e, data) => setViewMode(data.value as 'backlog' | 'list' | 'board')}
                             size="small"
                         >
-                            <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>
+                            {!isMobile && <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>}
                             <Tab value="list" icon={<TextBulletListLtrRegular />}>List</Tab>
                             <Tab value="board" icon={<BoardRegular />}>Board</Tab>
                         </TabList>
                         <Toolbar>
                             <ToolbarDivider />
                             <Input
-                                className={styles.searchInput}
+                                className={mergeClasses(styles.searchInput, isMobile && styles.searchInputMobile)}
                                 placeholder="Search work items..."
                                 size="small"
                                 appearance="underline"
@@ -766,12 +817,12 @@ export function WorkItemsPage() {
                             {selectedCount > 0 && (
                                 <>
                                     <ToolbarDivider />
-                                    <div className={styles.bulkActions}>
+                                    <div className={mergeClasses(styles.bulkActions, isMobile && styles.bulkActionsMobile)}>
                                         <Text size={200} className={styles.bulkLabel}>
                                             {selectedCount} selected
                                         </Text>
                                         <Dropdown
-                                            className={styles.bulkStateDropdown}
+                                            className={mergeClasses(styles.bulkStateDropdown, isMobile && styles.bulkStateDropdownMobile)}
                                             size="small"
                                             placeholder="State"
                                             selectedOptions={bulkState ? [bulkState] : []}
@@ -785,7 +836,7 @@ export function WorkItemsPage() {
                                             ))}
                                         </Dropdown>
                                         <Input
-                                            className={styles.bulkAssigneeInput}
+                                            className={mergeClasses(styles.bulkAssigneeInput, isMobile && styles.bulkAssigneeInputMobile)}
                                             size="small"
                                             appearance="outline"
                                             placeholder="Assign to..."
@@ -851,9 +902,9 @@ export function WorkItemsPage() {
                     />
                 )}
                 {viewMode === 'board' && (
-                    <div className={mergeClasses(styles.boardContainer, isCompact && styles.boardContainerCompact)}>
+                    <div className={mergeClasses(styles.boardContainer, isDense && styles.boardContainerCompact, isMobile && styles.boardContainerMobile)}>
                         {boardColumns.map((col) => (
-                            <KanbanColumn key={col.state} state={col.state} items={col.items} levelMap={levelMap} onItemClick={setSelectedItem} />
+                            <KanbanColumn key={col.state} state={col.state} items={col.items} levelMap={levelMap} onItemClick={setSelectedItem} mobile={isMobile} />
                         ))}
                     </div>
                 )}

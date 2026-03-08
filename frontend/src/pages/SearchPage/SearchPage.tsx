@@ -18,7 +18,7 @@ import { PageHeader, EmptyState } from '../../components/shared'
 import { SearchResultCard } from './'
 import { useSearch } from '../../proxies'
 import { getSearchTypeForCategory, type SearchCategory } from './searchCategory'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -53,12 +53,18 @@ const useStyles = makeStyles({
         gap: '0.375rem',
         marginTop: '0.5rem',
     },
+    tabList: {
+        overflowX: 'auto',
+        paddingBottom: '0.25rem',
+    },
 })
 
 export function SearchPage() {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const [query, setQuery] = useState('')
     const [category, setCategory] = useState<SearchCategory>('all')
     const { data: results, isLoading } = useSearch(query, getSearchTypeForCategory(category))
@@ -66,17 +72,17 @@ export function SearchPage() {
     const filtered = results ?? []
 
     return (
-        <div className={mergeClasses(styles.page, isCompact && styles.pageCompact)}>
+        <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
             <PageHeader
                 title="Search"
                 subtitle="Search across projects, work items, chats, and agents"
             />
 
             <Input
-                className={mergeClasses(styles.searchBox, isCompact && styles.searchBoxCompact, styles.fullWidth)}
+                className={mergeClasses(styles.searchBox, isDense && styles.searchBoxCompact, styles.fullWidth)}
                 contentBefore={<SearchRegular />}
                 placeholder="Search everything..."
-                size={isCompact ? 'medium' : 'large'}
+                size={isDense ? 'medium' : 'large'}
                 value={query}
                 onChange={(_e, data) => setQuery(data.value)}
             />
@@ -84,7 +90,8 @@ export function SearchPage() {
             <TabList
                 selectedValue={category}
                 onTabSelect={(_e, data) => setCategory(data.value as SearchCategory)}
-                size={isCompact ? 'small' : 'medium'}
+                size={isDense ? 'small' : 'medium'}
+                className={styles.tabList}
             >
                 <Tab value="all">All ({filtered.length})</Tab>
                 <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
@@ -96,7 +103,7 @@ export function SearchPage() {
             {isLoading ? (
                 <Spinner label="Searching..." />
             ) : filtered.length > 0 ? (
-                <div className={mergeClasses(styles.resultsList, isCompact && styles.resultsListCompact)}>
+                <div className={mergeClasses(styles.resultsList, isDense && styles.resultsListCompact)}>
                     {filtered.map((result, i) => (
                         <SearchResultCard key={i} result={result} />
                     ))}

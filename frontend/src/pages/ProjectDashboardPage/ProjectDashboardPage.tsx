@@ -21,7 +21,7 @@ import {
 import { PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
 import { useProjectDashboardBySlug, resolveIcon } from '../../proxies'
-import { useCurrentProject, usePreferences } from '../../hooks'
+import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 
 const useStyles = makeStyles({
     page: {
@@ -29,6 +29,12 @@ const useStyles = makeStyles({
         maxWidth: '1400px',
         margin: '0 auto',
         width: '100%',
+    },
+    pageMobile: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
     },
     repoLink: {
         display: 'flex',
@@ -47,6 +53,10 @@ const useStyles = makeStyles({
     headerActions: {
         display: 'flex',
         gap: '0.5rem',
+        flexWrap: 'wrap',
+    },
+    headerActionsMobile: {
+        width: '100%',
     },
     metricsGrid: {
         display: 'grid',
@@ -112,31 +122,43 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         marginBottom: '1rem',
     },
+    quickActionsMobile: {
+        gridTemplateColumns: '1fr',
+    },
+    metricsGridMobile: {
+        gridTemplateColumns: '1fr 1fr',
+    },
+    repoLinkMobile: {
+        display: 'inline-flex',
+        marginBottom: '0.75rem',
+    },
 })
 
 export function ProjectDashboardPage() {
     const styles = useStyles()
     const { slug } = useCurrentProject()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
 
     if (isLoading || !dashboard) {
         return (
-            <div className={styles.page}>
+            <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
                 <Spinner label="Loading dashboard..." />
             </div>
         )
     }
 
     return (
-        <div className={styles.page}>
+        <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
             <PageHeader
                 title={dashboard.title}
                 subtitle={undefined}
                 actions={
-                    <div className={styles.headerActions}>
+                    <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <Button appearance="primary" icon={<ChatRegular />} onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}>
                             Open Chat
                         </Button>
@@ -147,14 +169,14 @@ export function ProjectDashboardPage() {
                 }
             />
 
-            <span className={styles.repoLink} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
+            <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
                 <LinkRegular />
                 {dashboard.repo}
                 <OpenRegular className={styles.openLinkIcon} />
             </span>
 
             {/* Quick Actions */}
-            <div className={mergeClasses(styles.quickActions, isCompact && styles.quickActionsCompact)}>
+            <div className={mergeClasses(styles.quickActions, isDense && styles.quickActionsCompact, isMobile && styles.quickActionsMobile)}>
                 <QuickActionCard
                     icon={<ChatRegular />}
                     title="AI Chat"
@@ -182,7 +204,7 @@ export function ProjectDashboardPage() {
             </div>
 
             {/* Metrics */}
-            <div className={mergeClasses(styles.metricsGrid, isCompact && styles.metricsGridCompact)}>
+            <div className={mergeClasses(styles.metricsGrid, isDense && styles.metricsGridCompact, isMobile && styles.metricsGridMobile)}>
                 {dashboard.metrics.map((metric) => (
                     <MetricCard
                         key={metric.label}
@@ -196,9 +218,9 @@ export function ProjectDashboardPage() {
             </div>
 
             {/* Two column layout */}
-            <div className={mergeClasses(styles.twoColumns, isCompact && styles.twoColumnsCompact)}>
+            <div className={mergeClasses(styles.twoColumns, isDense && styles.twoColumnsCompact)}>
                 {/* Recent Activity */}
-                <Card className={mergeClasses(styles.sectionCard, isCompact && styles.sectionCardCompact)}>
+                <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
                     <div className={styles.sectionHeader}>
                         <Title3>Recent Activity</Title3>
                         <Button appearance="transparent" size="small" onClick={() => navigate(`/projects/${slug}/agents`)}>View all</Button>
@@ -212,7 +234,7 @@ export function ProjectDashboardPage() {
                 </Card>
 
                 {/* Agent Status */}
-                <Card className={mergeClasses(styles.sectionCard, isCompact && styles.sectionCardCompact)}>
+                <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
                     <div className={styles.sectionHeader}>
                         <Title3>Agent Status</Title3>
                         <Button

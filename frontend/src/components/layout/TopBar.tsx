@@ -12,6 +12,7 @@ import {
     GridRegular,
     ChatRegular,
     AlertRegular,
+    NavigationRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from './'
@@ -36,11 +37,22 @@ const useStyles = makeStyles({
         paddingRight: '0.75rem',
         minHeight: '42px',
     },
+    topBarMobile: {
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        minHeight: '44px',
+    },
     topBarLeft: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.625rem',
         minWidth: 0,
+    },
+    topBarLeftMobile: {
+        gap: '0.375rem',
+        flex: 1,
     },
     topBarRight: {
         display: 'flex',
@@ -50,6 +62,9 @@ const useStyles = makeStyles({
     },
     topBarRightCompact: {
         gap: '0.125rem',
+    },
+    topBarRightMobile: {
+        gap: 0,
     },
     tierBadge: {
         textTransform: 'uppercase',
@@ -93,6 +108,10 @@ const useStyles = makeStyles({
         fontSize: '12px',
         gap: '0.125rem',
     },
+    breadcrumbMobile: {
+        fontSize: '12px',
+        maxWidth: '100%',
+    },
     breadcrumbItem: {
         display: 'flex',
         alignItems: 'center',
@@ -117,6 +136,9 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
+    sidebarToggleButton: {
+        flexShrink: 0,
+    },
 })
 
 interface BreadcrumbEntry {
@@ -128,9 +150,11 @@ interface TopBarProps {
     breadcrumbs: BreadcrumbEntry[]
     chatOpen?: boolean
     onToggleChat?: () => void
+    isMobile?: boolean
+    onToggleSidebar?: () => void
 }
 
-export function TopBar({ breadcrumbs, chatOpen, onToggleChat }: TopBarProps) {
+export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, onToggleSidebar }: TopBarProps) {
     const styles = useStyles()
     const navigate = useNavigate()
     const { user } = useAuth()
@@ -140,15 +164,27 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat }: TopBarProps) {
     const markAllRead = useMarkAllNotificationsAsRead()
     const unreadCount = notifications?.length ?? 0
     const tier = (user?.role ?? 'free').toString().toUpperCase()
+    const visibleBreadcrumbs = isMobile ? breadcrumbs.slice(-1) : breadcrumbs
 
     return (
-        <div className={mergeClasses(styles.topBar, isCompact && styles.topBarCompact)}>
-            <div className={styles.topBarLeft}>
-                <div className={mergeClasses(styles.breadcrumb, isCompact && styles.breadcrumbCompact)}>
-                    {breadcrumbs.map((crumb, i) => (
+        <div className={mergeClasses(styles.topBar, isCompact && styles.topBarCompact, isMobile && styles.topBarMobile)}>
+            <div className={mergeClasses(styles.topBarLeft, isMobile && styles.topBarLeftMobile)}>
+                {isMobile && onToggleSidebar && (
+                    <Tooltip content="Open navigation" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            icon={<NavigationRegular />}
+                            size="small"
+                            onClick={onToggleSidebar}
+                            className={styles.sidebarToggleButton}
+                        />
+                    </Tooltip>
+                )}
+                <div className={mergeClasses(styles.breadcrumb, isCompact && styles.breadcrumbCompact, isMobile && styles.breadcrumbMobile)}>
+                    {visibleBreadcrumbs.map((crumb, i) => (
                         <span key={i} className={styles.breadcrumbItem}>
                             {i > 0 && <Text className={styles.breadcrumbSep}>/</Text>}
-                            {i === breadcrumbs.length - 1 ? (
+                            {i === visibleBreadcrumbs.length - 1 ? (
                                 <Text className={styles.breadcrumbCurrent}>{crumb.label}</Text>
                             ) : (
                                 <Button
@@ -164,15 +200,17 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat }: TopBarProps) {
                     ))}
                 </div>
             </div>
-            <div className={mergeClasses(styles.topBarRight, isCompact && styles.topBarRightCompact)}>
-                <Badge
-                    appearance="outline"
-                    color="brand"
-                    size="small"
-                    className={mergeClasses(styles.tierBadge, isCompact && styles.tierBadgeCompact)}
-                >
-                    {tier}
-                </Badge>
+            <div className={mergeClasses(styles.topBarRight, isCompact && styles.topBarRightCompact, isMobile && styles.topBarRightMobile)}>
+                {!isMobile && (
+                    <Badge
+                        appearance="outline"
+                        color="brand"
+                        size="small"
+                        className={mergeClasses(styles.tierBadge, isCompact && styles.tierBadgeCompact)}
+                    >
+                        {tier}
+                    </Badge>
+                )}
                 <Tooltip content="Search" relationship="label">
                     <Button
                         appearance="subtle"

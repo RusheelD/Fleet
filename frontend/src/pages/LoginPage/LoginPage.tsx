@@ -23,11 +23,23 @@ const useStyles = makeStyles({
         justifyContent: 'center',
         minHeight: '100vh',
         padding: tokens.spacingVerticalXXL,
+        '@media (max-width: 900px)': {
+            alignItems: 'flex-start',
+            paddingTop: tokens.spacingVerticalL,
+            paddingBottom: tokens.spacingVerticalL,
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     card: {
         width: '100%',
         maxWidth: '420px',
         padding: tokens.spacingVerticalL,
+        '@media (max-width: 900px)': {
+            paddingTop: tokens.spacingVerticalM,
+            paddingBottom: tokens.spacingVerticalM,
+            marginTop: tokens.spacingVerticalS,
+        },
     },
     header: {
         display: 'flex',

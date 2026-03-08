@@ -17,12 +17,13 @@ import {
     BotRegular,
     HomeFilled,
     NavigationRegular,
+    DismissRegular,
 } from '@fluentui/react-icons'
 
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useCurrentProject, usePreferences, useServerEvents, ChatGeneratingProvider } from '../../hooks'
+import { useCurrentProject, usePreferences, useServerEvents, ChatGeneratingProvider, useIsMobile } from '../../hooks'
 
 import type { NavItemConfig } from '../../models'
 
@@ -36,13 +37,15 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorNeutralBackground2,
         height: '100%',
     },
+    rootMobile: {
+        position: 'relative',
+        overflow: 'hidden',
+    },
 
-    /* ───── Sidebar pane (SplitView first) ───── */
     sidebarPane: {
         flexShrink: 0,
     },
 
-    /* ───── Sidebar shell ───── */
     sidebar: {
         display: 'flex',
         flexDirection: 'column',
@@ -54,6 +57,10 @@ const useStyles = makeStyles({
         overflowY: 'auto',
         flexShrink: 0,
         boxShadow: `inset -1px 0 0 ${tokens.colorNeutralStroke2}`,
+    },
+    sidebarMobile: {
+        height: '100vh',
+        boxShadow: tokens.shadow64,
     },
     sidebarExpanded: {
         width: SIDEBAR_WIDTH_EXPANDED,
@@ -68,7 +75,38 @@ const useStyles = makeStyles({
         width: SIDEBAR_WIDTH_COLLAPSED_COMPACT,
     },
 
-    /* ───── Nav section / group ───── */
+    mobileSidebarBackdrop: {
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        zIndex: 30,
+    },
+    mobileSidebarDrawer: {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 'min(82vw, 300px)',
+        zIndex: 31,
+        transform: 'translateX(-100%)',
+        transition: 'transform 0.2s ease',
+        pointerEvents: 'none',
+    },
+    mobileSidebarDrawerOpen: {
+        transform: 'translateX(0)',
+        pointerEvents: 'auto',
+    },
+    mobileSidebarCloseRow: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        paddingTop: '0.25rem',
+        paddingBottom: 0,
+        paddingLeft: '0.25rem',
+        paddingRight: '0.25rem',
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground2,
+    },
+
     navSection: {
         display: 'flex',
         flexDirection: 'column',
@@ -99,7 +137,6 @@ const useStyles = makeStyles({
         fontSize: '10px',
     },
 
-    /* ───── Footer ───── */
     sidebarFooter: {
         marginTop: 'auto',
         padding: '0.375rem',
@@ -129,7 +166,6 @@ const useStyles = makeStyles({
         minHeight: '30px',
     },
 
-    /* ───── Main content area ───── */
     content: {
         display: 'flex',
         flexDirection: 'column',
@@ -140,12 +176,14 @@ const useStyles = makeStyles({
     mainContent: {
         flex: 1,
         overflow: 'auto',
+        minWidth: 0,
     },
     contentWithChat: {
         display: 'flex',
         flexDirection: 'row',
         flex: 1,
         overflow: 'hidden',
+        minWidth: 0,
     },
     chatPane: {
         flexShrink: 0,
@@ -154,6 +192,12 @@ const useStyles = makeStyles({
         flexDirection: 'row',
         backgroundColor: tokens.colorNeutralBackground1,
         borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    chatOverlayMobile: {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 40,
+        backgroundColor: tokens.colorNeutralBackground1,
     },
     resizeHandle: {
         width: '6px',
@@ -175,29 +219,39 @@ export function Layout() {
     const location = useLocation()
     const { slug } = useParams()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const [sidebarExpanded, setSidebarExpanded] = useState(!preferences?.sidebarCollapsed)
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
     const [chatOpen, setChatOpen] = useState(false)
 
     const { projectId, projectTitle } = useCurrentProject()
     useServerEvents(projectId)
 
-    // Open chat pane when navigated with { state: { openChat: true } }
     useEffect(() => {
         if (location.state?.openChat) {
             setChatOpen(true)
-            // Clear the state so it doesn't re-trigger on back/forward navigation
             window.history.replaceState({}, '')
         }
     }, [location.state])
 
-    // Keep live layout state synced with the settings toggle.
     useEffect(() => {
         if (preferences) {
             setSidebarExpanded(!preferences.sidebarCollapsed)
         }
     }, [preferences?.sidebarCollapsed])
 
-    /* ── Chat pane resize state ── */
+    useEffect(() => {
+        if (!isMobile) {
+            setMobileSidebarOpen(false)
+        }
+    }, [isMobile])
+
+    useEffect(() => {
+        if (isMobile) {
+            setMobileSidebarOpen(false)
+        }
+    }, [isMobile, location.pathname])
+
     const MIN_CHAT_WIDTH = 340
     const MAX_CHAT_WIDTH = 800
     const DEFAULT_CHAT_WIDTH = 480
@@ -205,14 +259,18 @@ export function Layout() {
     const isResizing = useRef(false)
 
     const handleResizeStart = useCallback(() => {
+        if (isMobile) {
+            return
+        }
+
         isResizing.current = true
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
-    }, [])
+    }, [isMobile])
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
-            if (!isResizing.current) return
+            if (!isResizing.current || isMobile) return
             const newWidth = window.innerWidth - e.clientX
             setChatWidth(Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, newWidth)))
         }
@@ -229,7 +287,7 @@ export function Layout() {
             window.removeEventListener('mousemove', handleMouseMove)
             window.removeEventListener('mouseup', handleMouseUp)
         }
-    }, [])
+    }, [isMobile])
 
     const isActive = useCallback(
         (path: string, exact?: boolean) => {
@@ -241,7 +299,6 @@ export function Layout() {
         [location.pathname],
     )
 
-    /* ── Navigation sections ── */
     const globalNav: NavItemConfig[] = [
         { icon: <FolderRegular />, label: 'All Projects', path: '/projects', exact: true },
         { icon: <SearchRegular />, label: 'Search', path: '/search' },
@@ -260,7 +317,6 @@ export function Layout() {
         { icon: <CreditCardPersonRegular />, label: 'Subscription', path: '/subscription' },
     ]
 
-    /* ── Breadcrumbs ── */
     const getBreadcrumbs = () => {
         const parts: Array<{ label: string; path?: string }> = []
 
@@ -290,131 +346,178 @@ export function Layout() {
     }
 
     const breadcrumbs = getBreadcrumbs()
+    const isCompact = preferences?.compactMode ?? false
+    const sidebarIsExpanded = isMobile ? true : sidebarExpanded
+
+    const sidebarNav = (
+        <nav
+            className={mergeClasses(
+                styles.sidebar,
+                isMobile && styles.sidebarMobile,
+                sidebarIsExpanded ? styles.sidebarExpanded : styles.sidebarCollapsed,
+                isCompact && sidebarIsExpanded && styles.sidebarExpandedCompact,
+                isCompact && !sidebarIsExpanded && styles.sidebarCollapsedCompact,
+            )}
+        >
+            {isMobile && (
+                <div className={styles.mobileSidebarCloseRow}>
+                    <Tooltip content="Close navigation" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<DismissRegular />}
+                            onClick={() => setMobileSidebarOpen(false)}
+                            aria-label="Close navigation"
+                        />
+                    </Tooltip>
+                </div>
+            )}
+            <SidebarHeader
+                expanded={sidebarIsExpanded}
+                onToggle={() => {
+                    if (isMobile) {
+                        setMobileSidebarOpen(false)
+                    } else {
+                        setSidebarExpanded((prev) => !prev)
+                    }
+                }}
+            />
+
+            {sidebarIsExpanded && slug && (
+                <ProjectSelector projectName={projectTitle ?? slug} expanded={sidebarIsExpanded} />
+            )}
+
+            {!sidebarIsExpanded && !isMobile && (
+                <div className={mergeClasses(styles.collapsedTopSlot, isCompact && styles.collapsedTopSlotCompact)}>
+                    <Tooltip content="Expand sidebar" relationship="label" positioning="after">
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<NavigationRegular />}
+                            onClick={() => setSidebarExpanded(true)}
+                            className={mergeClasses(
+                                styles.collapsedExpandButton,
+                                isCompact && styles.collapsedExpandButtonCompact,
+                            )}
+                            aria-label="Expand sidebar"
+                        />
+                    </Tooltip>
+                </div>
+            )}
+
+            <div className={mergeClasses(styles.navSection, isCompact && styles.navSectionCompact)}>
+                {sidebarIsExpanded && (
+                    <Text className={mergeClasses(styles.navSectionLabel, isCompact && styles.navSectionLabelCompact)}>
+                        Navigate
+                    </Text>
+                )}
+                {globalNav.map((item) => (
+                    <SidebarNavItem
+                        key={item.path}
+                        item={item}
+                        active={isActive(item.path, item.exact)}
+                        expanded={sidebarIsExpanded}
+                    />
+                ))}
+            </div>
+
+            {slug && (
+                <div className={mergeClasses(styles.navSection, isCompact && styles.navSectionCompact)}>
+                    {sidebarIsExpanded && (
+                        <Text className={mergeClasses(styles.navSectionLabel, isCompact && styles.navSectionLabelCompact)}>
+                            Project
+                        </Text>
+                    )}
+                    {projectNav.map((item) => (
+                        <SidebarNavItem
+                            key={item.path}
+                            item={item}
+                            active={isActive(item.path, item.exact)}
+                            expanded={sidebarIsExpanded}
+                        />
+                    ))}
+                </div>
+            )}
+
+            <div className={mergeClasses(styles.sidebarFooter, isCompact && styles.sidebarFooterCompact)}>
+                {bottomNav.map((item) => (
+                    <SidebarNavItem
+                        key={item.path}
+                        item={item}
+                        active={isActive(item.path, item.exact)}
+                        expanded={sidebarIsExpanded}
+                    />
+                ))}
+            </div>
+        </nav>
+    )
+
+    const content = (
+        <div className={styles.content}>
+            <TopBar
+                breadcrumbs={breadcrumbs}
+                chatOpen={chatOpen}
+                onToggleChat={() => setChatOpen((prev) => !prev)}
+                isMobile={isMobile}
+                onToggleSidebar={isMobile ? () => setMobileSidebarOpen(true) : undefined}
+            />
+
+            <div className={chatOpen && !isMobile ? styles.contentWithChat : styles.mainContent}>
+                <div className={styles.mainContent}>
+                    <Outlet />
+                </div>
+
+                {!isMobile && chatOpen && (
+                    <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
+                        <div
+                            className={mergeClasses(
+                                styles.resizeHandle,
+                                isResizing.current ? styles.resizeHandleActive : undefined,
+                            )}
+                            onMouseDown={handleResizeStart}
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Resize chat pane"
+                        />
+                        <ChatDrawer
+                            projectId={projectId}
+                            onClose={() => setChatOpen(false)}
+                        />
+                    </div>
+                )}
+            </div>
+
+            {isMobile && chatOpen && (
+                <div className={styles.chatOverlayMobile}>
+                    <ChatDrawer
+                        projectId={projectId}
+                        onClose={() => setChatOpen(false)}
+                    />
+                </div>
+            )}
+        </div>
+    )
 
     return (
-        <SplitView
-            containerClassName={styles.root}
-            firstPaneClassName={styles.sidebarPane}
-            first={
-                <nav
-                    className={mergeClasses(
-                        styles.sidebar,
-                        sidebarExpanded ? styles.sidebarExpanded : styles.sidebarCollapsed,
-                        preferences?.compactMode && sidebarExpanded && styles.sidebarExpandedCompact,
-                        preferences?.compactMode && !sidebarExpanded && styles.sidebarCollapsedCompact,
+        <ChatGeneratingProvider>
+            {isMobile ? (
+                <div className={mergeClasses(styles.root, styles.rootMobile)}>
+                    {mobileSidebarOpen && (
+                        <div className={styles.mobileSidebarBackdrop} onClick={() => setMobileSidebarOpen(false)} />
                     )}
-                >
-                    <SidebarHeader
-                        expanded={sidebarExpanded}
-                        onToggle={() => setSidebarExpanded((prev) => !prev)}
-                    />
-
-                    {/* Project selector (expanded only) */}
-                    {sidebarExpanded && slug && (
-                        <ProjectSelector projectName={projectTitle ?? slug} expanded={sidebarExpanded} />
-                    )}
-                    {!sidebarExpanded && (
-                        <div className={mergeClasses(styles.collapsedTopSlot, preferences?.compactMode && styles.collapsedTopSlotCompact)}>
-                            <Tooltip content="Expand sidebar" relationship="label" positioning="after">
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={<NavigationRegular />}
-                                    onClick={() => setSidebarExpanded(true)}
-                                    className={mergeClasses(
-                                        styles.collapsedExpandButton,
-                                        preferences?.compactMode && styles.collapsedExpandButtonCompact,
-                                    )}
-                                    aria-label="Expand sidebar"
-                                />
-                            </Tooltip>
-                        </div>
-                    )}
-
-                    {/* Global nav */}
-                    <div className={mergeClasses(styles.navSection, preferences?.compactMode && styles.navSectionCompact)}>
-                        {sidebarExpanded && (
-                            <Text className={mergeClasses(styles.navSectionLabel, preferences?.compactMode && styles.navSectionLabelCompact)}>
-                                Navigate
-                            </Text>
-                        )}
-                        {globalNav.map((item) => (
-                            <SidebarNavItem
-                                key={item.path}
-                                item={item}
-                                active={isActive(item.path, item.exact)}
-                                expanded={sidebarExpanded}
-                            />
-                        ))}
+                    <div className={mergeClasses(styles.mobileSidebarDrawer, mobileSidebarOpen && styles.mobileSidebarDrawerOpen)}>
+                        {sidebarNav}
                     </div>
-
-                    {/* Project-scoped nav */}
-                    {slug && (
-                        <div className={mergeClasses(styles.navSection, preferences?.compactMode && styles.navSectionCompact)}>
-                            {sidebarExpanded && (
-                                <Text className={mergeClasses(styles.navSectionLabel, preferences?.compactMode && styles.navSectionLabelCompact)}>
-                                    Project
-                                </Text>
-                            )}
-                            {projectNav.map((item) => (
-                                <SidebarNavItem
-                                    key={item.path}
-                                    item={item}
-                                    active={isActive(item.path, item.exact)}
-                                    expanded={sidebarExpanded}
-                                />
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Footer / utility nav */}
-                    <div className={mergeClasses(styles.sidebarFooter, preferences?.compactMode && styles.sidebarFooterCompact)}>
-                        {bottomNav.map((item) => (
-                            <SidebarNavItem
-                                key={item.path}
-                                item={item}
-                                active={isActive(item.path, item.exact)}
-                                expanded={sidebarExpanded}
-                            />
-                        ))}
-                    </div>
-                </nav>
-            }
-            second={
-                <ChatGeneratingProvider>
-                    <div className={styles.content}>
-                        <TopBar
-                            breadcrumbs={breadcrumbs}
-                            chatOpen={chatOpen}
-                            onToggleChat={() => setChatOpen((prev) => !prev)}
-                        />
-
-                        <div className={chatOpen ? styles.contentWithChat : styles.mainContent}>
-                            <div className={styles.mainContent}>
-                                <Outlet />
-                            </div>
-                            {chatOpen && (
-                                <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
-                                    <div
-                                        className={mergeClasses(
-                                            styles.resizeHandle,
-                                            isResizing.current ? styles.resizeHandleActive : undefined,
-                                        )}
-                                        onMouseDown={handleResizeStart}
-                                        role="separator"
-                                        aria-orientation="vertical"
-                                        aria-label="Resize chat pane"
-                                    />
-                                    <ChatDrawer
-                                        projectId={projectId}
-                                        onClose={() => setChatOpen(false)}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </ChatGeneratingProvider>
-            }
-        />
+                    {content}
+                </div>
+            ) : (
+                <SplitView
+                    containerClassName={styles.root}
+                    firstPaneClassName={styles.sidebarPane}
+                    first={sidebarNav}
+                    second={content}
+                />
+            )}
+        </ChatGeneratingProvider>
     )
 }
