@@ -17,7 +17,7 @@ import type {
   CreateWorkItemRequest, UpdateWorkItemRequest,
   CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest,
 } from './'
-import type { UserProfile, UserPreferences } from '../models'
+import type { AgentExecution, AgentInfo, LogEntry, UserProfile, UserPreferences } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
@@ -283,12 +283,129 @@ export function useRetryExecution(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (executionId: string) => retryExecution(projectId!, executionId),
-    onSuccess: () => {
+    onMutate: async (executionId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['executions'] })
+      await queryClient.cancelQueries({ queryKey: ['logs'] })
+
+      const previousExecutions = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+      const previousLogs = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
+
+      const nowIso = new Date().toISOString()
+      const optimisticId = `retry-pending-${executionId}-${Date.now()}`
+      const sourceExecution = previousExecutions
+        .flatMap(([, executions]) => executions ?? [])
+        .find((execution) => execution.id === executionId)
+
+      const optimisticAgents: AgentInfo[] = sourceExecution
+        ? sourceExecution.agents.map((agent, index) => ({
+          ...agent,
+          status: index === 0 ? 'running' : 'idle',
+          currentTask: index === 0 ? 'Retry queued' : 'Waiting to start',
+          progress: 0,
+        }))
+        : []
+
+      const optimisticExecution: AgentExecution = {
+        id: optimisticId,
+        workItemId: sourceExecution?.workItemId ?? 0,
+        workItemTitle: sourceExecution?.workItemTitle ?? 'Retrying execution',
+        status: 'queued',
+        agents: optimisticAgents,
+        startedAt: nowIso,
+        duration: 'starting...',
+        progress: 0,
+        branchName: sourceExecution?.branchName ?? null,
+        pullRequestUrl: sourceExecution?.pullRequestUrl ?? null,
+        currentPhase: 'Retry queued',
+      }
+
+      queryClient.setQueriesData<AgentExecution[]>(
+        { queryKey: ['executions'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          if (current.some((execution) => execution.id === optimisticId)) return current
+          return [optimisticExecution, ...current]
+        },
+      )
+
+      const optimisticLogMessage = sourceExecution
+        ? `Retry requested for execution ${executionId} (work item #${sourceExecution.workItemId})`
+        : `Retry requested for execution ${executionId}`
+
+      queryClient.setQueriesData<LogEntry[]>(
+        { queryKey: ['logs'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return [
+            ...current,
+            {
+              time: nowIso,
+              agent: 'System',
+              level: 'info',
+              message: optimisticLogMessage,
+              isDetailed: false,
+              executionId: optimisticId,
+            },
+          ]
+        },
+      )
+
+      return { previousExecutions, previousLogs, optimisticId }
+    },
+    onSuccess: (result, executionId, context) => {
+      if (context?.optimisticId) {
+        queryClient.setQueriesData<AgentExecution[]>(
+          { queryKey: ['executions'] },
+          (current) => {
+            if (!Array.isArray(current)) return current
+            return current.map((execution) =>
+              execution.id === context.optimisticId
+                ? {
+                  ...execution,
+                  id: result.executionId,
+                  status: 'running',
+                  currentPhase: 'Initializing retry',
+                }
+                : execution,
+            )
+          },
+        )
+
+        queryClient.setQueriesData<LogEntry[]>(
+          { queryKey: ['logs'] },
+          (current) => {
+            if (!Array.isArray(current)) return current
+            return current.map((log) =>
+              log.executionId === context.optimisticId
+                ? {
+                  ...log,
+                  executionId: result.executionId,
+                  message: `Retry started for execution ${executionId} (new execution ${result.executionId})`,
+                }
+                : log,
+            )
+          },
+        )
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ['logs'] })
       void queryClient.invalidateQueries({ queryKey: ['executions'] })
       void queryClient.invalidateQueries({ queryKey: ['work-items'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: (_error, _executionId, context) => {
+      if (context?.previousExecutions) {
+        for (const [queryKey, snapshot] of context.previousExecutions) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+      if (context?.previousLogs) {
+        for (const [queryKey, snapshot] of context.previousLogs) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
     },
   })
 }

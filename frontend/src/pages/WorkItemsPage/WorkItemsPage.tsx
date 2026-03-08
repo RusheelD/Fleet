@@ -35,6 +35,11 @@ import { useWorkItems, useWorkItemLevels, useUpdateWorkItem, useBulkUpdateWorkIt
 import { useCurrentProject, usePreferences } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
+import {
+    DEFAULT_WORK_ITEM_COLUMN_WIDTHS,
+    WORK_ITEM_TABLE_COLUMNS,
+    type WorkItemTableColumnKey,
+} from './workItemTableColumns'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
 
@@ -153,6 +158,19 @@ const useStyles = makeStyles({
         flexDirection: 'column' as const,
         gap: '0.25rem',
     },
+    columnSurface: {
+        padding: '0.75rem',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '0.5rem',
+        minWidth: '220px',
+        borderRadius: tokens.borderRadiusLarge,
+    },
+    columnHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
     filterHeader: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -224,6 +242,9 @@ export function WorkItemsPage() {
     const [selectedWorkItemNumbers, setSelectedWorkItemNumbers] = useState<Set<number>>(new Set())
     const [bulkState, setBulkState] = useState<WorkItemState | ''>('')
     const [bulkAssignee, setBulkAssignee] = useState('')
+    const [collapsedColumns, setCollapsedColumns] = useState<Set<WorkItemTableColumnKey>>(new Set())
+    const [columnWidths, setColumnWidths] =
+        useState<Record<WorkItemTableColumnKey, number>>({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
 
     const updateMutation = useUpdateWorkItem(projectId)
     const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
@@ -285,6 +306,36 @@ export function WorkItemsPage() {
 
     const clearSelection = useCallback(() => {
         setSelectedWorkItemNumbers(new Set())
+    }, [])
+
+    const handleToggleColumnVisibility = useCallback((column: WorkItemTableColumnKey, visible: boolean) => {
+        setCollapsedColumns((previous) => {
+            const next = new Set(previous)
+            if (visible) {
+                next.delete(column)
+            } else {
+                const definition = WORK_ITEM_TABLE_COLUMNS.find((entry) => entry.key === column)
+                if (definition?.collapsible) {
+                    next.add(column)
+                }
+            }
+            return next
+        })
+    }, [])
+
+    const handleResizeColumn = useCallback((column: WorkItemTableColumnKey, width: number) => {
+        setColumnWidths((previous) => {
+            const nextWidth = Math.round(width)
+            if (previous[column] === nextWidth) {
+                return previous
+            }
+            return { ...previous, [column]: nextWidth }
+        })
+    }, [])
+
+    const handleResetColumns = useCallback(() => {
+        setCollapsedColumns(new Set())
+        setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
     }, [])
 
     const levelMap = useMemo(() => {
@@ -497,6 +548,39 @@ export function WorkItemsPage() {
                                     </div>
                                 </PopoverSurface>
                             </Popover>
+                            <Popover withArrow>
+                                <PopoverTrigger disableButtonEnhancement>
+                                    <ToolbarButton>Columns</ToolbarButton>
+                                </PopoverTrigger>
+                                <PopoverSurface className={styles.columnSurface}>
+                                    <div className={styles.columnHeader}>
+                                        <Text weight="semibold" size={300}>Columns</Text>
+                                        <Button
+                                            appearance="subtle"
+                                            size="small"
+                                            icon={<DismissRegular />}
+                                            onClick={handleResetColumns}
+                                        >
+                                            Reset
+                                        </Button>
+                                    </div>
+                                    <Divider />
+                                    {WORK_ITEM_TABLE_COLUMNS.map((column) => {
+                                        const visible = !collapsedColumns.has(column.key)
+                                        return (
+                                            <Checkbox
+                                                key={column.key}
+                                                label={column.label}
+                                                checked={visible}
+                                                disabled={!column.collapsible}
+                                                onChange={(_event, data) => {
+                                                    handleToggleColumnVisibility(column.key, data.checked === true)
+                                                }}
+                                            />
+                                        )
+                                    })}
+                                </PopoverSurface>
+                            </Popover>
                             <ToolbarDivider />
                             <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
                             {selectedCount > 0 && (
@@ -566,6 +650,9 @@ export function WorkItemsPage() {
                         onToggleSelectionForItems={toggleSelectionForItems}
                         onReparent={handleReparent}
                         onTitleChange={handleTitleChange}
+                        columnWidths={columnWidths}
+                        collapsedColumns={collapsedColumns}
+                        onResizeColumn={handleResizeColumn}
                     />
                 )}
                 {viewMode === 'list' && (
@@ -578,6 +665,9 @@ export function WorkItemsPage() {
                         onToggleSelection={toggleSelection}
                         onToggleSelectionForItems={toggleSelectionForItems}
                         onTitleChange={handleTitleChange}
+                        columnWidths={columnWidths}
+                        collapsedColumns={collapsedColumns}
+                        onResizeColumn={handleResizeColumn}
                     />
                 )}
                 {viewMode === 'board' && (

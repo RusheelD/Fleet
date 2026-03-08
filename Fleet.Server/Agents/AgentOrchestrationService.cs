@@ -1203,9 +1203,27 @@ public class AgentOrchestrationService(
             }
 
             // Mark the draft PR as ready for review
-            if (prNumber > 0)
+            var resolvedPrNumber = prNumber > 0
+                ? prNumber
+                : (TryParsePullRequestNumber(prUrl) ?? 0);
+            if (resolvedPrNumber <= 0)
             {
-                await MarkPullRequestReadyAsync(accessToken, repoFullName, prNumber, externalCancellation);
+                var discoveredPr = await FindOpenPullRequestByHeadBranchAsync(
+                    accessToken,
+                    repoFullName,
+                    sandbox.BranchName,
+                    externalCancellation);
+                if (discoveredPr.Number > 0)
+                {
+                    resolvedPrNumber = discoveredPr.Number;
+                    if (string.IsNullOrWhiteSpace(prUrl))
+                        prUrl = discoveredPr.Url;
+                }
+            }
+
+            if (resolvedPrNumber > 0)
+            {
+                await MarkPullRequestReadyAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation);
                 await scopedNotificationService.PublishAsync(
                     userId,
                     projectId,
@@ -1214,9 +1232,16 @@ public class AgentOrchestrationService(
                     prUrl ?? "A pull request is ready for review.",
                         executionId);
             }
+            else if (!string.IsNullOrWhiteSpace(prUrl))
+            {
+                logger.LogWarning(
+                    "Execution {ExecutionId}: pipeline succeeded but could not resolve PR number from URL {PrUrl}",
+                    executionId,
+                    prUrl);
+            }
 
-            var prLifecycle = prNumber > 0
-                ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, prNumber, externalCancellation)
+            var prLifecycle = resolvedPrNumber > 0
+                ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation)
                 : null;
 
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
@@ -2242,6 +2267,62 @@ public class AgentOrchestrationService(
             return null;
 
         return int.TryParse(segments[3], out var prNumber) ? prNumber : null;
+    }
+
+    private async Task<(int Number, string? Url)> FindOpenPullRequestByHeadBranchAsync(
+        string accessToken,
+        string repoFullName,
+        string headBranch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var owner = repoFullName.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(headBranch))
+                return (0, null);
+
+            var encodedHead = Uri.EscapeDataString($"{owner}:{headBranch}");
+            var client = httpClientFactory.CreateClient("GitHub");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"https://api.github.com/repos/{repoFullName}/pulls?state=open&head={encodedHead}&per_page=10");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Failed to find open PR for branch {Branch}: status={StatusCode}",
+                    headBranch,
+                    response.StatusCode);
+                return (0, null);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var root = JsonSerializer.Deserialize<JsonElement>(body);
+            if (root.ValueKind != JsonValueKind.Array)
+                return (0, null);
+
+            foreach (var pull in root.EnumerateArray())
+            {
+                if (!pull.TryGetProperty("number", out var numberProp) || !numberProp.TryGetInt32(out var number))
+                    continue;
+
+                if (number <= 0)
+                    continue;
+
+                var url = pull.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() : null;
+                return (number, url);
+            }
+
+            return (0, null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve open PR for branch {Branch}", headBranch);
+            return (0, null);
+        }
     }
 
     private sealed record DraftPullRequestCreateResult(

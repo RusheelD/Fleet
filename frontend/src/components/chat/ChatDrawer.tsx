@@ -65,6 +65,13 @@ interface ChatDrawerProps {
     onClose: () => void
 }
 
+const DEFAULT_GENERATE_MESSAGE =
+    'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
+
+function normalizeMessageContent(value: string): string {
+    return value.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
 export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const styles = useStyles()
     const queryClient = useQueryClient()
@@ -137,9 +144,13 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         const pending = optimisticMessages.filter(m => !serverIds.has(m.id))
         // Also deduplicate by content - if the server already has the user message, skip
         const serverUserContents = new Set(
-            serverMessages.filter(m => m.role === 'user').map(m => m.content)
+            serverMessages
+                .filter(m => m.role === 'user')
+                .map(m => normalizeMessageContent(m.content))
         )
-        const unique = pending.filter(m => m.role !== 'user' || !serverUserContents.has(m.content))
+        const unique = pending.filter(
+            m => m.role !== 'user' || !serverUserContents.has(normalizeMessageContent(m.content)),
+        )
         return [...serverMessages, ...unique]
     }, [serverMessages, optimisticMessages])
     const suggestions = chatData?.suggestions ?? []
@@ -166,17 +177,13 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
         setMessage('')
 
-        const defaultGenerateMessage = 'Generate work items based on the context you have been given.'
-
         // If generating with no user input, use the default generate message
         const contentToSend = generateWorkItems && !userContent
-            ? defaultGenerateMessage
+            ? DEFAULT_GENERATE_MESSAGE
             : userContent
 
         // Optimistic: show user message immediately
-        const displayContent = generateWorkItems && !userContent
-            ? 'Generate work items'
-            : userContent
+        const displayContent = contentToSend
         setOptimisticMessages([{
             id: `optimistic-${Date.now()}`,
             role: 'user',

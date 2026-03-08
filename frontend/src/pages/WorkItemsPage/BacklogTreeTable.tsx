@@ -21,6 +21,11 @@ import type { WorkItem, WorkItemLevel } from '../../models'
 import { resolveLevelIcon } from '../../proxies'
 import { StateDot } from './StateDot'
 import { formatWorkItemState } from './stateLabel'
+import {
+    buildWorkItemGridTemplateColumns,
+    MIN_WORK_ITEM_COLUMN_WIDTHS,
+    type WorkItemTableColumnKey,
+} from './workItemTableColumns'
 
 /* ── Drop zone enum ────────────────────────────────────────── */
 type DropZone = 'above' | 'on' | 'below' | null
@@ -37,7 +42,6 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -67,7 +71,6 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -299,6 +302,21 @@ const useStyles = makeStyles({
         paddingLeft: '8px',
         paddingRight: '8px',
     },
+    resizeHandle: {
+        position: 'absolute',
+        top: '-6px',
+        right: '-6px',
+        width: '12px',
+        height: 'calc(100% + 12px)',
+        cursor: 'col-resize',
+        zIndex: 2,
+    },
+    headerCell: {
+        position: 'relative',
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'center',
+    },
 })
 
 interface BacklogTreeTableProps {
@@ -311,6 +329,9 @@ interface BacklogTreeTableProps {
     onToggleSelectionForItems?: (itemNumbers: number[], selected: boolean) => void
     onReparent?: (itemId: number, newParentId: number | null) => void
     onTitleChange?: (itemId: number, newTitle: string) => void
+    columnWidths: Record<WorkItemTableColumnKey, number>
+    collapsedColumns: ReadonlySet<WorkItemTableColumnKey>
+    onResizeColumn?: (column: WorkItemTableColumnKey, width: number) => void
 }
 
 export function BacklogTreeTable({
@@ -323,8 +344,59 @@ export function BacklogTreeTable({
     onToggleSelectionForItems,
     onReparent,
     onTitleChange,
+    columnWidths,
+    collapsedColumns,
+    onResizeColumn,
 }: BacklogTreeTableProps) {
     const styles = useStyles()
+    const gridTemplateColumns = useMemo(
+        () => buildWorkItemGridTemplateColumns(columnWidths, collapsedColumns),
+        [columnWidths, collapsedColumns],
+    )
+    const activeResizeRef = useRef<{
+        column: WorkItemTableColumnKey
+        startX: number
+        startWidth: number
+    } | null>(null)
+
+    const startResizingColumn = useCallback((event: React.MouseEvent, column: WorkItemTableColumnKey) => {
+        if (!onResizeColumn) {
+            return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+
+        const startWidth = columnWidths[column]
+        activeResizeRef.current = { column, startX: event.clientX, startWidth }
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const active = activeResizeRef.current
+            if (!active) {
+                return
+            }
+
+            const delta = moveEvent.clientX - active.startX
+            const nextWidth = Math.max(
+                MIN_WORK_ITEM_COLUMN_WIDTHS[active.column],
+                active.startWidth + delta,
+            )
+            onResizeColumn(active.column, nextWidth)
+        }
+
+        const handleMouseUp = () => {
+            activeResizeRef.current = null
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+        }
+
+        window.addEventListener('mousemove', handleMouseMove)
+        window.addEventListener('mouseup', handleMouseUp)
+    }, [columnWidths, onResizeColumn])
+    const isColumnVisible = useCallback(
+        (column: WorkItemTableColumnKey) => !collapsedColumns.has(column),
+        [collapsedColumns],
+    )
 
     /* ── Build tree structure ──────────────────────────────── */
     const { roots, childrenMap } = useMemo(() => {
@@ -350,22 +422,73 @@ export function BacklogTreeTable({
 
         return { roots: rootItems, childrenMap: cMap }
     }, [items])
+    const itemById = useMemo(() => {
+        const map = new Map<number, WorkItem>()
+        for (const item of items) {
+            map.set(item.workItemNumber, item)
+        }
+        return map
+    }, [items])
+
+    const isResolvedLikeState = useCallback((state: string) =>
+        state === 'Resolved' || state === 'Resolved (AI)' || state === 'Closed',
+    [])
+
+    const areAllDescendantsResolved = useCallback((itemId: number): boolean => {
+        const queue = [...(childrenMap.get(itemId) ?? [])]
+        if (queue.length === 0) {
+            return false
+        }
+
+        while (queue.length > 0) {
+            const current = queue.shift()!
+            if (!isResolvedLikeState(current.state)) {
+                return false
+            }
+
+            const children = childrenMap.get(current.workItemNumber)
+            if (children?.length) {
+                queue.push(...children)
+            }
+        }
+
+        return true
+    }, [childrenMap, isResolvedLikeState])
+
+    const shouldAutoCollapseNode = useCallback((itemId: number): boolean => {
+        const item = itemById.get(itemId)
+        if (!item) {
+            return false
+        }
+
+        return isResolvedLikeState(item.state) && areAllDescendantsResolved(itemId)
+    }, [areAllDescendantsResolved, isResolvedLikeState, itemById])
 
     /* ── Track expanded state ──────────────────────────────── */
     const [expanded, setExpanded] = useState<Set<number>>(() => {
         const initial = new Set<number>()
         for (const root of roots) {
-            if (childrenMap.has(root.workItemNumber)) initial.add(root.workItemNumber)
+            if (childrenMap.has(root.workItemNumber) && !shouldAutoCollapseNode(root.workItemNumber)) {
+                initial.add(root.workItemNumber)
+            }
         }
         return initial
     })
 
-    // Auto-expand parents when new children arrive (e.g., LLM creates nested items)
+    // Auto-expand active parents when new children arrive, but auto-collapse
+    // resolved branches whose descendants are all resolved/closed.
     useEffect(() => {
         setExpanded((prev) => {
             const next = new Set(prev)
             let changed = false
             for (const parentId of childrenMap.keys()) {
+                if (shouldAutoCollapseNode(parentId)) {
+                    if (next.delete(parentId)) {
+                        changed = true
+                    }
+                    continue
+                }
+
                 if (!next.has(parentId)) {
                     next.add(parentId)
                     changed = true
@@ -373,7 +496,7 @@ export function BacklogTreeTable({
             }
             return changed ? next : prev
         })
-    }, [childrenMap])
+    }, [childrenMap, shouldAutoCollapseNode])
 
     const toggleExpanded = useCallback((id: number) => {
         setExpanded((prev) => {
@@ -560,7 +683,7 @@ export function BacklogTreeTable({
     return (
         <div className={styles.container}>
             {/* header */}
-            <div className={styles.header}>
+            <div className={styles.header} style={{ gridTemplateColumns }}>
                 <div className={styles.selectHeaderCell}>
                     <Checkbox
                         aria-label="Select visible work items"
@@ -573,13 +696,76 @@ export function BacklogTreeTable({
                         }}
                     />
                 </div>
-                <Caption1 className={styles.headerText}>Type</Caption1>
-                <Caption1 className={styles.headerText}>Title</Caption1>
-                <Caption1 className={styles.headerText}>State</Caption1>
-                <Caption1 className={styles.headerText}>ID</Caption1>
-                <Caption1 className={styles.headerText}>Difficulty</Caption1>
-                <Caption1 className={styles.headerText}>Assigned To</Caption1>
-                <Caption1 className={styles.headerText}>Tags</Caption1>
+                {isColumnVisible('type') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>Type</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'type')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('title') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>Title</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'title')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('state') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>State</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'state')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('id') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>ID</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'id')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('difficulty') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>Difficulty</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'difficulty')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('assignedTo') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>Assigned To</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'assignedTo')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('tags') && (
+                    <div className={styles.headerCell}>
+                        <Caption1 className={styles.headerText}>Tags</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'tags')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
             </div>
 
             {/* rows */}
@@ -600,7 +786,10 @@ export function BacklogTreeTable({
                             isDragging && styles.rowDragging,
                             dropClass || undefined,
                         )}
-                        style={{ borderLeftColor: level?.color ?? 'transparent' }}
+                        style={{
+                            borderLeftColor: level?.color ?? 'transparent',
+                            gridTemplateColumns,
+                        }}
                         onClick={() => {
                             if (!isEditing) onItemClick?.(item)
                         }}
@@ -618,22 +807,32 @@ export function BacklogTreeTable({
                                 onChange={(_event, data) => onToggleSelection?.(item.workItemNumber, data.checked === true)}
                             />
                         </div>
-                        {/* Work Item Type */}
-                        <div className={styles.typeCell}>
-                            <span
-                                className={styles.dragHandle}
-                                onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.workItemNumber) }}
-                                onMouseUp={() => setDraggableRowId(null)}
-                            >
-                                <ReOrderRegular />
-                            </span>
-                            <Text className={styles.typeName}>
-                                {level?.name ?? '-'}
-                            </Text>
-                        </div>
+                        {isColumnVisible('type') && (
+                            <div className={styles.typeCell}>
+                                <span
+                                    className={styles.dragHandle}
+                                    onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.workItemNumber) }}
+                                    onMouseUp={() => setDraggableRowId(null)}
+                                >
+                                    <ReOrderRegular />
+                                </span>
+                                <Text className={styles.typeName}>
+                                    {level?.name ?? '-'}
+                                </Text>
+                            </div>
+                        )}
 
-                        {/* Title */}
-                        <div className={styles.titleCell} style={{ paddingLeft: `${depth * 24}px` }}>
+                        {isColumnVisible('title') && (
+                            <div className={styles.titleCell} style={{ paddingLeft: `${depth * 24}px` }}>
+                                {!isColumnVisible('type') && (
+                                    <span
+                                        className={styles.dragHandle}
+                                        onMouseDown={(e) => { e.stopPropagation(); setDraggableRowId(item.workItemNumber) }}
+                                        onMouseUp={() => setDraggableRowId(null)}
+                                    >
+                                        <ReOrderRegular />
+                                    </span>
+                                )}
                             {hasChildren ? (
                                 <Button
                                     className={styles.expandButton}
@@ -685,48 +884,54 @@ export function BacklogTreeTable({
                                     <span className={styles.childCountNumber}>{childCount}</span>
                                 </span>
                             )}
-                        </div>
+                            </div>
+                        )}
 
-                        {/* State */}
-                        <div className={styles.stateCell}>
-                            <StateDot state={item.state} />
-                            <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
-                        </div>
+                        {isColumnVisible('state') && (
+                            <div className={styles.stateCell}>
+                                <StateDot state={item.state} />
+                                <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
+                            </div>
+                        )}
 
-                        {/* ID */}
-                        <Text className={styles.idText}>{item.workItemNumber}</Text>
+                        {isColumnVisible('id') && (
+                            <Text className={styles.idText}>{item.workItemNumber}</Text>
+                        )}
 
-                        {/* Difficulty */}
-                        <Text className={styles.difficultyText}>
-                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
-                        </Text>
+                        {isColumnVisible('difficulty') && (
+                            <Text className={styles.difficultyText}>
+                                {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
+                            </Text>
+                        )}
 
-                        {/* Assigned To */}
-                        <div className={styles.assigneeCell}>
-                            {item.assignedTo && (
-                                <>
-                                    <span className={styles.assigneeIcon}>
-                                        {item.isAI ? <BotRegular /> : <PersonRegular />}
-                                    </span>
-                                    <Text className={styles.assigneeName}>{item.assignedTo}</Text>
-                                </>
-                            )}
-                        </div>
+                        {isColumnVisible('assignedTo') && (
+                            <div className={styles.assigneeCell}>
+                                {item.assignedTo && (
+                                    <>
+                                        <span className={styles.assigneeIcon}>
+                                            {item.isAI ? <BotRegular /> : <PersonRegular />}
+                                        </span>
+                                        <Text className={styles.assigneeName}>{item.assignedTo}</Text>
+                                    </>
+                                )}
+                            </div>
+                        )}
 
-                        {/* Tags */}
-                        <div className={styles.tagsCell}>
-                            {item.tags.slice(0, 3).map((tag) => (
-                                <Badge
-                                    key={tag}
-                                    appearance="tint"
-                                    size="small"
-                                    color="informative"
-                                    className={styles.tagBadge}
-                                >
-                                    {tag}
-                                </Badge>
-                            ))}
-                        </div>
+                        {isColumnVisible('tags') && (
+                            <div className={styles.tagsCell}>
+                                {item.tags.slice(0, 3).map((tag) => (
+                                    <Badge
+                                        key={tag}
+                                        appearance="tint"
+                                        size="small"
+                                        color="informative"
+                                        className={styles.tagBadge}
+                                    >
+                                        {tag}
+                                    </Badge>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )
             })}

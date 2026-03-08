@@ -19,6 +19,11 @@ import type { WorkItem, WorkItemLevel } from '../../models'
 import { resolveLevelIcon } from '../../proxies'
 import { StateDot } from './StateDot'
 import { formatWorkItemState } from './stateLabel'
+import {
+    buildWorkItemGridTemplateColumns,
+    MIN_WORK_ITEM_COLUMN_WIDTHS,
+    type WorkItemTableColumnKey,
+} from './workItemTableColumns'
 
 /* ── Sortable columns ─────────────────────────────────────── */
 type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
@@ -36,7 +41,6 @@ const useStyles = makeStyles({
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
-        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
@@ -81,7 +85,6 @@ const useStyles = makeStyles({
     /* ── data rows ─────────────────────────────────────────── */
     row: {
         display: 'grid',
-        gridTemplateColumns: '34px 110px 3fr 120px 55px 70px 150px 150px',
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
@@ -214,6 +217,19 @@ const useStyles = makeStyles({
         paddingLeft: '8px',
         paddingRight: '8px',
     },
+    resizeHandle: {
+        position: 'absolute',
+        top: '-6px',
+        right: '-6px',
+        width: '12px',
+        height: 'calc(100% + 12px)',
+        cursor: 'col-resize',
+        zIndex: 2,
+    },
+    headerCellResizable: {
+        position: 'relative',
+        minWidth: 0,
+    },
 })
 
 interface BacklogListProps {
@@ -225,6 +241,9 @@ interface BacklogListProps {
     onToggleSelection?: (itemNumber: number, selected: boolean) => void
     onToggleSelectionForItems?: (itemNumbers: number[], selected: boolean) => void
     onTitleChange?: (itemId: number, newTitle: string) => void
+    columnWidths: Record<WorkItemTableColumnKey, number>
+    collapsedColumns: ReadonlySet<WorkItemTableColumnKey>
+    onResizeColumn?: (column: WorkItemTableColumnKey, width: number) => void
 }
 
 export function BacklogList({
@@ -236,12 +255,24 @@ export function BacklogList({
     onToggleSelection,
     onToggleSelectionForItems,
     onTitleChange,
+    columnWidths,
+    collapsedColumns,
+    onResizeColumn,
 }: BacklogListProps) {
     const styles = useStyles()
 
     /* ── Sorting ───────────────────────────────────────────── */
     const [sortKey, setSortKey] = useState<SortKey>('id')
     const [sortDir, setSortDir] = useState<SortDir>('asc')
+    const gridTemplateColumns = useMemo(
+        () => buildWorkItemGridTemplateColumns(columnWidths, collapsedColumns),
+        [columnWidths, collapsedColumns],
+    )
+    const activeResizeRef = useRef<{
+        column: WorkItemTableColumnKey
+        startX: number
+        startWidth: number
+    } | null>(null)
 
     const handleSort = useCallback((key: SortKey) => {
         setSortKey((prev) => {
@@ -253,6 +284,41 @@ export function BacklogList({
             return key
         })
     }, [])
+
+    const startResizingColumn = useCallback((event: React.MouseEvent, column: WorkItemTableColumnKey) => {
+        if (!onResizeColumn) {
+            return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+
+        const startWidth = columnWidths[column]
+        activeResizeRef.current = { column, startX: event.clientX, startWidth }
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const active = activeResizeRef.current
+            if (!active) {
+                return
+            }
+
+            const delta = moveEvent.clientX - active.startX
+            const nextWidth = Math.max(
+                MIN_WORK_ITEM_COLUMN_WIDTHS[active.column],
+                active.startWidth + delta,
+            )
+            onResizeColumn(active.column, nextWidth)
+        }
+
+        const handleMouseUp = () => {
+            activeResizeRef.current = null
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+        }
+
+        window.addEventListener('mousemove', handleMouseMove)
+        window.addEventListener('mouseup', handleMouseUp)
+    }, [columnWidths, onResizeColumn])
 
     const getLevel = useCallback(
         (item: WorkItem): WorkItemLevel | undefined =>
@@ -343,10 +409,15 @@ export function BacklogList({
         )
     }
 
+    const isColumnVisible = useCallback(
+        (column: WorkItemTableColumnKey) => !collapsedColumns.has(column),
+        [collapsedColumns],
+    )
+
     return (
         <div className={styles.container}>
             {/* header */}
-            <div className={styles.header}>
+            <div className={styles.header} style={{ gridTemplateColumns }}>
                 <div className={styles.selectHeaderCell}>
                     <Checkbox
                         aria-label="Select visible work items"
@@ -359,31 +430,82 @@ export function BacklogList({
                         }}
                     />
                 </div>
-                <div className={styles.headerCell} onClick={() => handleSort('type')}>
-                    <Caption1 className={styles.headerText}>Type</Caption1>
-                    <SortIndicator col="type" />
-                </div>
-                <div className={styles.headerCell} onClick={() => handleSort('title')}>
-                    <Caption1 className={styles.headerText}>Title</Caption1>
-                    <SortIndicator col="title" />
-                </div>
-                <div className={styles.headerCell} onClick={() => handleSort('state')}>
-                    <Caption1 className={styles.headerText}>State</Caption1>
-                    <SortIndicator col="state" />
-                </div>
-                <div className={styles.headerCell} onClick={() => handleSort('id')}>
-                    <Caption1 className={styles.headerText}>ID</Caption1>
-                    <SortIndicator col="id" />
-                </div>
-                <div className={styles.headerCell} onClick={() => handleSort('difficulty')}>
-                    <Caption1 className={styles.headerText}>Difficulty</Caption1>
-                    <SortIndicator col="difficulty" />
-                </div>
-                <div className={styles.headerCell} onClick={() => handleSort('assignedTo')}>
-                    <Caption1 className={styles.headerText}>Assigned To</Caption1>
-                    <SortIndicator col="assignedTo" />
-                </div>
-                <Caption1 className={styles.headerText}>Tags</Caption1>
+                {isColumnVisible('type') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('type')}>
+                        <Caption1 className={styles.headerText}>Type</Caption1>
+                        <SortIndicator col="type" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'type')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('title') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('title')}>
+                        <Caption1 className={styles.headerText}>Title</Caption1>
+                        <SortIndicator col="title" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'title')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('state') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('state')}>
+                        <Caption1 className={styles.headerText}>State</Caption1>
+                        <SortIndicator col="state" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'state')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('id') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('id')}>
+                        <Caption1 className={styles.headerText}>ID</Caption1>
+                        <SortIndicator col="id" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'id')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('difficulty') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('difficulty')}>
+                        <Caption1 className={styles.headerText}>Difficulty</Caption1>
+                        <SortIndicator col="difficulty" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'difficulty')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('assignedTo') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)} onClick={() => handleSort('assignedTo')}>
+                        <Caption1 className={styles.headerText}>Assigned To</Caption1>
+                        <SortIndicator col="assignedTo" />
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'assignedTo')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
+                {isColumnVisible('tags') && (
+                    <div className={mergeClasses(styles.headerCell, styles.headerCellResizable)}>
+                        <Caption1 className={styles.headerText}>Tags</Caption1>
+                        <span
+                            className={styles.resizeHandle}
+                            onMouseDown={(event) => startResizingColumn(event, 'tags')}
+                            aria-hidden="true"
+                        />
+                    </div>
+                )}
             </div>
 
             {/* rows */}
@@ -396,7 +518,10 @@ export function BacklogList({
                     <div
                         key={item.workItemNumber}
                         className={mergeClasses(styles.row, isSelected && styles.rowSelected)}
-                        style={{ borderLeftColor: level?.color ?? 'transparent' }}
+                        style={{
+                            borderLeftColor: level?.color ?? 'transparent',
+                            gridTemplateColumns,
+                        }}
                         onClick={() => {
                             if (!isEditing) onItemClick?.(item)
                         }}
@@ -408,85 +533,92 @@ export function BacklogList({
                                 onChange={(_event, data) => onToggleSelection?.(item.workItemNumber, data.checked === true)}
                             />
                         </div>
-                        {/* Work Item Type */}
-                        <div className={styles.typeCell}>
-                            <Text className={styles.typeName}>
-                                {level?.name ?? '-'}
-                            </Text>
-                        </div>
-
-                        {/* Title */}
-                        <div className={styles.titleCell}>
-                            {level && (
-                                <span className={styles.titleIcon} style={{ color: level.color }}>
-                                    {resolveLevelIcon(level.iconName)}
-                                </span>
-                            )}
-                            {isEditing ? (
-                                <Input
-                                    ref={editInputRef}
-                                    className={styles.titleInput}
-                                    size="small"
-                                    appearance="underline"
-                                    value={editTitle}
-                                    onChange={(_e, data) => setEditTitle(data.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') commitEdit()
-                                        if (e.key === 'Escape') cancelEdit()
-                                    }}
-                                    onBlur={commitEdit}
-                                    onClick={(e) => e.stopPropagation()}
-                                />
-                            ) : (
-                                <Text
-                                    className={styles.titleText}
-                                    onDoubleClick={(e) => startEditing(item, e)}
-                                >
-                                    {item.title}
+                        {isColumnVisible('type') && (
+                            <div className={styles.typeCell}>
+                                <Text className={styles.typeName}>
+                                    {level?.name ?? '-'}
                                 </Text>
-                            )}
-                        </div>
+                            </div>
+                        )}
 
-                        {/* State */}
-                        <div className={styles.stateCell}>
-                            <StateDot state={item.state} />
-                            <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
-                        </div>
-
-                        {/* ID */}
-                        <Text className={styles.idText}>{item.workItemNumber}</Text>
-
-                        {/* Difficulty */}
-                        <Text className={styles.difficultyText}>
-                            {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
-                        </Text>
-
-                        {/* Assigned To */}
-                        <div className={styles.assigneeCell}>
-                            {item.assignedTo && (
-                                <>
-                                    <span className={styles.assigneeIcon}>
-                                        {item.isAI ? <BotRegular /> : <PersonRegular />}
+                        {isColumnVisible('title') && (
+                            <div className={styles.titleCell}>
+                                {level && (
+                                    <span className={styles.titleIcon} style={{ color: level.color }}>
+                                        {resolveLevelIcon(level.iconName)}
                                     </span>
-                                    <Text className={styles.assigneeName}>{item.assignedTo}</Text>
-                                </>
-                            )}
-                        </div>
+                                )}
+                                {isEditing ? (
+                                    <Input
+                                        ref={editInputRef}
+                                        className={styles.titleInput}
+                                        size="small"
+                                        appearance="underline"
+                                        value={editTitle}
+                                        onChange={(_e, data) => setEditTitle(data.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') commitEdit()
+                                            if (e.key === 'Escape') cancelEdit()
+                                        }}
+                                        onBlur={commitEdit}
+                                        onClick={(e) => e.stopPropagation()}
+                                    />
+                                ) : (
+                                    <Text
+                                        className={styles.titleText}
+                                        onDoubleClick={(e) => startEditing(item, e)}
+                                    >
+                                        {item.title}
+                                    </Text>
+                                )}
+                            </div>
+                        )}
 
-                        {/* Tags */}
-                        <div className={styles.tagsCell}>
-                            {item.tags.slice(0, 3).map((tag) => (
-                                <Badge
-                                    key={tag}
-                                    appearance="tint"
-                                    size="small"
-                                    color="informative"
-                                    className={styles.tagBadge}
-                                >
-                                    {tag}
-                                </Badge>
-                            ))}
-                        </div>
+                        {isColumnVisible('state') && (
+                            <div className={styles.stateCell}>
+                                <StateDot state={item.state} />
+                                <Text className={styles.stateText}>{formatWorkItemState(item.state)}</Text>
+                            </div>
+                        )}
+
+                        {isColumnVisible('id') && (
+                            <Text className={styles.idText}>{item.workItemNumber}</Text>
+                        )}
+
+                        {isColumnVisible('difficulty') && (
+                            <Text className={styles.difficultyText}>
+                                {(['', 'D1', 'D2', 'D3', 'D4', 'D5'] as const)[item.difficulty] ?? '-'}
+                            </Text>
+                        )}
+
+                        {isColumnVisible('assignedTo') && (
+                            <div className={styles.assigneeCell}>
+                                {item.assignedTo && (
+                                    <>
+                                        <span className={styles.assigneeIcon}>
+                                            {item.isAI ? <BotRegular /> : <PersonRegular />}
+                                        </span>
+                                        <Text className={styles.assigneeName}>{item.assignedTo}</Text>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
+                        {isColumnVisible('tags') && (
+                            <div className={styles.tagsCell}>
+                                {item.tags.slice(0, 3).map((tag) => (
+                                    <Badge
+                                        key={tag}
+                                        appearance="tint"
+                                        size="small"
+                                        color="informative"
+                                        className={styles.tagBadge}
+                                    >
+                                        {tag}
+                                    </Badge>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )
             })}

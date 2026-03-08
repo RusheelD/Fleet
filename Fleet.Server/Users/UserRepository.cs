@@ -4,6 +4,7 @@ using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Fleet.Server.Auth;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Fleet.Server.Users;
 
@@ -26,11 +27,31 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
     {
         var user = await context.UserProfiles.FindAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
+        var normalizedEmail = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedEmail))
+            throw new ArgumentException("Email is required.");
+
+        var emailInUse = await context.UserProfiles
+            .AnyAsync(u => u.Id != userId && u.Email == normalizedEmail);
+        if (emailInUse)
+            throw new InvalidOperationException("That email address is already in use by another account.");
+
         user.DisplayName = request.DisplayName;
-        user.Email = request.Email;
+        user.Email = normalizedEmail;
         user.Bio = request.Bio;
         user.Location = request.Location;
-        await context.SaveChangesAsync();
+
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg &&
+                                           pg.SqlState == PostgresErrorCodes.UniqueViolation &&
+                                           string.Equals(pg.ConstraintName, "IX_UserProfiles_Email", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("That email address is already in use by another account.", ex);
+        }
+
         return new UserProfileDto(
             user.DisplayName,
             user.Email,

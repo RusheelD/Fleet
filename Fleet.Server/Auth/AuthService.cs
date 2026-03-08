@@ -41,10 +41,11 @@ public class AuthService(
         if (string.IsNullOrEmpty(oid))
             throw new UnauthorizedAccessException("No object identifier claim found in token.");
 
-        var email = principal.FindFirst(ClaimTypes.Email)?.Value
+        var rawEmail = principal.FindFirst(ClaimTypes.Email)?.Value
             ?? principal.FindFirst("preferred_username")?.Value
             ?? "";
-        var isUnlimitedTierUser = IsUnlimitedTierUser(oid, email);
+        var email = NormalizeEmail(rawEmail, oid);
+        var isUnlimitedTierUser = IsUnlimitedTierUser(oid, rawEmail);
 
         var existing = await authRepository.GetByEntraObjectIdAsync(oid);
         if (existing is not null)
@@ -79,7 +80,7 @@ public class AuthService(
         var user = new UserProfile
         {
             EntraObjectId = oid,
-            Username = DeriveUsername(email, name),
+            Username = DeriveUsername(rawEmail, name),
             Email = email,
             DisplayName = name,
             Bio = string.Empty,
@@ -139,6 +140,18 @@ public class AuthService(
             return email.Split('@')[0].ToLowerInvariant();
 
         return displayName.ToLowerInvariant().Replace(' ', '.');
+    }
+
+    private static string NormalizeEmail(string email, string oid)
+    {
+        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+
+        // Some identity tokens omit email. Use a stable per-user placeholder to
+        // satisfy the unique email constraint without conflating distinct users.
+        var safeOid = (oid ?? string.Empty).Trim().ToLowerInvariant();
+        return $"{safeOid}@entra.local";
     }
 
     private static UserProfileDto ToProfileDto(UserProfile user) =>

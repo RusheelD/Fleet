@@ -63,7 +63,7 @@ public class AgentPhaseRunner(
     /// chat limit to keep context windows lean and inference fast.
     /// </summary>
     private const int AgentMaxToolOutputLength = 12_000;
-    private const int EstimatedProgressCeilingPercent = 95;
+    private const int EstimatedProgressCeilingPercent = 100;
     private const int FallbackProgressCadenceToolCalls = 1;
     private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
 
@@ -125,7 +125,9 @@ public class AgentPhaseRunner(
                     return;
                 }
 
-                clampedPercent = Math.Clamp(clampedPercent, lastReportedPercent + 1, EstimatedProgressCeilingPercent);
+                var nextMinimum = lastReportedPercent + 1;
+                var safeMinimum = Math.Min(nextMinimum, EstimatedProgressCeilingPercent);
+                clampedPercent = ClampWithinProgressWindow(clampedPercent, safeMinimum, EstimatedProgressCeilingPercent);
             }
 
             if (!force && clampedPercent <= lastReportedPercent)
@@ -152,19 +154,41 @@ public class AgentPhaseRunner(
                 return EstimatedProgressCeilingPercent;
             }
 
-            if (maxToolCalls <= 0)
-            {
-                return Math.Clamp(lastReportedPercent + 1, 1, EstimatedProgressCeilingPercent);
-            }
-
-            var estimated = (int)Math.Round((double)totalToolCalls / maxToolCalls * 100.0);
-            var minAllowed = Math.Max(1, lastReportedPercent + 1);
-            if (minAllowed > EstimatedProgressCeilingPercent)
+            var nextMinimum = lastReportedPercent + 1;
+            if (nextMinimum >= EstimatedProgressCeilingPercent)
             {
                 return EstimatedProgressCeilingPercent;
             }
 
-            return Math.Clamp(estimated, minAllowed, EstimatedProgressCeilingPercent);
+            if (maxToolCalls <= 0)
+            {
+                return ClampWithinProgressWindow(nextMinimum, 1, EstimatedProgressCeilingPercent);
+            }
+
+            var estimated = (int)Math.Round((double)totalToolCalls / maxToolCalls * 100.0);
+            var minAllowed = Math.Max(1, nextMinimum);
+            if (minAllowed >= EstimatedProgressCeilingPercent)
+            {
+                return EstimatedProgressCeilingPercent;
+            }
+
+            return ClampWithinProgressWindow(estimated, minAllowed, EstimatedProgressCeilingPercent);
+        }
+
+        static int ClampWithinProgressWindow(int value, int min, int max)
+        {
+            // Defensive bound clamp that never throws when min/max are inconsistent.
+            if (min > max)
+            {
+                return max;
+            }
+
+            if (value < min)
+            {
+                return min;
+            }
+
+            return value > max ? max : value;
         }
 
         try
