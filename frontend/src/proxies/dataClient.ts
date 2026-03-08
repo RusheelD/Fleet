@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import {
-  getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug,
-  getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem,
+  getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
+  getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs, clearLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
@@ -145,6 +145,44 @@ export function useDeleteProject() {
 export function useWorkItems(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('work-items', () => getWorkItems(projectId!), [projectId], [], {
     refetchInterval: options?.pollingInterval ?? WORK_ITEMS_POLL_MS,
+  })
+}
+
+export function useExportWorkItems(projectId: string | undefined) {
+  return useMutation({
+    mutationFn: () => exportWorkItemsFile(projectId!),
+  })
+}
+
+export function useImportWorkItems(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: unknown) => importWorkItemsFile(projectId!, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useExportProjects() {
+  return useMutation({
+    mutationFn: () => exportProjectsFile(),
+  })
+}
+
+export function useImportProjects() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: unknown) => importProjectsFile(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+    },
   })
 }
 

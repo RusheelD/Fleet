@@ -1,8 +1,26 @@
 export { ApiError, setTokenGetter, fetchWithAuth, get, post, put, del, postForm } from './proxy'
-export { getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug } from './projectsProxy'
-export type { CreateProjectRequest, UpdateProjectRequest } from './projectsProxy'
-export { getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem } from './workItemsProxy'
-export type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsProxy'
+export {
+  getProjects,
+  getProjectDashboard,
+  getProjectDashboardBySlug,
+  createProject,
+  updateProject,
+  deleteProject,
+  checkSlug,
+  exportProjectsFile,
+  importProjectsFile,
+} from './projectsProxy'
+export type { CreateProjectRequest, UpdateProjectRequest, ProjectsImportResult } from './projectsProxy'
+export {
+  getWorkItems,
+  createWorkItem,
+  updateWorkItem,
+  bulkUpdateWorkItems,
+  deleteWorkItem,
+  exportWorkItemsFile,
+  importWorkItemsFile,
+} from './workItemsProxy'
+export type { CreateWorkItemRequest, UpdateWorkItemRequest, WorkItemsImportResult } from './workItemsProxy'
 export { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
 export type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
 export {
@@ -32,7 +50,11 @@ export {
   useCreateProject,
   useUpdateProject,
   useDeleteProject,
+  useExportProjects,
+  useImportProjects,
   useWorkItems,
+  useExportWorkItems,
+  useImportWorkItems,
   useWorkItemLevels,
   useExecutions,
   useLogs,

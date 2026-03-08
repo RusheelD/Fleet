@@ -1,4 +1,4 @@
-import { get, post, put, del } from './'
+import { get, post, put, del, fetchWithAuth, ApiError } from './'
 import type { WorkItem } from '../models'
 
 export function getWorkItems(projectId: string): Promise<WorkItem[]> {
@@ -55,4 +55,28 @@ export function bulkUpdateWorkItems(
 
 export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {
   return del<void>(`/api/projects/${projectId}/work-items/${workItemNumber}`)
+}
+
+export interface WorkItemsImportResult {
+  workItemsImported: number
+  workItemLevelsImported: number
+}
+
+export async function exportWorkItemsFile(projectId: string): Promise<Blob> {
+  const response = await fetchWithAuth(`/api/projects/${projectId}/work-items/export`, { method: 'GET' })
+  if (!response.ok) {
+    let body: unknown
+    try {
+      body = await response.json()
+    } catch {
+      body = await response.text()
+    }
+    throw new ApiError(response.status, body)
+  }
+
+  return response.blob()
+}
+
+export function importWorkItemsFile(projectId: string, payload: unknown): Promise<WorkItemsImportResult> {
+  return post<WorkItemsImportResult>(`/api/projects/${projectId}/work-items/import`, payload)
 }

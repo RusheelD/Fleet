@@ -1,4 +1,4 @@
-import { get, post, put, del } from './'
+import { get, post, put, del, fetchWithAuth, ApiError } from './'
 import type { ProjectData, ProjectDashboard, SlugCheckResult } from '../models'
 
 export interface CreateProjectRequest {
@@ -19,6 +19,13 @@ export interface UpdateProjectRequest {
   commitAuthorMode?: string
   commitAuthorName?: string
   commitAuthorEmail?: string
+}
+
+export interface ProjectsImportResult {
+  projectsImported: number
+  workItemsImported: number
+  workItemLevelsImported: number
+  importedProjectIds: string[]
 }
 
 export function getProjects(): Promise<ProjectData[]> {
@@ -47,4 +54,23 @@ export function deleteProject(projectId: string): Promise<void> {
 
 export function checkSlug(name: string): Promise<SlugCheckResult> {
   return get<SlugCheckResult>(`/api/projects/check-slug?name=${encodeURIComponent(name)}`)
+}
+
+export async function exportProjectsFile(): Promise<Blob> {
+  const response = await fetchWithAuth('/api/projects/export', { method: 'GET' })
+  if (!response.ok) {
+    let body: unknown
+    try {
+      body = await response.json()
+    } catch {
+      body = await response.text()
+    }
+    throw new ApiError(response.status, body)
+  }
+
+  return response.blob()
+}
+
+export function importProjectsFile(payload: unknown): Promise<ProjectsImportResult> {
+  return post<ProjectsImportResult>('/api/projects/import', payload)
 }

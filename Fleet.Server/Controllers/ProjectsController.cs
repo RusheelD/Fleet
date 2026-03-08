@@ -5,6 +5,8 @@ using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
+using System.Text;
+using System.Text.Json;
 
 namespace Fleet.Server.Controllers;
 
@@ -13,6 +15,7 @@ namespace Fleet.Server.Controllers;
 [Route("api/[controller]")]
 public class ProjectsController(
     IProjectService projectService,
+    IProjectImportExportService projectImportExportService,
     IAuthService authService,
     IServerEventPublisher eventPublisher) : ControllerBase
 {
@@ -135,5 +138,40 @@ public class ProjectsController(
             ServerEventTopics.ProjectsUpdated,
             new { projectId });
         return NoContent();
+    }
+
+    [HttpGet("export")]
+    public async Task<IActionResult> Export(CancellationToken cancellationToken)
+    {
+        var payload = await projectImportExportService.ExportProjectsAsync(cancellationToken);
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var fileName = $"fleet-projects-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
+        return File(bytes, "application/json", fileName);
+    }
+
+    [HttpPost("import")]
+    public async Task<IActionResult> Import([FromBody] ProjectsExportFileDto payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var importResult = await projectImportExportService.ImportProjectsAsync(payload, cancellationToken);
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { importedProjectIds = importResult.ImportedProjectIds });
+            return Ok(importResult);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid import file",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest,
+                Instance = HttpContext?.Request?.Path.ToString() ?? "/api/projects/import",
+            });
+        }
     }
 }

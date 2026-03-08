@@ -12,6 +12,7 @@ namespace Fleet.Server.Tests.Controllers;
 public class ProjectsControllerTests
 {
     private Mock<IProjectService> _projectService = null!;
+    private Mock<IProjectImportExportService> _projectImportExportService = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IServerEventPublisher> _eventPublisher = null!;
     private ProjectsController _sut = null!;
@@ -20,10 +21,15 @@ public class ProjectsControllerTests
     public void Setup()
     {
         _projectService = new Mock<IProjectService>();
+        _projectImportExportService = new Mock<IProjectImportExportService>();
         _authService = new Mock<IAuthService>();
         _eventPublisher = new Mock<IServerEventPublisher>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
-        _sut = new ProjectsController(_projectService.Object, _authService.Object, _eventPublisher.Object);
+        _sut = new ProjectsController(
+            _projectService.Object,
+            _projectImportExportService.Object,
+            _authService.Object,
+            _eventPublisher.Object);
     }
 
     [TestMethod]
@@ -185,5 +191,45 @@ public class ProjectsControllerTests
         var result = await _sut.Delete("missing");
 
         Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task Export_ReturnsJsonFile()
+    {
+        _projectImportExportService
+            .Setup(s => s.ExportProjectsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProjectsExportFileDto("fleet.projects+workitems", 1, DateTime.UtcNow.ToString("o"), []));
+
+        var result = await _sut.Export(CancellationToken.None);
+
+        var file = result as FileContentResult;
+        Assert.IsNotNull(file);
+        Assert.AreEqual("application/json", file.ContentType);
+    }
+
+    [TestMethod]
+    public async Task Import_Success_ReturnsOk()
+    {
+        var payload = new ProjectsExportFileDto("fleet.projects+workitems", 1, DateTime.UtcNow.ToString("o"), []);
+        _projectImportExportService
+            .Setup(s => s.ImportProjectsAsync(payload, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProjectsImportResultDto(1, 0, 0, ["p1"]));
+
+        var result = await _sut.Import(payload, CancellationToken.None);
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task Import_InvalidPayload_ReturnsBadRequest()
+    {
+        var payload = new ProjectsExportFileDto("bad-format", 1, DateTime.UtcNow.ToString("o"), []);
+        _projectImportExportService
+            .Setup(s => s.ImportProjectsAsync(payload, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Unsupported projects import format."));
+
+        var result = await _sut.Import(payload, CancellationToken.None);
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
     }
 }

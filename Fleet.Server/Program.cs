@@ -273,6 +273,7 @@ builder.Services.AddScoped<IConnectionService, ConnectionService>();
 builder.Services.AddScoped<IGitHubTokenProtector, GitHubTokenProtector>();
 builder.Services.AddScoped<IGitHubApiService, GitHubApiService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 builder.Services.AddScoped<IWorkItemLevelService, WorkItemLevelService>();
 builder.Services.AddScoped<IAgentService, AgentService>();

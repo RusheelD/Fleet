@@ -653,18 +653,21 @@ public class AgentOrchestrationService(
             .ToListAsync(cancellationToken);
 
         var priorProgress = Math.Clamp(priorExecution.Progress, 0, 1);
-        var shouldReuseExistingBranchAndPr =
+        var reuseBranchName = string.IsNullOrWhiteSpace(priorExecution.BranchName)
+            ? null
+            : priorExecution.BranchName.Trim();
+        var shouldReuseExistingPullRequest =
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
 
         var retryPlan = new RetryExecutionPlan(
             SourceExecutionId: priorExecution.Id,
             SourceStatus: priorExecution.Status,
-            ReuseBranchName: shouldReuseExistingBranchAndPr ? priorExecution.BranchName : null,
-            ReusePullRequestUrl: shouldReuseExistingBranchAndPr ? priorExecution.PullRequestUrl : null,
-            ReusePullRequestNumber: shouldReuseExistingBranchAndPr
+            ReuseBranchName: reuseBranchName,
+            ReusePullRequestUrl: shouldReuseExistingPullRequest ? priorExecution.PullRequestUrl : null,
+            ReusePullRequestNumber: shouldReuseExistingPullRequest
                 ? TryParsePullRequestNumber(priorExecution.PullRequestUrl)
                 : null,
-            ReusePullRequestTitle: shouldReuseExistingBranchAndPr ? priorExecution.PullRequestTitle : null,
+            ReusePullRequestTitle: shouldReuseExistingPullRequest ? priorExecution.PullRequestTitle : null,
             PriorProgressEstimate: priorProgress,
             RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults));
 

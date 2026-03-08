@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useCallback, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
@@ -20,10 +20,12 @@ import {
     GridRegular,
     TextAlignJustifyRegular,
     ArrowSortRegular,
+    ArrowUploadRegular,
+    ArrowDownloadRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { ProjectCard, ProjectRow, NewProjectDialog } from './'
-import { useProjects } from '../../proxies'
+import { useProjects, useExportProjects, useImportProjects } from '../../proxies'
 import { usePreferences } from '../../hooks'
 import type { ProjectData } from '../../models'
 
@@ -122,8 +124,11 @@ export function ProjectsPage() {
     const styles = useStyles()
     const navigate = useNavigate()
     const { data: projects, isLoading } = useProjects()
+    const exportProjectsMutation = useExportProjects()
+    const importProjectsMutation = useImportProjects()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
+    const importFileInputRef = useRef<HTMLInputElement | null>(null)
 
     const [searchQuery, setSearchQuery] = useState('')
     const [sortKey, setSortKey] = useState<SortKey>('Last activity')
@@ -144,6 +149,43 @@ export function ProjectsPage() {
         return [...filtered].sort(sortFns[sortKey])
     }, [projects, searchQuery, sortKey])
 
+    const handleExportProjects = useCallback(async () => {
+        try {
+            const blob = await exportProjectsMutation.mutateAsync()
+            const downloadUrl = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = downloadUrl
+            anchor.download = `fleet-projects-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+            document.body.appendChild(anchor)
+            anchor.click()
+            anchor.remove()
+            URL.revokeObjectURL(downloadUrl)
+        } catch {
+            // Ignore: errors are surfaced by query error boundaries / API handlers.
+        }
+    }, [exportProjectsMutation])
+
+    const handleImportClick = useCallback(() => {
+        importFileInputRef.current?.click()
+    }, [])
+
+    const handleImportFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0]
+        if (!file) {
+            return
+        }
+
+        try {
+            const text = await file.text()
+            const payload = JSON.parse(text) as unknown
+            await importProjectsMutation.mutateAsync(payload)
+        } catch {
+            // Ignore: invalid JSON or API errors are surfaced by API handlers.
+        } finally {
+            event.target.value = ''
+        }
+    }, [importProjectsMutation])
+
     if (isLoading) {
         return (
             <div className={styles.page}>
@@ -158,13 +200,38 @@ export function ProjectsPage() {
                 title="Projects"
                 subtitle="Manage your projects and track AI agent progress"
                 actions={
-                    <Button
-                        appearance="primary"
-                        icon={<AddRegular />}
-                        onClick={() => setNewProjectOpen(true)}
-                    >
-                        New Project
-                    </Button>
+                    <>
+                        <input
+                            ref={importFileInputRef}
+                            type="file"
+                            accept=".json,application/json"
+                            style={{ display: 'none' }}
+                            onChange={handleImportFileChange}
+                        />
+                        <Button
+                            appearance="secondary"
+                            icon={<ArrowUploadRegular />}
+                            onClick={handleImportClick}
+                            disabled={importProjectsMutation.isPending}
+                        >
+                            Import
+                        </Button>
+                        <Button
+                            appearance="secondary"
+                            icon={<ArrowDownloadRegular />}
+                            onClick={() => void handleExportProjects()}
+                            disabled={exportProjectsMutation.isPending || (projects?.length ?? 0) === 0}
+                        >
+                            Export
+                        </Button>
+                        <Button
+                            appearance="primary"
+                            icon={<AddRegular />}
+                            onClick={() => setNewProjectOpen(true)}
+                        >
+                            New Project
+                        </Button>
+                    </>
                 }
             />
 

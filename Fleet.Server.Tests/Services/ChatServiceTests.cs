@@ -478,15 +478,13 @@ public class ChatServiceTests
     [TestMethod]
     public async Task SendMessageAsync_WithWriteTool_PublishesStreamingEvents()
     {
-        var writeTool = new Mock<IChatTool>();
-        writeTool.Setup(t => t.Name).Returns("bulk_update_work_items");
-        writeTool.Setup(t => t.Description).Returns("Bulk update work items");
-        writeTool.Setup(t => t.ParametersJsonSchema).Returns("{}");
-        writeTool.Setup(t => t.IsWriteTool).Returns(true);
-        writeTool.Setup(t => t.ExecuteAsync(It.IsAny<string>(), It.IsAny<ChatToolContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Updated 1 work item.");
+        var writeTool = new TestChatTool(
+            name: "bulk_update_work_items",
+            description: "Bulk update work items",
+            isWriteTool: true,
+            result: "Updated 1 work item.");
 
-        var toolRegistryWithTools = new ChatToolRegistry([writeTool.Object]);
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
         var sut = new ChatService(
             _chatRepo.Object,
             _llmClient.Object,
@@ -514,17 +512,18 @@ public class ChatServiceTests
             .ReturnsAsync(assistantMsg);
 
         var toolCalls = new List<LLMToolCall> { new("call-1", "bulk_update_work_items", "{}") };
-        var callCount = 0;
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse(string.Empty, null), // Session auto-naming request
+            new LLMResponse(null, toolCalls),    // Main loop: tool call
+            new LLMResponse("Done", null),       // Main loop: final text
+        });
+
         _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                callCount++;
-                return callCount == 1
-                    ? new LLMResponse(null, toolCalls)
-                    : new LLMResponse("Done", null);
-            });
+            .ReturnsAsync(() => responses.Dequeue());
 
         await sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+        Assert.AreEqual(1, writeTool.ExecuteCount);
 
         _eventPublisher.Verify(
             p => p.PublishProjectEventAsync(
@@ -551,6 +550,25 @@ public class ChatServiceTests
                 It.IsAny<object?>(),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
+    }
+
+    private sealed class TestChatTool(
+        string name,
+        string description,
+        bool isWriteTool,
+        string result) : IChatTool
+    {
+        public string Name => name;
+        public string Description => description;
+        public string ParametersJsonSchema => "{}";
+        public bool IsWriteTool => isWriteTool;
+        public int ExecuteCount { get; private set; }
+
+        public Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
+        {
+            ExecuteCount++;
+            return Task.FromResult(result);
+        }
     }
 }
 

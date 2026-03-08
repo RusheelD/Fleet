@@ -1,9 +1,12 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Models;
+using Fleet.Server.Projects;
 using Fleet.Server.Realtime;
 using Fleet.Server.WorkItems;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Text.Json;
 
 namespace Fleet.Server.Controllers;
 
@@ -13,6 +16,7 @@ namespace Fleet.Server.Controllers;
 [ServiceFilter(typeof(ProjectOwnershipFilter))]
 public class WorkItemsController(
     IWorkItemService workItemService,
+    IProjectImportExportService projectImportExportService,
     IAuthService authService,
     IServerEventPublisher eventPublisher) : ControllerBase
 {
@@ -84,5 +88,52 @@ public class WorkItemsController(
             ServerEventTopics.ProjectsUpdated,
             new { projectId });
         return NoContent();
+    }
+
+    [HttpGet("export")]
+    public async Task<IActionResult> Export(string projectId, CancellationToken cancellationToken)
+    {
+        var payload = await projectImportExportService.ExportWorkItemsAsync(projectId, cancellationToken);
+        if (payload is null) return NotFound();
+
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var fileName = $"fleet-work-items-{projectId}-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
+        return File(bytes, "application/json", fileName);
+    }
+
+    [HttpPost("import")]
+    public async Task<IActionResult> Import(
+        string projectId,
+        [FromBody] ProjectWorkItemsExportFileDto payload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var importResult = await projectImportExportService.ImportWorkItemsAsync(projectId, payload, cancellationToken);
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, importedCount = importResult.WorkItemsImported },
+                cancellationToken);
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId },
+                cancellationToken);
+            return Ok(importResult);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid import file",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest,
+                Instance = HttpContext?.Request?.Path.ToString() ?? $"/api/projects/{projectId}/work-items/import",
+            });
+        }
     }
 }

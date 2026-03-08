@@ -1,6 +1,7 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Controllers;
 using Fleet.Server.Models;
+using Fleet.Server.Projects;
 using Fleet.Server.Realtime;
 using Fleet.Server.WorkItems;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ namespace Fleet.Server.Tests.Controllers;
 public class WorkItemsControllerTests
 {
     private Mock<IWorkItemService> _service = null!;
+    private Mock<IProjectImportExportService> _projectImportExportService = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IServerEventPublisher> _eventPublisher = null!;
     private WorkItemsController _sut = null!;
@@ -22,10 +24,15 @@ public class WorkItemsControllerTests
     public void Setup()
     {
         _service = new Mock<IWorkItemService>();
+        _projectImportExportService = new Mock<IProjectImportExportService>();
         _authService = new Mock<IAuthService>();
         _eventPublisher = new Mock<IServerEventPublisher>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
-        _sut = new WorkItemsController(_service.Object, _authService.Object, _eventPublisher.Object);
+        _sut = new WorkItemsController(
+            _service.Object,
+            _projectImportExportService.Object,
+            _authService.Object,
+            _eventPublisher.Object);
     }
 
     [TestMethod]
@@ -116,5 +123,66 @@ public class WorkItemsControllerTests
         var result = await _sut.Delete(ProjectId, 99);
 
         Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task Export_ReturnsJsonFile()
+    {
+        _projectImportExportService
+            .Setup(s => s.ExportWorkItemsAsync(ProjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProjectWorkItemsExportFileDto(
+                "fleet.workitems",
+                1,
+                DateTime.UtcNow.ToString("o"),
+                "Project 1",
+                "owner/repo",
+                [],
+                []));
+
+        var result = await _sut.Export(ProjectId, CancellationToken.None);
+
+        var file = result as FileContentResult;
+        Assert.IsNotNull(file);
+        Assert.AreEqual("application/json", file.ContentType);
+    }
+
+    [TestMethod]
+    public async Task Import_Success_ReturnsOk()
+    {
+        var payload = new ProjectWorkItemsExportFileDto(
+            "fleet.workitems",
+            1,
+            DateTime.UtcNow.ToString("o"),
+            "Project 1",
+            "owner/repo",
+            [],
+            []);
+        _projectImportExportService
+            .Setup(s => s.ImportWorkItemsAsync(ProjectId, payload, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkItemsImportResultDto(4, 1));
+
+        var result = await _sut.Import(ProjectId, payload, CancellationToken.None);
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task Import_InvalidPayload_ReturnsBadRequest()
+    {
+        var payload = new ProjectWorkItemsExportFileDto(
+            "bad-format",
+            1,
+            DateTime.UtcNow.ToString("o"),
+            "Project 1",
+            "owner/repo",
+            [],
+            []);
+        _projectImportExportService
+            .Setup(s => s.ImportWorkItemsAsync(ProjectId, payload, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Unsupported work-items import format."));
+
+        var result = await _sut.Import(ProjectId, payload, CancellationToken.None);
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
     }
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -28,10 +28,19 @@ import {
     TextBulletListTreeRegular,
     AddRegular,
     DismissRegular,
+    ArrowUploadRegular,
+    ArrowDownloadRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
-import { useWorkItems, useWorkItemLevels, useUpdateWorkItem, useBulkUpdateWorkItems } from '../../proxies'
+import {
+    useWorkItems,
+    useWorkItemLevels,
+    useUpdateWorkItem,
+    useBulkUpdateWorkItems,
+    useExportWorkItems,
+    useImportWorkItems,
+} from '../../proxies'
 import { useCurrentProject, usePreferences } from '../../hooks'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
@@ -248,6 +257,9 @@ export function WorkItemsPage() {
 
     const updateMutation = useUpdateWorkItem(projectId)
     const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
+    const exportWorkItemsMutation = useExportWorkItems(projectId)
+    const importWorkItemsMutation = useImportWorkItems(projectId)
+    const importFileInputRef = useRef<HTMLInputElement | null>(null)
 
     const handleReparent = useCallback((itemId: number, newParentId: number | null) => {
         // Send 0 to clear parent (backend treats 0 as 'set to null')
@@ -337,6 +349,43 @@ export function WorkItemsPage() {
         setCollapsedColumns(new Set())
         setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
     }, [])
+
+    const handleExportWorkItems = useCallback(async () => {
+        try {
+            const blob = await exportWorkItemsMutation.mutateAsync()
+            const downloadUrl = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = downloadUrl
+            anchor.download = `fleet-work-items-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+            document.body.appendChild(anchor)
+            anchor.click()
+            anchor.remove()
+            URL.revokeObjectURL(downloadUrl)
+        } catch {
+            // Ignore: errors are surfaced by API handlers.
+        }
+    }, [exportWorkItemsMutation])
+
+    const handleImportClick = useCallback(() => {
+        importFileInputRef.current?.click()
+    }, [])
+
+    const handleImportFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0]
+        if (!file) {
+            return
+        }
+
+        try {
+            const text = await file.text()
+            const payload = JSON.parse(text) as unknown
+            await importWorkItemsMutation.mutateAsync(payload)
+        } catch {
+            // Ignore: invalid JSON or API errors are surfaced by API handlers.
+        } finally {
+            event.target.value = ''
+        }
+    }, [importWorkItemsMutation])
 
     const levelMap = useMemo(() => {
         const map = new Map<number, WorkItemLevel>()
@@ -432,6 +481,29 @@ export function WorkItemsPage() {
                     subtitle="Manage your backlog, track progress, and assign agents"
                     actions={
                         <div className={styles.headerActions}>
+                            <input
+                                ref={importFileInputRef}
+                                type="file"
+                                accept=".json,application/json"
+                                style={{ display: 'none' }}
+                                onChange={handleImportFileChange}
+                            />
+                            <Button
+                                appearance="secondary"
+                                icon={<ArrowUploadRegular />}
+                                onClick={handleImportClick}
+                                disabled={importWorkItemsMutation.isPending}
+                            >
+                                Import
+                            </Button>
+                            <Button
+                                appearance="secondary"
+                                icon={<ArrowDownloadRegular />}
+                                onClick={() => void handleExportWorkItems()}
+                                disabled={exportWorkItemsMutation.isPending || !projectId}
+                            >
+                                Export
+                            </Button>
                             <Button
                                 appearance="primary"
                                 icon={<AddRegular />}
