@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 
 env:
+  AZURE_WEBAPP_NAME: fleet-ai-dev
   NODE_VERSION: "20"
   DOTNET_VERSION: "10.0.x"
   FRONTEND_DIR: frontend
@@ -81,17 +82,30 @@ jobs:
           name: fleet-ai-dev-app
           path: ${{ env.PUBLISH_DIR }}
 
-      - name: Login to Azure
+      - name: Login to Azure (OIDC)
+        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_FD172B62E3BB4325AD4F4E86373604D1 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CDF7AFF2C0244FFBB2EACF6F6B7D6DAB }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2C6AD26EA9194C5DB05F968B2BE367BA }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID || secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_FD172B62E3BB4325AD4F4E86373604D1 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID || secrets.AZURE_TENANT_ID || secrets.AZUREAPPSERVICE_TENANTID_CDF7AFF2C0244FFBB2EACF6F6B7D6DAB }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID || secrets.AZURE_SUBSCRIPTION_ID || secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2C6AD26EA9194C5DB05F968B2BE367BA }}
+          allow-no-subscriptions: true
 
-      - name: Deploy to Azure Web App
-        id: deploy-to-webapp
+      - name: Deploy to Azure Web App (publish profile)
+        id: deploy-to-webapp-publish-profile
+        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
         uses: azure/webapps-deploy@v3
         with:
-          app-name: fleet-ai-dev
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          slot-name: Production
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ${{ env.PUBLISH_DIR }}
+
+      - name: Deploy to Azure Web App (OIDC)
+        id: deploy-to-webapp-oidc
+        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
           slot-name: Production
           package: ${{ env.PUBLISH_DIR }}
