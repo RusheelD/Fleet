@@ -8,7 +8,75 @@ public static class DbConnectionStringResolver
 {
     public static string? ResolveFleetDbLocalMigrationConnectionString(IConfiguration configuration)
     {
-        var localMigrationCandidates = new[]
+        var isLocalEnvironment = IsLocalEnvironment(configuration);
+        var localMigrationConnection = ResolveFromCandidates(
+            GetLocalMigrationCandidates(configuration),
+            forceSupabaseSessionPooling: isLocalEnvironment);
+        if (!string.IsNullOrWhiteSpace(localMigrationConnection))
+        {
+            return localMigrationConnection;
+        }
+
+        return ResolveFromCandidates(
+            GetDefaultCandidates(configuration),
+            forceSupabaseSessionPooling: isLocalEnvironment);
+    }
+
+    public static string? ResolveFleetDbConnectionString(IConfiguration configuration)
+    {
+        var isLocalEnvironment = IsLocalEnvironment(configuration);
+        if (isLocalEnvironment)
+        {
+            var localMigrationConnection = ResolveFromCandidates(
+                GetLocalMigrationCandidates(configuration),
+                forceSupabaseSessionPooling: true);
+            if (!string.IsNullOrWhiteSpace(localMigrationConnection))
+            {
+                return localMigrationConnection;
+            }
+        }
+
+        return ResolveFromCandidates(
+            GetDefaultCandidates(configuration),
+            forceSupabaseSessionPooling: isLocalEnvironment);
+    }
+
+    private static bool IsLocalEnvironment(IConfiguration configuration)
+    {
+        var environmentName =
+            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
+            configuration["ASPNETCORE_ENVIRONMENT"] ??
+            configuration["DOTNET_ENVIRONMENT"] ??
+            "Development";
+
+        return string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(environmentName, "Local", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveFromCandidates(
+        IEnumerable<string?> candidates,
+        bool forceSupabaseSessionPooling)
+    {
+        foreach (var candidate in candidates)
+        {
+            var normalized = NormalizePostgresConnectionString(candidate);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            return forceSupabaseSessionPooling
+                ? ForceSupabaseSessionPooling(normalized)
+                : normalized;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string?> GetLocalMigrationCandidates(IConfiguration configuration)
+    {
+        return new[]
         {
             configuration.GetConnectionString("fleetdb_migrations"),
             configuration.GetConnectionString("FleetDbMigrations"),
@@ -17,22 +85,11 @@ public static class DbConnectionStringResolver
             configuration["FLEETDB_MIGRATIONS_CONNECTION_STRING"],
             configuration["DATABASE_MIGRATIONS_URL"],
         };
-
-        foreach (var candidate in localMigrationCandidates)
-        {
-            var normalized = NormalizePostgresConnectionString(candidate);
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                return normalized;
-            }
-        }
-
-        return ResolveFleetDbConnectionString(configuration);
     }
 
-    public static string? ResolveFleetDbConnectionString(IConfiguration configuration)
+    private static IEnumerable<string?> GetDefaultCandidates(IConfiguration configuration)
     {
-        var candidates = new[]
+        return new[]
         {
             configuration.GetConnectionString("fleetdb"),
             configuration.GetConnectionString("FleetDb"),
@@ -50,17 +107,6 @@ public static class DbConnectionStringResolver
             configuration["POSTGRES_CONNECTION_STRING"],
             configuration["FLEETDB_CONNECTION_STRING"],
         };
-
-        foreach (var candidate in candidates)
-        {
-            var normalized = NormalizePostgresConnectionString(candidate);
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                return normalized;
-            }
-        }
-
-        return null;
     }
 
     private static string? NormalizePostgresConnectionString(string? raw)
@@ -110,6 +156,18 @@ public static class DbConnectionStringResolver
         }
 
         ApplyQueryStringOptions(builder, uri.Query);
+        return builder.ConnectionString;
+    }
+
+    private static string ForceSupabaseSessionPooling(string connectionString)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        var host = builder.Host ?? string.Empty;
+        if (host.EndsWith(".pooler.supabase.com", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Port = 5432;
+        }
+
         return builder.ConnectionString;
     }
 

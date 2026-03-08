@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 
 namespace Fleet.Server.Data;
@@ -42,6 +43,8 @@ public class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbContext>
                 maxRetryCount: 5,
                 maxRetryDelay: TimeSpan.FromSeconds(10),
                 errorCodesToAdd: null));
+        builder.ReplaceService<IHistoryRepository, NoLockNpgsqlHistoryRepository>();
+        builder.ReplaceService<IMigrationCommandExecutor, NoTransactionMigrationCommandExecutor>();
         return new FleetDbContext(builder.Options);
     }
 }
