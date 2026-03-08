@@ -65,3 +65,5 @@ jobs:
           app-name: fleet-api-dev
           slot-name: Production
           package: .
+          clean: true
+
