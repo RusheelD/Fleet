@@ -16,8 +16,8 @@ env:
   DOTNET_VERSION: "10.0.x"
   FRONTEND_DIR: ./frontend
   BACKEND_PROJECT: ./Fleet.Server/Fleet.Server.csproj
-  BACKEND_WWWROOT: ./Fleet.Server/wwwroot
   PUBLISH_DIR: ./publish
+  DEPLOY_ZIP: ./fleet-ai-dev.zip
 
 jobs:
   build-and-deploy:
@@ -44,25 +44,12 @@ jobs:
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run build
 
-      - name: Recreate backend wwwroot and copy frontend build
+      - name: Verify frontend dist
         shell: bash
         run: |
-          rm -rf "${{ env.BACKEND_WWWROOT }}"
-          mkdir -p "${{ env.BACKEND_WWWROOT }}"
-          cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.BACKEND_WWWROOT }}/"
-
-      - name: Verify frontend copied into backend wwwroot
-        shell: bash
-        run: |
-          echo "== frontend/dist =="
           ls -la "${{ env.FRONTEND_DIR }}/dist"
           find "${{ env.FRONTEND_DIR }}/dist" -maxdepth 3 -type f | sort
-
-          echo "== Fleet.Server/wwwroot =="
-          ls -la "${{ env.BACKEND_WWWROOT }}"
-          find "${{ env.BACKEND_WWWROOT }}" -maxdepth 3 -type f | sort
-
-          test -f "${{ env.BACKEND_WWWROOT }}/index.html"
+          test -f "${{ env.FRONTEND_DIR }}/dist/index.html"
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -75,7 +62,14 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore --output "${{ env.PUBLISH_DIR }}"
 
-      - name: Verify published output
+      - name: Copy frontend into published app
+        shell: bash
+        run: |
+          rm -rf "${{ env.PUBLISH_DIR }}/wwwroot"
+          mkdir -p "${{ env.PUBLISH_DIR }}/wwwroot"
+          cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.PUBLISH_DIR }}/wwwroot/"
+
+      - name: Verify final published app
         shell: bash
         run: |
           echo "== publish root =="
@@ -88,9 +82,18 @@ jobs:
 
           test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
 
+      - name: Create deployment zip
+        shell: bash
+        run: |
+          cd "${{ env.PUBLISH_DIR }}"
+          zip -r "${{ github.workspace }}/fleet-ai-dev.zip" .
+
+      - name: Verify deployment zip exists
+        run: test -f "${{ env.DEPLOY_ZIP }}"
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ${{ env.PUBLISH_DIR }}
+          package: ${{ env.DEPLOY_ZIP }}
