@@ -69,17 +69,25 @@ jobs:
           mkdir -p "${{ env.PUBLISH_DIR }}/wwwroot"
           cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.PUBLISH_DIR }}/wwwroot/"
 
+      - name: Remove test artifacts from publish output
+        shell: bash
+        run: |
+          find "${{ env.PUBLISH_DIR }}" -maxdepth 1 \( -name "*Tests*" -o -name "testhost*" -o -name "*.trx" \) -print -delete || true
+
       - name: Verify final published app
         shell: bash
         run: |
           echo "== publish root =="
           ls -la "${{ env.PUBLISH_DIR }}"
-          find "${{ env.PUBLISH_DIR }}" -maxdepth 2 -type f | sort
+          find "${{ env.PUBLISH_DIR }}" -maxdepth 1 -type f | sort
 
           echo "== publish wwwroot =="
           ls -la "${{ env.PUBLISH_DIR }}/wwwroot"
           find "${{ env.PUBLISH_DIR }}/wwwroot" -maxdepth 3 -type f | sort
 
+          test -f "${{ env.PUBLISH_DIR }}/Fleet.Server.dll"
+          test -f "${{ env.PUBLISH_DIR }}/Fleet.Server.runtimeconfig.json"
+          test ! -f "${{ env.PUBLISH_DIR }}/Fleet.Server.Tests.runtimeconfig.json"
           test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
 
       - name: Create deployment zip
@@ -87,9 +95,6 @@ jobs:
         run: |
           cd "${{ env.PUBLISH_DIR }}"
           zip -r "${{ github.workspace }}/fleet-ai-dev.zip" .
-
-      - name: Verify deployment zip exists
-        run: test -f "${{ env.DEPLOY_ZIP }}"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
