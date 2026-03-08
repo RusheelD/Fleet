@@ -13,7 +13,12 @@ public class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbContext>
     public FleetDbContext CreateDbContext(string[] args)
     {
         var builder = new DbContextOptionsBuilder<FleetDbContext>();
-        builder.UseNpgsql("Host=localhost;Database=fleetdb;Username=postgres;Password=postgres");
+        builder.UseNpgsql(
+            "Host=localhost;Database=fleetdb;Username=postgres;Password=postgres",
+            o => o.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorCodesToAdd: null));
         return new FleetDbContext(builder.Options);
     }
 }

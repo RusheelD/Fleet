@@ -17,6 +17,7 @@ using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Npgsql;
 using System.Security.Claims;
@@ -137,7 +138,15 @@ if (!string.IsNullOrWhiteSpace(fleetDbConnectionString))
 {
     builder.Configuration["ConnectionStrings:fleetdb"] = fleetDbConnectionString;
 }
-builder.AddNpgsqlDbContext<FleetDbContext>("fleetdb");
+builder.AddNpgsqlDbContext<FleetDbContext>(
+    "fleetdb",
+    configureDbContextOptions: options =>
+    {
+        options.UseNpgsql(o => o.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorCodesToAdd: null));
+    });
 
 // Add services to the container.
 builder.Services.AddProblemDetails();
