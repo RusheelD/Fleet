@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_ENVIRONMENT: string
   readonly VITE_WEBSITE_URL: string
   readonly VITE_GITHUB_CLIENT_ID?: string
+  readonly VITE_API_ORIGIN?: string
 }
 
 interface ImportMeta {

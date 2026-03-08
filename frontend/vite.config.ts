@@ -58,6 +58,7 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
   console.log(`[vite] mode: "${config.mode}" → API target: ${apiTarget}`)
 
   return {
+    base: '/',
     plugins: [react()],
     resolve: {
       alias: {

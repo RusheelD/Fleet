@@ -1,13 +1,21 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Build and deploy Node.js app to Azure Web App - fleet-ai-dev
+name: Build and deploy ASP.Net Core app to Azure Web App - fleet-ai-dev
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+
+env:
+  NODE_VERSION: "20"
+  DOTNET_VERSION: "10.0.x"
+  FRONTEND_DIR: frontend
+  BACKEND_PROJECT: Fleet.Server/Fleet.Server.csproj
+  BACKEND_WWWROOT: Fleet.Server/wwwroot
+  PUBLISH_DIR: ${{ github.workspace }}/published-app
 
 jobs:
   build:
@@ -19,23 +27,45 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        working-directory: ./frontend
-        run: npm install
+      - name: Install frontend dependencies
+        working-directory: ./${{ env.FRONTEND_DIR }}
+        run: npm ci
 
       - name: Build frontend
-        working-directory: ./frontend
+        working-directory: ./${{ env.FRONTEND_DIR }}
         run: npm run build
 
-      - name: Upload artifact
+      - name: Copy frontend build into backend wwwroot
+        run: |
+          rm -rf "${{ env.BACKEND_WWWROOT }}"
+          mkdir -p "${{ env.BACKEND_WWWROOT }}"
+          cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.BACKEND_WWWROOT }}/"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore backend dependencies
+        run: dotnet restore "${{ env.BACKEND_PROJECT }}"
+
+      - name: Build backend
+        run: dotnet build "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore
+
+      - name: Publish backend
+        run: dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-build --output "${{ env.PUBLISH_DIR }}"
+
+      - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-build
-          path: frontend/dist
+          name: fleet-ai-dev-app
+          path: ${{ env.PUBLISH_DIR }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -45,10 +75,11 @@ jobs:
       contents: read
 
     steps:
-      - name: Download artifact
+      - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: frontend-build
+          name: fleet-ai-dev-app
+          path: ${{ env.PUBLISH_DIR }}
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -58,8 +89,9 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2C6AD26EA9194C5DB05F968B2BE367BA }}
 
       - name: Deploy to Azure Web App
+        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
           app-name: fleet-ai-dev
           slot-name: Production
-          package: .
+          package: ${{ env.PUBLISH_DIR }}
