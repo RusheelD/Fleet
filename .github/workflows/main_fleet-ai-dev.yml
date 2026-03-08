@@ -82,8 +82,20 @@ jobs:
           name: fleet-ai-dev-app
           path: ${{ env.PUBLISH_DIR }}
 
+      - name: Determine deploy auth mode
+        id: auth_mode
+        shell: bash
+        env:
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        run: |
+          if [ -n "$AZURE_WEBAPP_PUBLISH_PROFILE" ]; then
+            echo "use_publish_profile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_publish_profile=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Login to Azure (OIDC)
-        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
+        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'false' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID || secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_FD172B62E3BB4325AD4F4E86373604D1 }}
@@ -93,7 +105,7 @@ jobs:
 
       - name: Deploy to Azure Web App (publish profile)
         id: deploy-to-webapp-publish-profile
-        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
+        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'true' }}
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
@@ -103,7 +115,7 @@ jobs:
 
       - name: Deploy to Azure Web App (OIDC)
         id: deploy-to-webapp-oidc
-        if: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
+        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'false' }}
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}

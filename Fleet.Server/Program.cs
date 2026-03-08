@@ -16,102 +16,10 @@ using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
-using Npgsql;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
-
-static string? NormalizePostgresConnectionString(string? raw)
-{
-    if (string.IsNullOrWhiteSpace(raw))
-    {
-        return null;
-    }
-
-    var value = raw.Trim();
-    if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-    {
-        return value;
-    }
-
-    if (!string.Equals(uri.Scheme, "postgres", StringComparison.OrdinalIgnoreCase) &&
-        !string.Equals(uri.Scheme, "postgresql", StringComparison.OrdinalIgnoreCase))
-    {
-        return value;
-    }
-
-    var builder = new NpgsqlConnectionStringBuilder
-    {
-        Host = uri.Host,
-        Port = uri.IsDefaultPort ? 5432 : uri.Port,
-        Database = uri.AbsolutePath.Trim('/'),
-    };
-
-    if (!string.IsNullOrWhiteSpace(uri.UserInfo))
-    {
-        var userInfo = uri.UserInfo.Split(':', 2, StringSplitOptions.None);
-        builder.Username = Uri.UnescapeDataString(userInfo[0]);
-        if (userInfo.Length > 1)
-        {
-            builder.Password = Uri.UnescapeDataString(userInfo[1]);
-        }
-    }
-
-    var queryValues = QueryHelpers.ParseQuery(uri.Query);
-    foreach (var pair in queryValues)
-    {
-        if (pair.Value.Count == 0)
-        {
-            continue;
-        }
-
-        var key = pair.Key;
-        var parsedValue = pair.Value[0];
-        if (!string.IsNullOrWhiteSpace(key) && parsedValue is not null)
-        {
-            try
-            {
-                builder[key] = parsedValue;
-            }
-            catch (ArgumentException)
-            {
-                // Ignore unknown query keys from URL-style connection strings.
-            }
-        }
-    }
-
-    return builder.ConnectionString;
-}
-
-static string? ResolveFleetDbConnectionString(IConfiguration configuration)
-{
-    var candidates = new[]
-    {
-        configuration.GetConnectionString("fleetdb"),
-        configuration["ConnectionStrings:fleetdb"],
-        configuration["ConnectionStrings:FleetDb"],
-        configuration["ConnectionString"],
-        configuration["Aspire:Npgsql:EntityFrameworkCore:PostgreSQL:ConnectionString"],
-        configuration["Aspire:Npgsql:EntityFrameworkCore:PostgreSQL:FleetDbContext:ConnectionString"],
-        configuration["DATABASE_URL"],
-        configuration["POSTGRES_URL"],
-        configuration["POSTGRES_CONNECTION_STRING"],
-        configuration["FLEETDB_CONNECTION_STRING"],
-    };
-
-    foreach (var candidate in candidates)
-    {
-        var normalized = NormalizePostgresConnectionString(candidate);
-        if (!string.IsNullOrWhiteSpace(normalized))
-        {
-            return normalized;
-        }
-    }
-
-    return null;
-}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -133,7 +41,7 @@ builder.AddRedisClientBuilder("cache")
     .WithOutputCache();
 
 // Add PostgreSQL + EF Core via Aspire integration.
-var fleetDbConnectionString = ResolveFleetDbConnectionString(builder.Configuration);
+var fleetDbConnectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(builder.Configuration);
 if (!string.IsNullOrWhiteSpace(fleetDbConnectionString))
 {
     builder.Configuration["ConnectionStrings:fleetdb"] = fleetDbConnectionString;

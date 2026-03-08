@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.Extensions.Configuration;
 
 namespace Fleet.Server.Data;
 
@@ -12,9 +13,31 @@ public class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbContext>
 {
     public FleetDbContext CreateDbContext(string[] args)
     {
+        var currentDirectory = Directory.GetCurrentDirectory();
+        var configBasePath = File.Exists(Path.Combine(currentDirectory, "appsettings.json"))
+            ? currentDirectory
+            : Path.Combine(currentDirectory, "Fleet.Server");
+
+        var environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(configBasePath)
+            .AddJsonFile("appsettings.json", optional: true)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
+            .AddUserSecrets<FleetDbContextFactory>(optional: true)
+            .AddEnvironmentVariables()
+            .Build();
+
+        var connectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(configuration);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "FleetDbContext design-time connection string is missing. " +
+                "Set one of: ConnectionStrings:fleetdb, ConnectionStrings:Default, ConnectionString, or DATABASE_URL.");
+        }
+
         var builder = new DbContextOptionsBuilder<FleetDbContext>();
         builder.UseNpgsql(
-            "Host=localhost;Database=fleetdb;Username=postgres;Password=postgres",
+            connectionString,
             o => o.EnableRetryOnFailure(
                 maxRetryCount: 5,
                 maxRetryDelay: TimeSpan.FromSeconds(10),
