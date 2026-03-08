@@ -1,64 +1,66 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
-name: Build and deploy ASP.Net Core app to Azure Web App - fleet-ai-dev
+name: Build and deploy Fleet to Azure Web App - fleet-ai-dev
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "frontend/**"
+      - "Fleet.Server/**"
+      - ".github/workflows/main_fleet-ai-dev.yml"
   workflow_dispatch:
 
 env:
   AZURE_WEBAPP_NAME: fleet-ai-dev
   NODE_VERSION: "20"
   DOTNET_VERSION: "10.0.x"
-  FRONTEND_DIR: frontend
-  BACKEND_PROJECT: Fleet.Server/Fleet.Server.csproj
-  BACKEND_WWWROOT: Fleet.Server/wwwroot
-  PUBLISH_DIR: ${{ github.workspace }}/published-app
+  FRONTEND_DIR: ./frontend
+  BACKEND_PROJECT: ./Fleet.Server/Fleet.Server.csproj
+  BACKEND_WWWROOT: ./Fleet.Server/wwwroot
+  PUBLISH_DIR: ./publish
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: ${{ env.FRONTEND_DIR }}/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: ./${{ env.FRONTEND_DIR }}
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm ci
 
       - name: Build frontend
-        working-directory: ./${{ env.FRONTEND_DIR }}
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run build
 
-      - name: Recreate backend wwwroot and copy frontend build
+      - name: Recreate backend wwwroot
         run: |
           rm -rf "${{ env.BACKEND_WWWROOT }}"
           mkdir -p "${{ env.BACKEND_WWWROOT }}"
           cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.BACKEND_WWWROOT }}/"
 
-      - name: Print frontend dist and backend wwwroot listings
+      - name: Verify frontend copied into backend wwwroot
         run: |
           echo "== frontend/dist =="
           ls -la "${{ env.FRONTEND_DIR }}/dist"
           find "${{ env.FRONTEND_DIR }}/dist" -maxdepth 3 -type f | sort
+
           echo "== Fleet.Server/wwwroot =="
           ls -la "${{ env.BACKEND_WWWROOT }}"
           find "${{ env.BACKEND_WWWROOT }}" -maxdepth 3 -type f | sort
 
-      - name: Fail if Fleet.Server/wwwroot/index.html is missing
-        run: test -f "${{ env.BACKEND_WWWROOT }}/index.html"
+          test -f "${{ env.BACKEND_WWWROOT }}/index.html"
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -71,79 +73,21 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore --output "${{ env.PUBLISH_DIR }}"
 
-      - name: Print published output and confirm wwwroot/index.html
+      - name: Verify published output
         run: |
-          echo "== published output =="
+          echo "== publish root =="
           ls -la "${{ env.PUBLISH_DIR }}"
-          find "${{ env.PUBLISH_DIR }}" -maxdepth 4 -type f | sort
-          echo "== published wwwroot =="
-          ls -la "${{ env.PUBLISH_DIR }}/wwwroot"
-          find "${{ env.PUBLISH_DIR }}/wwwroot" -maxdepth 3 -type f | sort
-          test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
+          find "${{ env.PUBLISH_DIR }}" -maxdepth 2 -type f | sort
 
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: fleet-ai-dev-app
-          path: ${{ env.PUBLISH_DIR }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: fleet-ai-dev-app
-          path: ${{ env.PUBLISH_DIR }}
-
-      - name: Fail if published frontend bundle is missing
-        run: |
-          test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
+          echo "== publish wwwroot =="
           ls -la "${{ env.PUBLISH_DIR }}/wwwroot"
           find "${{ env.PUBLISH_DIR }}/wwwroot" -maxdepth 3 -type f | sort
 
-      - name: Determine deploy auth mode
-        id: auth_mode
-        shell: bash
-        env:
-          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        run: |
-          if [ -n "$AZURE_WEBAPP_PUBLISH_PROFILE" ]; then
-            echo "use_publish_profile=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "use_publish_profile=false" >> "$GITHUB_OUTPUT"
-          fi
+          test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
 
-      - name: Login to Azure (OIDC)
-        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'false' }}
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID || secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_AAF77799CFC646B596227A77F28AADFA }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID || secrets.AZURE_TENANT_ID || secrets.AZUREAPPSERVICE_TENANTID_BEB8E833354143C98782FEC2A188D874 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID || secrets.AZURE_SUBSCRIPTION_ID || secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_42E2C02FC04A4D8380E7AE899CA3E6A4 }}
-          allow-no-subscriptions: true
-
-      - name: Deploy to Azure Web App (publish profile)
-        id: deploy-to-webapp-publish-profile
-        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'true' }}
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          slot-name: Production
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: ${{ env.PUBLISH_DIR }}
-
-      - name: Deploy to Azure Web App (OIDC)
-        id: deploy-to-webapp-oidc
-        if: ${{ steps.auth_mode.outputs.use_publish_profile == 'false' }}
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          slot-name: Production
-          package: ${{ env.PUBLISH_DIR }}
-
