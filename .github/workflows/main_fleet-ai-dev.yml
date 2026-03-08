@@ -44,13 +44,15 @@ jobs:
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run build
 
-      - name: Recreate backend wwwroot
+      - name: Recreate backend wwwroot and copy frontend build
+        shell: bash
         run: |
           rm -rf "${{ env.BACKEND_WWWROOT }}"
           mkdir -p "${{ env.BACKEND_WWWROOT }}"
           cp -R "${{ env.FRONTEND_DIR }}/dist/." "${{ env.BACKEND_WWWROOT }}/"
 
       - name: Verify frontend copied into backend wwwroot
+        shell: bash
         run: |
           echo "== frontend/dist =="
           ls -la "${{ env.FRONTEND_DIR }}/dist"
@@ -74,6 +76,7 @@ jobs:
         run: dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore --output "${{ env.PUBLISH_DIR }}"
 
       - name: Verify published output
+        shell: bash
         run: |
           echo "== publish root =="
           ls -la "${{ env.PUBLISH_DIR }}"
@@ -89,5 +92,5 @@ jobs:
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ${{ env.PUBLISH_DIR }}
