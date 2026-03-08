@@ -27,12 +27,12 @@ public class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbContext>
             .AddEnvironmentVariables()
             .Build();
 
-        var connectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(configuration);
+        var connectionString = DbConnectionStringResolver.ResolveFleetDbLocalMigrationConnectionString(configuration);
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException(
                 "FleetDbContext design-time connection string is missing. " +
-                "Set one of: ConnectionStrings:fleetdb, ConnectionStrings:Default, ConnectionString, or DATABASE_URL.");
+                "Set one of: ConnectionStrings:fleetdb_migrations, ConnectionStrings:fleetdb, ConnectionStrings:Default, ConnectionString, or DATABASE_URL.");
         }
 
         var builder = new DbContextOptionsBuilder<FleetDbContext>();
