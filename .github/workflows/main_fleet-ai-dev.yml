@@ -1,7 +1,7 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Build and deploy Node.js app to Azure Web App - fleet-ai-dev
+name: Build and deploy ASP.Net Core app to Azure Web App - fleet-ai-dev
 
 on:
   push:
@@ -13,56 +13,53 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read #This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Set up .NET Core
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: "24"
+          dotnet-version: '10.x'
 
-      - name: Install dependencies
-        working-directory: ./frontend
-        run: npm install
+      - name: Build with dotnet
+        run: dotnet build --configuration Release
 
-      - name: Build frontend
-        working-directory: ./frontend
-        run: npm run build
+      - name: dotnet publish
+        run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp
 
-      - name: Upload artifact
+      - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-build
-          path: frontend/dist
+          name: .net-app
+          path: ${{env.DOTNET_ROOT}}/myapp
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write
-      contents: read
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
 
     steps:
-      - name: Download artifact
+      - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: frontend-build
-
+          name: .net-app
+      
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_FD172B62E3BB4325AD4F4E86373604D1 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CDF7AFF2C0244FFBB2EACF6F6B7D6DAB }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2C6AD26EA9194C5DB05F968B2BE367BA }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_578EC5CB4634499E90085980325479B5 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EACC5FADC6C3426FA65C132E1E301BD4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_479579B23A4346BAA9FFD18B73CEFC69 }}
 
       - name: Deploy to Azure Web App
+        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: fleet-ai-dev
-          slot-name: Production
+          app-name: 'fleet-ai-dev'
+          slot-name: 'Production'
           package: .
-          clean: true
-
-
+          
