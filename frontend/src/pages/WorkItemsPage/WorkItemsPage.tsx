@@ -46,6 +46,7 @@ import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
 import {
     DEFAULT_WORK_ITEM_COLUMN_WIDTHS,
+    MIN_WORK_ITEM_COLUMN_WIDTHS,
     WORK_ITEM_TABLE_COLUMNS,
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
@@ -180,6 +181,11 @@ const useStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'space-between',
     },
+    columnHint: {
+        color: tokens.colorNeutralForeground3,
+        fontSize: '12px',
+        lineHeight: '16px',
+    },
     filterHeader: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -222,6 +228,62 @@ const useStyles = makeStyles({
 
 const ALL_STATES: WorkItemState[] = ['New', 'Active', 'Planning (AI)', 'In Progress', 'In Progress (AI)', 'In-PR', 'In-PR (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
 const ALL_PRIORITIES = [1, 2, 3, 4] as const
+const COLUMN_PREFS_STORAGE_PREFIX = 'fleet.work-items.columns.v1'
+
+interface StoredColumnPreferences {
+    collapsedColumns?: WorkItemTableColumnKey[]
+    columnWidths?: Partial<Record<WorkItemTableColumnKey, number>>
+}
+
+function getColumnPrefsStorageKey(projectId?: string): string {
+    return `${COLUMN_PREFS_STORAGE_PREFIX}:${projectId ?? 'global'}`
+}
+
+function sanitizeCollapsedColumns(
+    value: unknown,
+): Set<WorkItemTableColumnKey> {
+    if (!Array.isArray(value)) {
+        return new Set()
+    }
+
+    const allowed = new Set(WORK_ITEM_TABLE_COLUMNS.map((column) => column.key))
+    const next = new Set<WorkItemTableColumnKey>()
+    for (const item of value) {
+        if (typeof item !== 'string') {
+            continue
+        }
+
+        if (allowed.has(item as WorkItemTableColumnKey)) {
+            next.add(item as WorkItemTableColumnKey)
+        }
+    }
+
+    return next
+}
+
+function sanitizeColumnWidths(
+    value: unknown,
+): Record<WorkItemTableColumnKey, number> {
+    const next = { ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS }
+    if (!value || typeof value !== 'object') {
+        return next
+    }
+
+    for (const column of WORK_ITEM_TABLE_COLUMNS) {
+        const key = column.key
+        const rawWidth = (value as Partial<Record<WorkItemTableColumnKey, unknown>>)[key]
+        if (typeof rawWidth !== 'number' || Number.isNaN(rawWidth) || !Number.isFinite(rawWidth)) {
+            continue
+        }
+
+        next[key] = Math.max(
+            MIN_WORK_ITEM_COLUMN_WIDTHS[key],
+            Math.round(rawWidth),
+        )
+    }
+
+    return next
+}
 
 interface WorkItemFilters {
     states: Set<WorkItemState>
@@ -251,9 +313,10 @@ export function WorkItemsPage() {
     const [selectedWorkItemNumbers, setSelectedWorkItemNumbers] = useState<Set<number>>(new Set())
     const [bulkState, setBulkState] = useState<WorkItemState | ''>('')
     const [bulkAssignee, setBulkAssignee] = useState('')
-    const [collapsedColumns, setCollapsedColumns] = useState<Set<WorkItemTableColumnKey>>(new Set())
-    const [columnWidths, setColumnWidths] =
-        useState<Record<WorkItemTableColumnKey, number>>({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
+    const [collapsedColumns, setCollapsedColumns] = useState<Set<WorkItemTableColumnKey>>(() => new Set())
+    const [columnWidths, setColumnWidths] = useState<Record<WorkItemTableColumnKey, number>>(
+        () => ({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS }),
+    )
 
     const updateMutation = useUpdateWorkItem(projectId)
     const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
@@ -287,6 +350,45 @@ export function WorkItemsPage() {
             return next.size === previous.size ? previous : next
         })
     }, [workItems])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        try {
+            const raw = window.localStorage.getItem(getColumnPrefsStorageKey(projectId))
+            if (!raw) {
+                setCollapsedColumns(new Set())
+                setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
+                return
+            }
+
+            const parsed = JSON.parse(raw) as StoredColumnPreferences
+            setCollapsedColumns(sanitizeCollapsedColumns(parsed.collapsedColumns))
+            setColumnWidths(sanitizeColumnWidths(parsed.columnWidths))
+        } catch {
+            setCollapsedColumns(new Set())
+            setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
+        }
+    }, [projectId])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        const payload: StoredColumnPreferences = {
+            collapsedColumns: Array.from(collapsedColumns),
+            columnWidths,
+        }
+
+        try {
+            window.localStorage.setItem(getColumnPrefsStorageKey(projectId), JSON.stringify(payload))
+        } catch {
+            // Ignore storage errors (for example private mode quota restrictions).
+        }
+    }, [collapsedColumns, columnWidths, projectId])
 
     const toggleSelection = useCallback((itemNumber: number, selected: boolean) => {
         setSelectedWorkItemNumbers((previous) => {
@@ -337,7 +439,10 @@ export function WorkItemsPage() {
 
     const handleResizeColumn = useCallback((column: WorkItemTableColumnKey, width: number) => {
         setColumnWidths((previous) => {
-            const nextWidth = Math.round(width)
+            const nextWidth = Math.max(
+                MIN_WORK_ITEM_COLUMN_WIDTHS[column],
+                Math.round(width),
+            )
             if (previous[column] === nextWidth) {
                 return previous
             }
@@ -637,6 +742,9 @@ export function WorkItemsPage() {
                                         </Button>
                                     </div>
                                     <Divider />
+                                    <Text className={styles.columnHint}>
+                                        Toggle visibility here. Drag table header separators to resize.
+                                    </Text>
                                     {WORK_ITEM_TABLE_COLUMNS.map((column) => {
                                         const visible = !collapsedColumns.has(column.key)
                                         return (

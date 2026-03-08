@@ -48,6 +48,12 @@ const useStyles = makeStyles({
         height: '100%',
         overflow: 'auto',
     },
+    headerActions: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS,
+        flexWrap: 'wrap',
+    },
     toolbar: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -200,7 +206,7 @@ export function ProjectsPage() {
                 title="Projects"
                 subtitle="Manage your projects and track AI agent progress"
                 actions={
-                    <>
+                    <div className={styles.headerActions}>
                         <input
                             ref={importFileInputRef}
                             type="file"
@@ -231,7 +237,7 @@ export function ProjectsPage() {
                         >
                             New Project
                         </Button>
-                    </>
+                    </div>
                 }
             />
 

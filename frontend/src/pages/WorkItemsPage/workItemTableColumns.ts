@@ -15,7 +15,7 @@ export interface WorkItemTableColumnDefinition {
 
 export const WORK_ITEM_TABLE_COLUMNS: WorkItemTableColumnDefinition[] = [
   { key: 'type', label: 'Type', collapsible: true },
-  { key: 'title', label: 'Title', collapsible: false },
+  { key: 'title', label: 'Title', collapsible: true },
   { key: 'state', label: 'State', collapsible: true },
   { key: 'id', label: 'ID', collapsible: true },
   { key: 'difficulty', label: 'Difficulty', collapsible: true },
@@ -55,4 +55,3 @@ export function buildWorkItemGridTemplateColumns(
   }
   return cols.join(' ')
 }
-

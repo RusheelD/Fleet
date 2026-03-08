@@ -305,17 +305,33 @@ const useStyles = makeStyles({
     resizeHandle: {
         position: 'absolute',
         top: '-6px',
-        right: '-6px',
-        width: '12px',
+        right: '-7px',
+        width: '14px',
         height: 'calc(100% + 12px)',
         cursor: 'col-resize',
         zIndex: 2,
+        display: 'flex',
+        alignItems: 'stretch',
+        justifyContent: 'center',
+        touchAction: 'none',
+        '::after': {
+            content: '""',
+            width: '2px',
+            borderRadius: '999px',
+            backgroundColor: tokens.colorNeutralStroke2,
+            transitionProperty: 'background-color',
+            transitionDuration: '0.15s',
+        },
+        ':hover::after': {
+            backgroundColor: tokens.colorBrandForeground1,
+        },
     },
     headerCell: {
         position: 'relative',
         minWidth: 0,
         display: 'flex',
         alignItems: 'center',
+        paddingRight: '6px',
     },
 })
 
