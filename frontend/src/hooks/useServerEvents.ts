@@ -138,17 +138,18 @@ export function useServerEvents(projectId?: string) {
     let cancelled = false
     let activeController: AbortController | null = null
     const lastInvalidationByTopic = new Map<string, number>()
+    const pendingInvalidationTimers = new Map<string, number>()
 
-    const shouldInvalidate = (topic: string): boolean => {
-      const minIntervalMs = topic === 'agents.updated' || topic === 'logs.updated' ? 200 : 150
-      const now = Date.now()
-      const previous = lastInvalidationByTopic.get(topic) ?? 0
-      if (now - previous < minIntervalMs) {
-        return false
+    const getMinIntervalMs = (topic: string): number => {
+      if (topic === 'agents.updated' || topic === 'logs.updated') {
+        return 150
       }
 
-      lastInvalidationByTopic.set(topic, now)
-      return true
+      if (topic === 'work-items.updated') {
+        return 75
+      }
+
+      return 100
     }
 
     const refreshQuery = (queryName: string) => {
@@ -163,11 +164,7 @@ export function useServerEvents(projectId?: string) {
       }
     }
 
-    const invalidateForTopic = (topic: string) => {
-      if (!shouldInvalidate(topic)) {
-        return
-      }
-
+    const invalidateForTopicNow = (topic: string) => {
       if (topic === 'connected') {
         refreshMany(['executions', 'logs', 'work-items'])
         return
@@ -203,6 +200,36 @@ export function useServerEvents(projectId?: string) {
       }
     }
 
+    const scheduleInvalidateForTopic = (topic: string) => {
+      const now = Date.now()
+      const minIntervalMs = getMinIntervalMs(topic)
+      const previous = lastInvalidationByTopic.get(topic) ?? 0
+      const elapsed = now - previous
+
+      if (elapsed >= minIntervalMs) {
+        lastInvalidationByTopic.set(topic, now)
+        invalidateForTopicNow(topic)
+        return
+      }
+
+      if (pendingInvalidationTimers.has(topic)) {
+        return
+      }
+
+      const delay = Math.max(0, minIntervalMs - elapsed)
+      const timerId = window.setTimeout(() => {
+        pendingInvalidationTimers.delete(topic)
+        if (cancelled) {
+          return
+        }
+
+        lastInvalidationByTopic.set(topic, Date.now())
+        invalidateForTopicNow(topic)
+      }, delay)
+
+      pendingInvalidationTimers.set(topic, timerId)
+    }
+
     const streamPath = projectId
       ? `/api/events/stream?projectId=${encodeURIComponent(projectId)}`
       : '/api/events/stream'
@@ -218,7 +245,7 @@ export function useServerEvents(projectId?: string) {
           await streamServerEvents(
             streamPath,
             ({ eventName }) => {
-              invalidateForTopic(eventName)
+              scheduleInvalidateForTopic(eventName)
             },
             controller.signal,
           )
@@ -246,6 +273,10 @@ export function useServerEvents(projectId?: string) {
       if (activeController) {
         activeController.abort()
       }
+      for (const timerId of pendingInvalidationTimers.values()) {
+        window.clearTimeout(timerId)
+      }
+      pendingInvalidationTimers.clear()
     }
   }, [isAuthenticated, projectId, queryClient])
 }

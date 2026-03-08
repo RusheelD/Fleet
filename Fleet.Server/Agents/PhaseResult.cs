@@ -17,5 +17,11 @@ public record PhaseResult(
     bool Success,
 
     /// <summary>Error message if the phase failed.</summary>
-    string? Error = null
+    string? Error = null,
+
+    /// <summary>Latest estimated completion percent reported during this attempt.</summary>
+    int EstimatedCompletionPercent = 0,
+
+    /// <summary>Latest status summary reported during this attempt.</summary>
+    string? LastProgressSummary = null
 );

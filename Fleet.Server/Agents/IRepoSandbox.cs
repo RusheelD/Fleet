@@ -23,12 +23,17 @@ public interface IRepoSandbox : IAsyncDisposable
     /// <param name="branchName">Branch name to create (e.g., "fleet/42-add-auth").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="baseBranch">Optional remote base branch to branch from before creating <paramref name="branchName"/>.</param>
+    /// <param name="resumeFromBranch">
+    /// When true, attempts to checkout the existing remote <paramref name="branchName"/> branch
+    /// instead of creating a new branch from <paramref name="baseBranch"/>.
+    /// </param>
     Task CloneAsync(
         string repoFullName,
         string accessToken,
         string branchName,
         CancellationToken cancellationToken = default,
-        string? baseBranch = null);
+        string? baseBranch = null,
+        bool resumeFromBranch = false);
 
     /// <summary>
     /// Lists files and directories at the given relative path.

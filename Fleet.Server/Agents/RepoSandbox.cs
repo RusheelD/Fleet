@@ -50,7 +50,8 @@ public class RepoSandbox : IRepoSandbox
         string accessToken,
         string branchName,
         CancellationToken cancellationToken,
-        string? baseBranch = null)
+        string? baseBranch = null,
+        bool resumeFromBranch = false)
     {
         _repoFullName = repoFullName;
         _branchName = branchName;
@@ -68,22 +69,62 @@ public class RepoSandbox : IRepoSandbox
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
 
-        // Create and checkout the feature branch (optionally from a caller-provided base branch).
-        if (!string.IsNullOrWhiteSpace(baseBranch))
+        // Resume an existing feature branch from origin if requested.
+        if (resumeFromBranch)
         {
-            result = await RunGitAsync($"fetch --depth 1 origin {baseBranch}", cancellationToken: cancellationToken);
+            var escapedBranch = EscapeGitArgument(branchName);
+            result = await RunGitAsync($"ls-remote --heads origin \"{escapedBranch}\"", cancellationToken: cancellationToken);
+            if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
+            {
+                throw new InvalidOperationException(
+                    $"Git remote branch lookup failed for '{branchName}'. " +
+                    "The branch was not found on origin, so retry cannot resume from it.");
+            }
+
+            result = await RunGitAsync(
+                $"fetch --depth 1 origin \"+refs/heads/{escapedBranch}:refs/remotes/origin/{escapedBranch}\"",
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Git fetch of existing branch '{branchName}' failed: {result.Stderr}");
+
+            result = await RunGitAsync(
+                $"checkout -B \"{escapedBranch}\" \"refs/remotes/origin/{escapedBranch}\"",
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Git checkout of existing branch '{branchName}' failed: {result.Stderr}");
+        }
+        // Create and checkout a new feature branch from a caller-provided base branch.
+        else if (!string.IsNullOrWhiteSpace(baseBranch))
+        {
+            var escapedBaseBranch = EscapeGitArgument(baseBranch);
+            var escapedBranch = EscapeGitArgument(branchName);
+
+            result = await RunGitAsync(
+                $"ls-remote --heads origin \"{escapedBaseBranch}\"",
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
+                throw new InvalidOperationException(
+                    $"Target/base branch '{baseBranch}' was not found on origin.");
+
+            result = await RunGitAsync(
+                $"fetch --depth 1 origin \"+refs/heads/{escapedBaseBranch}:refs/remotes/origin/{escapedBaseBranch}\"",
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git fetch of base branch '{baseBranch}' failed: {result.Stderr}");
 
-            result = await RunGitAsync($"checkout -B {branchName} origin/{baseBranch}", cancellationToken: cancellationToken);
+            result = await RunGitAsync(
+                $"checkout -B \"{escapedBranch}\" \"refs/remotes/origin/{escapedBaseBranch}\"",
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git checkout from base branch '{baseBranch}' failed: {result.Stderr}");
         }
         else
         {
-            result = await RunGitAsync($"checkout -b {branchName}", cancellationToken: cancellationToken);
+            result = await RunGitAsync($"checkout -b \"{EscapeGitArgument(branchName)}\"", cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git checkout failed: {result.Stderr}");
         }
@@ -498,6 +539,8 @@ public class RepoSandbox : IRepoSandbox
         return protectedBranchMarkers.Any(marker =>
             combinedCommand.Contains(marker, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
 
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)
     {

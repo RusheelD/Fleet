@@ -16,19 +16,30 @@ public class AgentPhaseRunner(
     IOptions<LLMOptions> llmOptions,
     ILogger<AgentPhaseRunner> logger) : IAgentPhaseRunner
 {
-    /// <summary>Max tool-calling loops per phase.</summary>
-    private const int MaxToolLoops = 50;
+    /// <summary>Default max tool-calling loops per phase.</summary>
+    private const int DefaultMaxToolLoops = 50;
 
     /// <summary>Returns the max tool calls allowed for a given agent role.</summary>
     public static int GetMaxToolCalls(AgentRole role) => role switch
     {
         AgentRole.Manager => 10,
         AgentRole.Planner => 15,
-        AgentRole.Contracts => 30,
+        AgentRole.Contracts => int.MaxValue,
         AgentRole.Review => 30,
         AgentRole.Documentation => 20,
-        AgentRole.Consolidation => 50,
-        _ => 150,  // Backend, Frontend, Testing, Styling
+        AgentRole.Consolidation => int.MaxValue,
+        _ => int.MaxValue,  // Backend, Frontend, Testing, Styling
+    };
+
+    private static int GetMaxToolLoops(AgentRole role) => role switch
+    {
+        AgentRole.Backend => 500,
+        AgentRole.Frontend => 500,
+        AgentRole.Testing => 500,
+        AgentRole.Styling => 500,
+        AgentRole.Contracts => 300,
+        AgentRole.Consolidation => 300,
+        _ => DefaultMaxToolLoops,
     };
 
     /// <summary>Returns the timeout for a given phase role (10-30 minutes).</summary>
@@ -54,6 +65,7 @@ public class AgentPhaseRunner(
     private const int AgentMaxToolOutputLength = 12_000;
     private const int EstimatedProgressCeilingPercent = 95;
     private const int FallbackProgressCadenceToolCalls = 1;
+    private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
 
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
@@ -79,8 +91,10 @@ public class AgentPhaseRunner(
 
         var totalToolCalls = 0;
         var maxToolCalls = GetMaxToolCalls(role);
+        var maxToolLoops = GetMaxToolLoops(role);
         var phaseTimeout = GetPhaseTimeout(role);
         var lastReportedPercent = 0;
+        var lastProgressSummary = "Starting phase";
         var nonProgressToolCallsSinceLastReport = 0;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -93,6 +107,9 @@ public class AgentPhaseRunner(
                 return;
             }
 
+            var normalizedSummary = string.IsNullOrWhiteSpace(summary)
+                ? "Working"
+                : summary.Trim();
             var clampedPercent = Math.Clamp(percent, 0, 100);
             if (force)
             {
@@ -117,9 +134,10 @@ public class AgentPhaseRunner(
             }
 
             lastReportedPercent = clampedPercent;
+            lastProgressSummary = normalizedSummary;
             try
             {
-                await onProgress(clampedPercent / 100.0, summary);
+                await onProgress(clampedPercent / 100.0, normalizedSummary);
             }
             catch (Exception ex)
             {
@@ -129,19 +147,30 @@ public class AgentPhaseRunner(
 
         int EstimateProgressPercentFromToolCalls()
         {
+            if (lastReportedPercent >= EstimatedProgressCeilingPercent)
+            {
+                return EstimatedProgressCeilingPercent;
+            }
+
             if (maxToolCalls <= 0)
             {
                 return Math.Clamp(lastReportedPercent + 1, 1, EstimatedProgressCeilingPercent);
             }
 
             var estimated = (int)Math.Round((double)totalToolCalls / maxToolCalls * 100.0);
-            return Math.Clamp(estimated, Math.Max(1, lastReportedPercent + 1), EstimatedProgressCeilingPercent);
+            var minAllowed = Math.Max(1, lastReportedPercent + 1);
+            if (minAllowed > EstimatedProgressCeilingPercent)
+            {
+                return EstimatedProgressCeilingPercent;
+            }
+
+            return Math.Clamp(estimated, minAllowed, EstimatedProgressCeilingPercent);
         }
 
         try
         {
             await ReportProgressAsync(1, "Starting phase", force: true);
-            for (var loop = 0; loop < MaxToolLoops; loop++)
+            for (var loop = 0; loop < maxToolLoops; loop++)
             {
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
                 var request = new LLMRequest(systemPrompt, messages, toolDefs, model, maxTokens,
@@ -150,13 +179,35 @@ public class AgentPhaseRunner(
 
                 try
                 {
-                    response = await llmClient.CompleteAsync(request, cts.Token);
+                    var responseTask = llmClient.CompleteAsync(request, cts.Token);
+                    var heartbeatCount = 0;
+                    while (!responseTask.IsCompleted)
+                    {
+                        var completedTask = await Task.WhenAny(
+                            responseTask,
+                            Task.Delay(ProgressHeartbeatInterval, cts.Token));
+                        if (completedTask == responseTask)
+                        {
+                            break;
+                        }
+
+                        heartbeatCount++;
+                        var waitedSeconds = heartbeatCount * (int)ProgressHeartbeatInterval.TotalSeconds;
+                        await ReportProgressAsync(
+                            lastReportedPercent,
+                            $"Waiting for model response ({waitedSeconds}s)",
+                            force: true);
+                    }
+
+                    response = await responseTask;
                 }
                 catch (OperationCanceledException)
                 {
                     logger.LogWarning("Phase {Role} timed out after {Timeout}", role, phaseTimeout);
                     return new PhaseResult(role, string.Empty, totalToolCalls, false,
-                        $"Phase timed out after {phaseTimeout.TotalMinutes} minutes.");
+                        $"Phase timed out after {phaseTimeout.TotalMinutes} minutes.",
+                        lastReportedPercent,
+                        lastProgressSummary);
                 }
 
                 // If the model returned tool calls, execute them
@@ -307,14 +358,16 @@ public class AgentPhaseRunner(
             }
 
             // Exhausted tool loops
-            logger.LogWarning("Phase {Role}: exhausted {Max} tool loops", role, MaxToolLoops);
+            logger.LogWarning("Phase {Role}: exhausted {Max} tool loops", role, maxToolLoops);
             return new PhaseResult(role, string.Empty, totalToolCalls, false,
-                $"Exhausted {MaxToolLoops} tool-calling loops without producing final output.");
+                $"Exhausted {maxToolLoops} tool-calling loops without producing final output.",
+                lastReportedPercent,
+                lastProgressSummary);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Phase {Role} failed with exception", role);
-            return new PhaseResult(role, string.Empty, totalToolCalls, false, ex.Message);
+            return new PhaseResult(role, string.Empty, totalToolCalls, false, ex.Message, lastReportedPercent, lastProgressSummary);
         }
     }
 

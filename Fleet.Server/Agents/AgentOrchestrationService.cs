@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Fleet.Server.Auth;
 using Fleet.Server.Connections;
 using Fleet.Server.Data;
@@ -56,6 +57,25 @@ public class AgentOrchestrationService(
     /// Queues operator steering notes to inject into the next phase prompt.
     /// </summary>
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<string>> SteeringNotes = new();
+
+    private sealed record RetryExecutionPlan(
+        string SourceExecutionId,
+        string? SourceStatus,
+        string? ReuseBranchName,
+        string? ReusePullRequestUrl,
+        int? ReusePullRequestNumber,
+        string? ReusePullRequestTitle,
+        double PriorProgressEstimate,
+        string RetryContextMarkdown)
+    {
+        public bool ReuseExistingBranch =>
+            !string.IsNullOrWhiteSpace(ReuseBranchName);
+
+        public bool ReuseExistingBranchAndPullRequest =>
+            ReuseExistingBranch &&
+            !string.IsNullOrWhiteSpace(ReusePullRequestUrl) &&
+            ReusePullRequestNumber is > 0;
+    }
 
     /// <summary>
     /// The ordered pipeline phases. Implementation phases run sequentially within their group.
@@ -256,13 +276,34 @@ public class AgentOrchestrationService(
         int workItemNumber,
         int userId,
         CancellationToken cancellationToken = default)
-        => StartExecutionAsync(projectId, workItemNumber, userId, targetBranch: null, cancellationToken);
+        => StartExecutionInternalAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            targetBranch: null,
+            retryPlan: null,
+            cancellationToken);
 
-    public async Task<string> StartExecutionAsync(
+    public Task<string> StartExecutionAsync(
         string projectId,
         int workItemNumber,
         int userId,
         string? targetBranch,
+        CancellationToken cancellationToken = default)
+        => StartExecutionInternalAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            targetBranch,
+            retryPlan: null,
+            cancellationToken);
+
+    private async Task<string> StartExecutionInternalAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? targetBranch,
+        RetryExecutionPlan? retryPlan,
         CancellationToken cancellationToken = default)
     {
         var codingRunCharged = false;
@@ -333,9 +374,25 @@ public class AgentOrchestrationService(
                 pipeline.SelectMany(g => g).Count(), selectedModelKey);
 
             // 7. Resolve collision-safe branch and PR title values.
-            var plannedBranch = BuildBranchName(project.BranchPattern, workItemNumber, workItem.Title);
-            var branchName = await ResolveUniqueBranchNameAsync(accessToken, repoFullName, plannedBranch, cancellationToken);
-            var plannedPrTitle = BuildPullRequestTitle(workItem);
+            var plannedPrTitle = retryPlan?.ReusePullRequestTitle ?? BuildPullRequestTitle(workItem);
+            string branchName;
+            string? reusePullRequestUrl = null;
+            var reusePullRequestNumber = 0;
+            if (retryPlan?.ReuseExistingBranch == true)
+            {
+                branchName = retryPlan.ReuseBranchName!;
+                if (retryPlan.ReuseExistingBranchAndPullRequest)
+                {
+                    reusePullRequestUrl = retryPlan.ReusePullRequestUrl;
+                    reusePullRequestNumber = retryPlan.ReusePullRequestNumber ?? 0;
+                }
+            }
+            else
+            {
+                var plannedBranch = BuildBranchName(project.BranchPattern, workItemNumber, workItem.Title);
+                branchName = await ResolveUniqueBranchNameAsync(accessToken, repoFullName, plannedBranch, cancellationToken);
+            }
+
             var (commitAuthorName, commitAuthorEmail) = ResolveCommitAuthor(
                 project.CommitAuthorMode,
                 project.CommitAuthorName,
@@ -354,6 +411,7 @@ public class AgentOrchestrationService(
                 Progress = 0,
                 BranchName = branchName,
                 PullRequestTitle = plannedPrTitle,
+                PullRequestUrl = reusePullRequestUrl,
                 CurrentPhase = "Initializing",
                 UserId = userId.ToString(),
                 ProjectId = projectId,
@@ -398,6 +456,40 @@ public class AgentOrchestrationService(
                 $"Execution {executionId} started for work item #{workItemNumber}: {workItem.Title}",
                 executionId: executionId);
 
+            if (retryPlan is not null)
+            {
+                var retrySummary = $"Retry context loaded from execution {retryPlan.SourceExecutionId} " +
+                                   $"(status: {retryPlan.SourceStatus ?? "unknown"}, prior progress: {(int)Math.Round(retryPlan.PriorProgressEstimate * 100)}%)";
+                await WriteLogEntryAsync(
+                    db,
+                    projectId,
+                    "System",
+                    "info",
+                    retrySummary,
+                    executionId: executionId);
+
+                if (retryPlan.ReuseExistingBranchAndPullRequest)
+                {
+                    await WriteLogEntryAsync(
+                        db,
+                        projectId,
+                        "System",
+                        "info",
+                        $"Resuming existing branch '{retryPlan.ReuseBranchName}' and PR: {retryPlan.ReusePullRequestUrl}",
+                        executionId: executionId);
+                }
+                else if (retryPlan.ReuseExistingBranch)
+                {
+                    await WriteLogEntryAsync(
+                        db,
+                        projectId,
+                        "System",
+                        "info",
+                        $"Resuming existing branch '{retryPlan.ReuseBranchName}' (a new PR will be opened if needed).",
+                        executionId: executionId);
+                }
+            }
+
             await eventPublisher.PublishProjectEventAsync(
                 userId,
                 projectId,
@@ -413,7 +505,7 @@ public class AgentOrchestrationService(
                 executionId, projectId, workItem, childWorkItems, repoFullName,
                 accessToken, branchName, commitAuthorName, commitAuthorEmail,
                 userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask,
-                pullRequestTargetBranch, cts.Token), CancellationToken.None);
+                pullRequestTargetBranch, retryPlan, reusePullRequestNumber, cts.Token), CancellationToken.None);
 
             return executionId;
         }
@@ -554,7 +646,35 @@ public class AgentOrchestrationService(
         if (string.Equals(priorExecution.Status, "running", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        return await StartExecutionAsync(projectId, priorExecution.WorkItemId, userId, cancellationToken);
+        var priorPhaseResults = await db.AgentPhaseResults
+            .AsNoTracking()
+            .Where(r => r.ExecutionId == priorExecution.Id)
+            .OrderBy(r => r.PhaseOrder)
+            .ToListAsync(cancellationToken);
+
+        var priorProgress = Math.Clamp(priorExecution.Progress, 0, 1);
+        var shouldReuseExistingBranchAndPr =
+            !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
+
+        var retryPlan = new RetryExecutionPlan(
+            SourceExecutionId: priorExecution.Id,
+            SourceStatus: priorExecution.Status,
+            ReuseBranchName: shouldReuseExistingBranchAndPr ? priorExecution.BranchName : null,
+            ReusePullRequestUrl: shouldReuseExistingBranchAndPr ? priorExecution.PullRequestUrl : null,
+            ReusePullRequestNumber: shouldReuseExistingBranchAndPr
+                ? TryParsePullRequestNumber(priorExecution.PullRequestUrl)
+                : null,
+            ReusePullRequestTitle: shouldReuseExistingBranchAndPr ? priorExecution.PullRequestTitle : null,
+            PriorProgressEstimate: priorProgress,
+            RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults));
+
+        return await StartExecutionInternalAsync(
+            projectId,
+            priorExecution.WorkItemId,
+            userId,
+            targetBranch: null,
+            retryPlan,
+            cancellationToken);
     }
 
     public async Task<ExecutionDocumentationDto?> GetExecutionDocumentationAsync(
@@ -612,6 +732,8 @@ public class AgentOrchestrationService(
         int userId, string selectedModelKey, AgentRole[][] pipeline,
         int maxConcurrentAgentsPerTask,
         string pullRequestTargetBranch,
+        RetryExecutionPlan? retryPlan,
+        int existingPullRequestNumber,
         CancellationToken externalCancellation)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
@@ -670,26 +792,42 @@ public class AgentOrchestrationService(
                 accessToken,
                 branchName,
                 externalCancellation,
-                baseBranch: pullRequestTargetBranch);
+                baseBranch: pullRequestTargetBranch,
+                resumeFromBranch: retryPlan?.ReuseExistingBranch == true);
 
             var toolContext = new AgentToolContext(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
 
-            // Open a draft PR immediately so agent commits are visible throughout development
-            var (prUrl, prNumber) = await OpenDraftPullRequestAsync(
-                sandbox,
-                accessToken,
-                repoFullName,
-                workItem,
-                commitAuthorName,
-                commitAuthorEmail,
-                pullRequestTargetBranch,
-                scopedDb,
-                executionId,
-                externalCancellation);
+            // Open a draft PR immediately so agent commits are visible throughout development,
+            // unless this run is explicitly resuming an existing branch/PR pair.
+            string? prUrl;
+            var prNumber = existingPullRequestNumber;
+            if (retryPlan?.ReuseExistingBranchAndPullRequest == true &&
+                !string.IsNullOrWhiteSpace(retryPlan.ReusePullRequestUrl))
+            {
+                prUrl = retryPlan.ReusePullRequestUrl;
+            }
+            else
+            {
+                (prUrl, prNumber) = await OpenDraftPullRequestAsync(
+                    sandbox,
+                    accessToken,
+                    repoFullName,
+                    workItem,
+                    commitAuthorName,
+                    commitAuthorEmail,
+                    pullRequestTargetBranch,
+                    scopedDb,
+                    executionId,
+                    externalCancellation);
+            }
 
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
+            if (retryPlan is not null && !string.IsNullOrWhiteSpace(retryPlan.RetryContextMarkdown))
+            {
+                workItemContext = $"{workItemContext}\n\n{retryPlan.RetryContextMarkdown}";
+            }
             var phaseOutputs = new List<(AgentRole Role, string Output)>();
 
             var totalRoles = pipeline.SelectMany(g => g).Count();
@@ -834,6 +972,8 @@ public class AgentOrchestrationService(
                 for (var attempt = 1; attempt <= maxAttempts; attempt++)
                 {
                     var isRetry = attempt > 1;
+                    var lastLoggedPercent = -1;
+                    var lastLoggedSummary = string.Empty;
                     var initialProgressSummary = isRetry
                         ? $"Retrying phase (attempt {attempt}/{maxAttempts})"
                         : $"Starting phase: {GetPhaseTaskDescription(role)}";
@@ -893,26 +1033,45 @@ public class AgentOrchestrationService(
                             if (!string.IsNullOrWhiteSpace(summary) &&
                                 !string.Equals(previousTask, summary, StringComparison.Ordinal))
                             {
+                                var isHeartbeat = IsHeartbeatProgressSummary(summary);
                                 await WriteLogEntryAsync(
                                     scopedDb,
                                     projectId,
                                     $"{role} Agent",
                                     "info",
                                     $"Status update: {summary}",
+                                    isDetailed: isHeartbeat,
                                     executionId: executionId);
+                                lastLoggedSummary = summary;
                             }
 
                             var pct = (int)Math.Round(estimatedProgress * 100);
-                            var logMessage = string.IsNullOrWhiteSpace(summary)
-                                ? $"Progress: {pct}%"
-                                : $"Progress: {pct}% - {summary}";
-                            await WriteLogEntryAsync(
-                                scopedDb,
-                                projectId,
-                                $"{role} Agent",
-                                "info",
-                                logMessage,
-                                executionId: executionId);
+                            if (pct != lastLoggedPercent)
+                            {
+                                await WriteLogEntryAsync(
+                                    scopedDb,
+                                    projectId,
+                                    $"{role} Agent",
+                                    "info",
+                                    $"Progress: {pct}%",
+                                    executionId: executionId);
+                                lastLoggedPercent = pct;
+                            }
+                            else if (!string.IsNullOrWhiteSpace(summary) &&
+                                     !string.Equals(lastLoggedSummary, summary, StringComparison.Ordinal))
+                            {
+                                // Preserve useful status transitions even when percent does not advance.
+                                var isHeartbeat = IsHeartbeatProgressSummary(summary);
+                                await WriteLogEntryAsync(
+                                    scopedDb,
+                                    projectId,
+                                    $"{role} Agent",
+                                    "info",
+                                    $"Status update: {summary}",
+                                    isDetailed: isHeartbeat,
+                                    executionId: executionId);
+                                lastLoggedSummary = summary;
+                            }
                         });
 
                         await PublishAgentsUpdatedAsync();
@@ -985,7 +1144,7 @@ public class AgentOrchestrationService(
                         }
                         else
                         {
-                            var errorText = result.Error ?? "Unknown error";
+                            var errorText = NormalizeAgentFailureMessage(result.Error);
                             await WriteLogEntryAsync(
                                 scopedDb,
                                 projectId,
@@ -1020,7 +1179,7 @@ public class AgentOrchestrationService(
                     priorAttempts.Add(result);
                 }
 
-                var finalError = priorAttempts.LastOrDefault()?.Error ?? "Unknown error";
+                var finalError = NormalizeAgentFailureMessage(priorAttempts.LastOrDefault()?.Error);
                 return new RolePhaseExecutionResult(
                     role,
                     false,
@@ -1390,6 +1549,13 @@ public class AgentOrchestrationService(
             var attempt = priorAttempts[i];
             sb.AppendLine($"### Failed Attempt {i + 1}");
             sb.AppendLine($"- Error: {attempt.Error ?? "Unknown error"}");
+            if (attempt.EstimatedCompletionPercent > 0)
+            {
+                var retrySummary = string.IsNullOrWhiteSpace(attempt.LastProgressSummary)
+                    ? "No summary captured"
+                    : attempt.LastProgressSummary;
+                sb.AppendLine($"- Last estimated completion: {attempt.EstimatedCompletionPercent}% ({retrySummary})");
+            }
             if (!string.IsNullOrWhiteSpace(attempt.Output))
             {
                 sb.AppendLine("- Output excerpt:");
@@ -1399,6 +1565,48 @@ public class AgentOrchestrationService(
         }
 
         sb.AppendLine("Focus on resolving the failure and completing this phase.");
+        return sb.ToString();
+    }
+
+    private static string BuildExecutionRetryContext(
+        AgentExecution priorExecution,
+        IReadOnlyList<AgentPhaseResult> priorPhaseResults)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Previous Execution Context");
+        sb.AppendLine($"- Previous execution id: {priorExecution.Id}");
+        sb.AppendLine($"- Previous status: {priorExecution.Status}");
+        sb.AppendLine($"- Last recorded completion: {(int)Math.Round(Math.Clamp(priorExecution.Progress, 0, 1) * 100)}%");
+        if (!string.IsNullOrWhiteSpace(priorExecution.BranchName))
+            sb.AppendLine($"- Reused branch: {priorExecution.BranchName}");
+        if (!string.IsNullOrWhiteSpace(priorExecution.PullRequestUrl))
+            sb.AppendLine($"- Reused PR: {priorExecution.PullRequestUrl}");
+        sb.AppendLine();
+
+        if (priorPhaseResults.Count > 0)
+        {
+            sb.AppendLine("### Prior phase outcomes");
+            foreach (var phase in priorPhaseResults.OrderBy(p => p.PhaseOrder))
+            {
+                var status = phase.Success ? "completed" : "failed";
+                sb.Append($"- {phase.Role}: {status}, tool calls={phase.ToolCallCount}");
+                if (!phase.Success && !string.IsNullOrWhiteSpace(phase.Error))
+                {
+                    sb.Append($", error={NormalizeAgentFailureMessage(phase.Error)}");
+                }
+
+                sb.AppendLine();
+            }
+        }
+        else
+        {
+            sb.AppendLine("### Prior phase outcomes");
+            sb.AppendLine("- No prior phase outputs were recorded.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Continue from the current repository state on the reused branch.");
+        sb.AppendLine("Do not restart completed work; focus on remaining failures and unfinished parts.");
         return sb.ToString();
     }
 
@@ -1412,6 +1620,30 @@ public class AgentOrchestrationService(
             return normalized;
 
         return $"{normalized[..maxChars]}\n\n[truncated]";
+    }
+
+    private static string NormalizeAgentFailureMessage(string? rawError)
+    {
+        if (string.IsNullOrWhiteSpace(rawError))
+            return "Unknown error";
+
+        var trimmed = rawError.Trim();
+        var match = Regex.Match(trimmed, "^'(?<min>\\d+)' cannot be greater than (?<max>\\d+)\\.$");
+        if (match.Success)
+        {
+            return "Internal progress-bound calculation failed while estimating completion. " +
+                   "This is a Fleet runtime issue, not a repository/code error.";
+        }
+
+        return trimmed;
+    }
+
+    private static bool IsHeartbeatProgressSummary(string summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary))
+            return false;
+
+        return summary.StartsWith("Waiting for model response (", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record RolePhaseExecutionResult(
@@ -1992,6 +2224,25 @@ public class AgentOrchestrationService(
 
     private static string BuildPullRequestCopyTitle(string baseTitle, int copyIndex)
         => copyIndex <= 1 ? $"{baseTitle} (copy)" : $"{baseTitle} (copy {copyIndex})";
+
+    private static int? TryParsePullRequestNumber(string? pullRequestUrl)
+    {
+        if (string.IsNullOrWhiteSpace(pullRequestUrl))
+            return null;
+
+        if (!Uri.TryCreate(pullRequestUrl, UriKind.Absolute, out var uri))
+            return null;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4)
+            return null;
+
+        // Expected format: /{owner}/{repo}/pull/{number}
+        if (!string.Equals(segments[2], "pull", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return int.TryParse(segments[3], out var prNumber) ? prNumber : null;
+    }
 
     private sealed record DraftPullRequestCreateResult(
         bool Success,
