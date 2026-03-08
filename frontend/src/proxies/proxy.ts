@@ -16,9 +16,33 @@ export class ApiError extends Error {
  * so that proxy functions can acquire MSAL access tokens outside React.
  */
 let tokenGetter: (() => Promise<string | undefined>) | undefined
-const configuredApiOrigin = (import.meta.env.VITE_API_ORIGIN ?? '')
-  .trim()
-  .replace(/\/+$/, '')
+const configuredApiOrigin = normalizeApiOrigin(import.meta.env.VITE_API_ORIGIN)
+
+function normalizeApiOrigin(rawOrigin?: string): string {
+  const normalized = (rawOrigin ?? '')
+    .trim()
+    .replace(/\/+$/, '')
+
+  if (!normalized) {
+    return ''
+  }
+
+  // In production we default to same-origin /api calls.
+  // Ignore localhost overrides to avoid baking local targets into deployed builds.
+  if (import.meta.env.PROD) {
+    try {
+      const parsed = new URL(normalized)
+      const host = parsed.hostname.toLowerCase()
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return ''
+      }
+    } catch {
+      return ''
+    }
+  }
+
+  return normalized
+}
 
 function resolveRequestUrl(url: string): string {
   if (!configuredApiOrigin || /^https?:\/\//i.test(url)) {
