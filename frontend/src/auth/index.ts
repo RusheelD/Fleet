@@ -1,1 +1,8 @@
-export { msalInstance, apiLoginRequest, googleLoginRequest, githubLoginRequest } from './msalConfig'
+export {
+  msalInstance,
+  apiLoginRequest,
+  googleLoginRequest,
+  githubLoginRequest,
+  getLoginRequest,
+  type AuthProvider,
+} from './msalConfig'

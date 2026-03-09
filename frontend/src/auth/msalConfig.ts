@@ -18,13 +18,34 @@ const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | und
 const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
 const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
 const githubIdpHint = import.meta.env.VITE_ENTRA_GITHUB_IDP_HINT as string | undefined
+const googlePrompt = import.meta.env.VITE_ENTRA_GOOGLE_PROMPT as string | undefined
+const githubPrompt = import.meta.env.VITE_ENTRA_GITHUB_PROMPT as string | undefined
+
+export type AuthProvider = 'microsoft' | 'google' | 'github'
 
 function normalizeHint(value: string | undefined, fallback: string): string {
   const normalized = value?.trim()
   return normalized && normalized.length > 0 ? normalized : fallback
 }
 
-function withProviderHints(
+function normalizeOptional(value: string | undefined): string | undefined {
+  const normalized = value?.trim()
+  return normalized && normalized.length > 0 ? normalized : undefined
+}
+
+function resolvePrompt(value: string | undefined, fallback: RedirectRequest['prompt']): RedirectRequest['prompt'] {
+  const normalized = normalizeOptional(value)
+  if (!normalized) {
+    return fallback
+  }
+
+  const allowedPrompts: RedirectRequest['prompt'][] = ['login', 'none', 'consent', 'select_account', 'create']
+  return allowedPrompts.includes(normalized as RedirectRequest['prompt'])
+    ? normalized as RedirectRequest['prompt']
+    : fallback
+}
+
+function buildProviderExtraQueryParameters(
   domainHint: string | undefined,
   idpHint: string | undefined,
   fallbackDomainHint: string,
@@ -37,6 +58,32 @@ function withProviderHints(
     domain_hint: resolvedDomainHint,
     // idp is optional and tenant-specific; only send it when explicitly configured.
     ...(resolvedIdpHint && resolvedIdpHint.length > 0 ? { idp: resolvedIdpHint } : {}),
+  }
+}
+
+function createProviderLoginRequest(
+  providerAuthority: string | undefined,
+  providerDomainHint: string | undefined,
+  providerIdpHint: string | undefined,
+  providerPrompt: string | undefined,
+  fallbackDomainHint: string,
+): RedirectRequest {
+  const resolvedAuthority = providerAuthority ?? authority ?? 'https://login.microsoftonline.com/common'
+  const resolvedDomainHint = normalizeHint(providerDomainHint, fallbackDomainHint)
+
+  return {
+    ...apiLoginRequest,
+    authority: resolvedAuthority,
+    // First-class hint field is the most reliable way to pass HRD hints through MSAL.
+    domainHint: resolvedDomainHint,
+    // In provider-specific flows force an interactive challenge by default.
+    prompt: resolvePrompt(providerPrompt, 'login'),
+    // Keep explicit query params for CIAM/B2C providers that key on raw query fields.
+    extraQueryParameters: buildProviderExtraQueryParameters(
+      providerDomainHint,
+      providerIdpHint,
+      fallbackDomainHint,
+    ),
   }
 }
 
@@ -76,28 +123,41 @@ const msalConfig: Configuration = {
  */
 export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : ['User.Read'],
+  prompt: 'select_account',
 }
 
 /** Login request that hints the user should sign in via Google */
 export const googleLoginRequest: RedirectRequest = {
-  ...apiLoginRequest,
-  authority: googleAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  extraQueryParameters: withProviderHints(
+  ...createProviderLoginRequest(
+    googleAuthority,
     googleDomainHint,
     googleIdpHint,
+    googlePrompt,
     'google.com',
   ),
 }
 
 /** Login request that hints the user should sign in via GitHub */
 export const githubLoginRequest: RedirectRequest = {
-  ...apiLoginRequest,
-  authority: githubAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  extraQueryParameters: withProviderHints(
+  ...createProviderLoginRequest(
+    githubAuthority,
     githubDomainHint,
     githubIdpHint,
+    githubPrompt,
     'github.com',
   ),
+}
+
+export function getLoginRequest(provider: AuthProvider = 'microsoft'): RedirectRequest {
+  if (provider === 'google') {
+    return googleLoginRequest
+  }
+
+  if (provider === 'github') {
+    return githubLoginRequest
+  }
+
+  return apiLoginRequest
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)

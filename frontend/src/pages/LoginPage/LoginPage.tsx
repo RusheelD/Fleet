@@ -13,8 +13,8 @@ import {
 import { useAuth } from '../../hooks'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionStatus } from '@azure/msal-browser'
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 const useStyles = makeStyles({
     root: {
@@ -101,15 +101,31 @@ function GitHubIcon({ className }: { className?: string }) {
 export function LoginPage() {
     const styles = useStyles()
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const { login } = useAuth()
     const isAuthenticated = useIsAuthenticated()
     const { inProgress } = useMsal()
+    const autoLoginStartedRef = useRef(false)
 
     useEffect(() => {
         if (isAuthenticated) {
             navigate('/projects', { replace: true })
         }
     }, [isAuthenticated, navigate])
+
+    useEffect(() => {
+        if (autoLoginStartedRef.current || isAuthenticated || inProgress !== InteractionStatus.None) {
+            return
+        }
+
+        const providerParam = searchParams.get('provider')
+        if (providerParam !== 'google' && providerParam !== 'github' && providerParam !== 'microsoft') {
+            return
+        }
+
+        autoLoginStartedRef.current = true
+        void login(providerParam)
+    }, [searchParams, login, isAuthenticated, inProgress])
 
     const isLoading = inProgress !== InteractionStatus.None
 
