@@ -12,21 +12,15 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
+const knownAuthoritiesEnv = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
 const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
-const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | undefined
 const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
 const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
-const githubIdpHint = import.meta.env.VITE_ENTRA_GITHUB_IDP_HINT as string | undefined
 const googlePrompt = import.meta.env.VITE_ENTRA_GOOGLE_PROMPT as string | undefined
 const githubPrompt = import.meta.env.VITE_ENTRA_GITHUB_PROMPT as string | undefined
 
 export type AuthProvider = 'microsoft' | 'google' | 'github'
-
-function normalizeHint(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim()
-  return normalized && normalized.length > 0 ? normalized : fallback
-}
 
 function normalizeOptional(value: string | undefined): string | undefined {
   const normalized = value?.trim()
@@ -45,45 +39,58 @@ function resolvePrompt(value: string | undefined, fallback: RedirectRequest['pro
     : fallback
 }
 
-function buildProviderExtraQueryParameters(
-  domainHint: string | undefined,
-  idpHint: string | undefined,
-  fallbackDomainHint: string,
-): RedirectRequest['extraQueryParameters'] {
-  const resolvedDomainHint = normalizeHint(domainHint, fallbackDomainHint)
-  const resolvedIdpHint = idpHint?.trim()
-
-  return {
-    // domain_hint helps issuer acceleration in Entra/B2C user flows.
-    domain_hint: resolvedDomainHint,
-    // idp is optional and tenant-specific; only send it when explicitly configured.
-    ...(resolvedIdpHint && resolvedIdpHint.length > 0 ? { idp: resolvedIdpHint } : {}),
+function parseAuthorityHost(authorityValue: string | undefined): string | undefined {
+  const normalized = normalizeOptional(authorityValue)
+  if (!normalized) {
+    return undefined
   }
+
+  try {
+    return new URL(normalized).host
+  } catch {
+    return undefined
+  }
+}
+
+function buildKnownAuthorities(): string[] {
+  const knownAuthorities = new Set<string>()
+
+  for (const token of (knownAuthoritiesEnv ?? '').split(',')) {
+    const normalized = token.trim()
+    if (normalized.length > 0) {
+      knownAuthorities.add(normalized)
+    }
+  }
+
+  for (const authorityValue of [authority, googleAuthority, githubAuthority]) {
+    const host = parseAuthorityHost(authorityValue)
+    if (!host) {
+      continue
+    }
+
+    // Entra External ID / B2C authorities should be explicitly trusted by MSAL.
+    if (host.endsWith('.ciamlogin.com') || host.endsWith('.b2clogin.com')) {
+      knownAuthorities.add(host)
+    }
+  }
+
+  return [...knownAuthorities]
 }
 
 function createProviderLoginRequest(
   providerAuthority: string | undefined,
   providerDomainHint: string | undefined,
-  providerIdpHint: string | undefined,
   providerPrompt: string | undefined,
-  fallbackDomainHint: string,
 ): RedirectRequest {
   const resolvedAuthority = providerAuthority ?? authority ?? 'https://login.microsoftonline.com/common'
-  const resolvedDomainHint = normalizeHint(providerDomainHint, fallbackDomainHint)
+  const resolvedDomainHint = normalizeOptional(providerDomainHint)
 
   return {
     ...apiLoginRequest,
     authority: resolvedAuthority,
-    // First-class hint field is the most reliable way to pass HRD hints through MSAL.
-    domainHint: resolvedDomainHint,
     // In provider-specific flows force an interactive challenge by default.
     prompt: resolvePrompt(providerPrompt, 'login'),
-    // Keep explicit query params for CIAM/B2C providers that key on raw query fields.
-    extraQueryParameters: buildProviderExtraQueryParameters(
-      providerDomainHint,
-      providerIdpHint,
-      fallbackDomainHint,
-    ),
+    ...(resolvedDomainHint ? { domainHint: resolvedDomainHint } : {}),
   }
 }
 
@@ -97,6 +104,7 @@ const getRedirectUri = () => {
 }
 
 const redirectUri = getRedirectUri()
+const knownAuthorities = buildKnownAuthorities()
 
 if (!clientId) {
   console.warn(
@@ -105,10 +113,18 @@ if (!clientId) {
   )
 }
 
+if (!normalizeOptional(googleAuthority)) {
+  console.warn(
+    'VITE_ENTRA_GOOGLE_AUTHORITY is not set. Google sign-in will use the shared authority, ' +
+    'which may still show provider selection in Entra.'
+  )
+}
+
 const msalConfig: Configuration = {
   auth: {
     clientId: clientId ?? 'PLACEHOLDER_CLIENT_ID',
     authority: authority ?? 'https://login.microsoftonline.com/common',
+    ...(knownAuthorities.length > 0 ? { knownAuthorities } : {}),
     redirectUri: redirectUri,
     postLogoutRedirectUri: redirectUri,
   },
@@ -123,7 +139,6 @@ const msalConfig: Configuration = {
  */
 export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : ['User.Read'],
-  prompt: 'select_account',
 }
 
 /** Login request that hints the user should sign in via Google */
@@ -131,9 +146,7 @@ export const googleLoginRequest: RedirectRequest = {
   ...createProviderLoginRequest(
     googleAuthority,
     googleDomainHint,
-    googleIdpHint,
     googlePrompt,
-    'google.com',
   ),
 }
 
@@ -142,9 +155,7 @@ export const githubLoginRequest: RedirectRequest = {
   ...createProviderLoginRequest(
     githubAuthority,
     githubDomainHint,
-    githubIdpHint,
     githubPrompt,
-    'github.com',
   ),
 }
 
