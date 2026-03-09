@@ -50,6 +50,7 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: '0.5rem',
         width: '100%',
+        flexWrap: 'wrap',
     },
     headerActionsMobile: {
         width: '100%',
@@ -58,6 +59,14 @@ const useStyles = makeStyles({
         display: 'flex',
         flexWrap: 'wrap',
         width: '100%',
+        rowGap: '0.375rem',
+        columnGap: '0.375rem',
+    },
+    actionsToolbarMobile: {
+        alignItems: 'stretch',
+    },
+    toolbarButtonMobile: {
+        flex: '1 1 120px',
     },
     summaryRow: {
         display: 'flex',
@@ -68,6 +77,9 @@ const useStyles = makeStyles({
     summaryRowCompact: {
         gap: '0.5rem',
         marginBottom: '0.75rem',
+    },
+    summaryRowMobile: {
+        gap: '0.5rem',
     },
     summaryIconWarning: {
         color: tokens.colorPaletteMarigoldForeground1,
@@ -85,6 +97,8 @@ const useStyles = makeStyles({
         marginBottom: '1rem',
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         paddingBottom: '0.5rem',
+        overflowX: 'auto',
+        whiteSpace: 'nowrap',
     },
     tabListSpacingCompact: {
         marginBottom: '0.5rem',
@@ -132,6 +146,8 @@ const useStyles = makeStyles({
     searchInputMobile: {
         maxWidth: 'unset',
         minWidth: '140px',
+        width: '100%',
+        flex: '1 1 100%',
     },
 })
 
@@ -314,10 +330,11 @@ export function AgentMonitorPage() {
                 subtitle="Track agent executions and view real-time logs"
                 actions={
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
-                        <Toolbar className={styles.actionsToolbar}>
+                        <Toolbar className={mergeClasses(styles.actionsToolbar, isMobile && styles.actionsToolbarMobile)}>
                             <ToolbarButton
                                 icon={<RocketRegular />}
                                 onClick={() => setDialogOpen(true)}
+                                className={mergeClasses(isMobile && styles.toolbarButtonMobile)}
                             >
                                 Start Execution
                             </ToolbarButton>
@@ -330,13 +347,19 @@ export function AgentMonitorPage() {
                                 onChange={(_e, data) => setSearchQuery(data.value)}
                                 contentBefore={<SearchRegular />}
                             />
-                            <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={() => { void refetchExec(); void refetchLogs() }}>Refresh</ToolbarButton>
+                            <ToolbarButton
+                                icon={<ArrowClockwiseRegular />}
+                                onClick={() => { void refetchExec(); void refetchLogs() }}
+                                className={mergeClasses(isMobile && styles.toolbarButtonMobile)}
+                            >
+                                Refresh
+                            </ToolbarButton>
                         </Toolbar>
                     </div>
                 }
             />
 
-            <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact)}>
+            <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact, isMobile && styles.summaryRowMobile)}>
                 <SummaryCard
                     icon={<PlayRegular />}
                     iconClassName={styles.summaryIconWarning}

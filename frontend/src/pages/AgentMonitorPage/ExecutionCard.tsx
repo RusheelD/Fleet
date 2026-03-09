@@ -29,7 +29,7 @@ import {
     CircleRegular,
 } from '@fluentui/react-icons'
 import type { AgentExecution, AgentInfo } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informative' | 'subtle'> = {
@@ -88,6 +88,12 @@ const useStyles = makeStyles({
         paddingRight: tokens.spacingHorizontalM,
         gap: tokens.spacingVerticalS,
     },
+    executionCardMobile: {
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalS,
+        paddingLeft: tokens.spacingHorizontalS,
+        paddingRight: tokens.spacingHorizontalS,
+    },
     executionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -96,6 +102,10 @@ const useStyles = makeStyles({
     },
     executionHeaderCompact: {
         gap: tokens.spacingHorizontalS,
+    },
+    executionHeaderMobile: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
     },
     executionTitle: {
         display: 'flex',
@@ -110,6 +120,11 @@ const useStyles = makeStyles({
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    titleTextMobile: {
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
     },
     titleTextCompact: {
         fontSize: '12px',
@@ -147,6 +162,10 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: tokens.spacingHorizontalXXS,
         flexShrink: 0,
+    },
+    executionActionsMobile: {
+        width: '100%',
+        justifyContent: 'flex-end',
     },
     pipeline: {
         display: 'flex',
@@ -226,6 +245,12 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         maxWidth: '26ch',
     },
+    taskCaptionMobile: {
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
+        maxWidth: 'unset',
+    },
     stepProgress: {
         maxWidth: '120px',
         marginTop: tokens.spacingVerticalXXS,
@@ -254,6 +279,12 @@ const useStyles = makeStyles({
     },
     completedActionsCompact: {
         gap: tokens.spacingHorizontalXS,
+    },
+    completedActionsMobile: {
+        width: '100%',
+    },
+    completedActionButtonMobile: {
+        flex: '1 1 120px',
     },
     compactDivider: {
         marginTop: '2px',
@@ -289,6 +320,7 @@ function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
 export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDocs }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const toasterId = useId('exec-toaster')
     const { dispatchToast } = useToastController(toasterId)
@@ -326,10 +358,10 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
     ) as AgentInfo[]
 
     return (
-        <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact)}>
+        <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile)}>
             <Toaster toasterId={toasterId} />
 
-            <div className={mergeClasses(styles.executionHeader, isCompact && styles.executionHeaderCompact)}>
+            <div className={mergeClasses(styles.executionHeader, isCompact && styles.executionHeaderCompact, isMobile && styles.executionHeaderMobile)}>
                 <div className={mergeClasses(styles.executionTitle, isCompact && styles.executionTitleCompact)}>
                     <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
@@ -339,7 +371,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                     </div>
                     <Text
                         weight="semibold"
-                        className={mergeClasses(styles.titleText, isCompact && styles.titleTextCompact)}
+                        className={mergeClasses(styles.titleText, isCompact && styles.titleTextCompact, isMobile && styles.titleTextMobile)}
                     >
                         {execution.workItemTitle}
                     </Text>
@@ -356,7 +388,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                         </Caption1>
                     )}
                 </div>
-                <div className={styles.executionActions}>
+                <div className={mergeClasses(styles.executionActions, isMobile && styles.executionActionsMobile)}>
                     {execution.status === 'running' && (
                         <>
                             <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={handlePause} />
@@ -424,6 +456,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                                     className={mergeClasses(
                                         isRunning ? styles.taskCaptionRunning : styles.taskCaption,
                                         isCompact && styles.taskCaptionCompact,
+                                        isMobile && styles.taskCaptionMobile,
                                     )}
                                 >
                                     {agent.currentTask}
@@ -451,13 +484,14 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
             </div>
 
             {execution.status === 'completed' && (
-                <div className={mergeClasses(styles.completedActions, isCompact && styles.completedActionsCompact)}>
+                <div className={mergeClasses(styles.completedActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
                     <Button
                         appearance="outline"
                         size="small"
                         icon={<BranchRegular />}
                         disabled={!execution.pullRequestUrl}
                         onClick={() => openPullRequest(execution.pullRequestUrl)}
+                        className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                     >
                         View PR
                     </Button>
@@ -470,6 +504,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                                 notify('No pull request diff is available for this execution', 'error')
                             }
                         }}
+                        className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                     >
                         View Changes
                     </Button>
@@ -484,6 +519,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                                 notify('Documentation is unavailable for this execution', 'error')
                             }
                         }}
+                        className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                     >
                         Docs
                     </Button>

@@ -63,6 +63,9 @@ const useStyles = makeStyles({
     headerActionsMobile: {
         width: '100%',
     },
+    headerActionButtonMobile: {
+        flex: '1 1 120px',
+    },
     toolbar: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -112,13 +115,22 @@ const useStyles = makeStyles({
     searchInputMobile: {
         maxWidth: 'unset',
         minWidth: 0,
+        width: '100%',
     },
     sortDropdown: {
         minWidth: '140px',
     },
     sortDropdownMobile: {
         minWidth: '120px',
-        flexShrink: 0,
+        flex: '1 1 140px',
+    },
+    toolbarRight: {
+        display: 'flex',
+        alignItems: 'center',
+    },
+    toolbarRightMobile: {
+        width: '100%',
+        justifyContent: 'flex-end',
     },
     projectGrid: {
         display: 'grid',
@@ -254,6 +266,7 @@ export function ProjectsPage() {
                             icon={<ArrowUploadRegular />}
                             onClick={handleImportClick}
                             disabled={importProjectsMutation.isPending}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                         >
                             Import
                         </Button>
@@ -262,6 +275,7 @@ export function ProjectsPage() {
                             icon={<ArrowDownloadRegular />}
                             onClick={() => void handleExportProjects()}
                             disabled={exportProjectsMutation.isPending || (projects?.length ?? 0) === 0}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                         >
                             Export
                         </Button>
@@ -269,6 +283,7 @@ export function ProjectsPage() {
                             appearance="primary"
                             icon={<AddRegular />}
                             onClick={() => setNewProjectOpen(true)}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                         >
                             New Project
                         </Button>
@@ -297,7 +312,7 @@ export function ProjectsPage() {
                         ))}
                     </Dropdown>
                 </div>
-                <Toolbar>
+                <Toolbar className={mergeClasses(styles.toolbarRight, isMobile && styles.toolbarRightMobile)}>
                     {!isDense && (
                         <>
                             <ToolbarButton

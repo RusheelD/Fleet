@@ -6,7 +6,7 @@ import {
     tokens,
     mergeClasses,
 } from '@fluentui/react-components'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 import type { KeyboardEvent, ReactNode } from 'react'
 
 const useStyles = makeStyles({
@@ -16,6 +16,7 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.75rem',
         minWidth: '160px',
+        flex: '1 1 160px',
     },
     summaryCardCompact: {
         paddingTop: '0.375rem',
@@ -24,6 +25,11 @@ const useStyles = makeStyles({
         paddingRight: '0.5rem',
         gap: '0.5rem',
         minWidth: '120px',
+        flex: '1 1 120px',
+    },
+    summaryCardMobile: {
+        minWidth: 'calc(50% - 0.5rem)',
+        flex: '1 1 calc(50% - 0.5rem)',
     },
     summaryIcon: {
         fontSize: '24px',
@@ -71,6 +77,7 @@ interface SummaryCardProps {
 export function SummaryCard({ icon, iconClassName, value, label, onClick, isActive = false }: SummaryCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const isInteractive = Boolean(onClick)
 
@@ -90,6 +97,7 @@ export function SummaryCard({ icon, iconClassName, value, label, onClick, isActi
             className={mergeClasses(
                 styles.summaryCard,
                 isCompact && styles.summaryCardCompact,
+                isMobile && styles.summaryCardMobile,
                 isInteractive && styles.summaryCardInteractive,
                 isActive && styles.summaryCardActive,
             )}

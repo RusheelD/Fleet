@@ -65,6 +65,7 @@ const useStyles = makeStyles({
     },
     topBarRightMobile: {
         gap: 0,
+        minWidth: 0,
     },
     tierBadge: {
         textTransform: 'uppercase',
@@ -219,14 +220,16 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, 
                         onClick={() => navigate('/search')}
                     />
                 </Tooltip>
-                <Tooltip content="View all projects" relationship="label">
-                    <Button
-                        appearance="subtle"
-                        icon={<GridRegular />}
-                        size="small"
-                        onClick={() => navigate('/projects')}
-                    />
-                </Tooltip>
+                {!isMobile && (
+                    <Tooltip content="View all projects" relationship="label">
+                        <Button
+                            appearance="subtle"
+                            icon={<GridRegular />}
+                            size="small"
+                            onClick={() => navigate('/projects')}
+                        />
+                    </Tooltip>
+                )}
                 <Tooltip content={chatOpen ? 'Close AI Chat' : 'Open AI Chat'} relationship="label">
                     <Button
                         appearance={chatOpen ? 'primary' : 'subtle'}

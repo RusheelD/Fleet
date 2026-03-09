@@ -43,7 +43,7 @@ const useStyles = makeStyles({
     profileRow: {
         display: 'flex',
         gap: '1.5rem',
-        alignItems: 'flex-start',
+        alignItems: 'stretch',
         flexWrap: 'wrap',
         '@media (max-width: 900px)': {
             gap: '0.875rem',
@@ -75,6 +75,10 @@ const useStyles = makeStyles({
         '@media (max-width: 900px)': {
             gridTemplateColumns: '1fr',
         },
+    },
+    fieldControl: {
+        width: '100%',
+        minWidth: 0,
     },
     saveButtonMobile: {
         width: '100%',
@@ -145,20 +149,20 @@ export function ProfileTab({ profile }: ProfileTabProps) {
                 <div className={styles.profileForm}>
                     <div className={styles.formRow}>
                         <Field label="Display Name">
-                            <Input value={displayName} onChange={(_e, data) => setDisplayName(data.value)} />
+                            <Input className={styles.fieldControl} value={displayName} onChange={(_e, data) => setDisplayName(data.value)} />
                         </Field>
                         <Field label="Email">
-                            <Input value={email} onChange={(_e, data) => setEmail(data.value)} type="email" />
+                            <Input className={styles.fieldControl} value={email} onChange={(_e, data) => setEmail(data.value)} type="email" />
                         </Field>
                     </div>
                     <Field label="Bio">
-                        <Input value={bio} onChange={(_e, data) => setBio(data.value)} />
+                        <Input className={styles.fieldControl} value={bio} onChange={(_e, data) => setBio(data.value)} />
                     </Field>
                     <Field label="Location">
-                        <Input value={location} onChange={(_e, data) => setLocation(data.value)} />
+                        <Input className={styles.fieldControl} value={location} onChange={(_e, data) => setLocation(data.value)} />
                     </Field>
                     <Field label="Subscription Tier">
-                        <Input value={(profile.role ?? 'free').toUpperCase()} readOnly />
+                        <Input className={styles.fieldControl} value={(profile.role ?? 'free').toUpperCase()} readOnly />
                     </Field>
                 </div>
             </div>

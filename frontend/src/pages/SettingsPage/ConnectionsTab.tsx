@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
     makeStyles,
     Title3,
@@ -17,9 +17,9 @@ import {
     DialogTrigger,
     mergeClasses,
 } from '@fluentui/react-components'
-import { PlugConnectedRegular } from '@fluentui/react-icons'
+import { PlugConnectedRegular, StarRegular } from '@fluentui/react-icons'
 import { AccountRow } from './'
-import { getGitHubOAuthState, getGitHubOAuthClientId, useUnlinkGitHub } from '../../proxies'
+import { getGitHubOAuthState, getGitHubOAuthClientId, useSetPrimaryGitHubAccount, useUnlinkGitHub } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import type { LinkedAccount } from '../../models'
 
@@ -42,6 +42,8 @@ const useStyles = makeStyles({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.5rem',
+        flexWrap: 'wrap',
     },
     infoCard: {
         padding: '1rem',
@@ -65,6 +67,9 @@ const useStyles = makeStyles({
     },
     connectError: {
         color: tokens.colorPaletteRedForeground1,
+    },
+    actionButtonMobile: {
+        width: '100%',
     },
 })
 
@@ -107,13 +112,24 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
     const styles = useStyles()
     const isMobile = useIsMobile()
     const unlinkGitHub = useUnlinkGitHub()
+    const setPrimaryGitHub = useSetPrimaryGitHubAccount()
     const [disconnectTarget, setDisconnectTarget] = useState<LinkedAccount | null>(null)
     const [isConnecting, setIsConnecting] = useState(false)
     const [isResolvingClientId, setIsResolvingClientId] = useState(!buildTimeClientId)
     const [connectError, setConnectError] = useState<string | null>(null)
     const [resolvedGitHubClientId, setResolvedGitHubClientId] = useState<string | undefined>(buildTimeClientId)
 
-    const gitHubConnections = connections.filter(c => c.provider === 'GitHub' && c.connectedAs)
+    const gitHubConnections = useMemo(
+        () => connections
+            .filter(c => c.provider === 'GitHub' && c.connectedAs)
+            .sort((a, b) => {
+                if (!!a.isPrimary !== !!b.isPrimary) {
+                    return a.isPrimary ? -1 : 1
+                }
+                return (b.connectedAt ?? '').localeCompare(a.connectedAt ?? '')
+            }),
+        [connections],
+    )
     const hasGitHubConnections = gitHubConnections.length > 0
 
     useEffect(() => {
@@ -192,6 +208,10 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
         })
     }, [disconnectTarget, unlinkGitHub])
 
+    const handleSetPrimaryGitHub = useCallback((accountId: number) => {
+        setPrimaryGitHub.mutate(accountId)
+    }, [setPrimaryGitHub])
+
     return (
         <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
             <div className={styles.sectionHeader}>
@@ -219,6 +239,7 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
                         size="small"
                         onClick={handleConnectGitHub}
                         disabled={isConnecting || isResolvingClientId}
+                        className={mergeClasses(isMobile && styles.actionButtonMobile)}
                     >
                         {isResolvingClientId ? 'Loading...' : (isConnecting ? 'Connecting...' : 'Connect GitHub')}
                     </Button>
@@ -231,9 +252,24 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
                     name="GitHub Account"
                     connectedAs={account.connectedAs}
                     actions={
-                        <Button appearance="subtle" size="small" onClick={() => setDisconnectTarget(account)}>
-                            Disconnect
-                        </Button>
+                        <>
+                            <Button
+                                appearance={account.isPrimary ? 'primary' : 'subtle'}
+                                size="small"
+                                icon={!account.isPrimary ? <StarRegular /> : undefined}
+                                onClick={() => handleSetPrimaryGitHub(account.id)}
+                                disabled={!!account.isPrimary || setPrimaryGitHub.isPending}
+                            >
+                                {account.isPrimary ? 'Primary' : 'Set Primary'}
+                            </Button>
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                onClick={() => setDisconnectTarget(account)}
+                            >
+                                Disconnect
+                            </Button>
+                        </>
                     }
                 />
             ))}

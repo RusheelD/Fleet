@@ -59,6 +59,8 @@ const useStyles = makeStyles({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.5rem',
+        flexWrap: 'wrap',
     },
     agentBadge: {
         display: 'flex',

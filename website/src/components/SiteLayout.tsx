@@ -14,6 +14,8 @@ const useStyles = makeStyles({
     content: {
         flexGrow: 1,
         minWidth: 0,
+        width: '100%',
+        overflowX: 'hidden',
     },
 })
 

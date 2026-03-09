@@ -97,6 +97,9 @@ const useStyles = makeStyles({
     headerActionsMobile: {
         width: '100%',
     },
+    headerActionButtonMobile: {
+        flex: '1 1 140px',
+    },
     toolbarRow: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -152,6 +155,16 @@ const useStyles = makeStyles({
     bulkActionsMobile: {
         width: '100%',
     },
+    inlineToolbar: {
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: tokens.spacingHorizontalXS,
+        minWidth: 0,
+    },
+    inlineToolbarMobile: {
+        width: '100%',
+    },
     bulkLabel: {
         color: tokens.colorNeutralForeground2,
         whiteSpace: 'nowrap',
@@ -179,6 +192,8 @@ const useStyles = makeStyles({
     searchInputMobile: {
         maxWidth: 'unset',
         minWidth: '140px',
+        width: '100%',
+        flex: '1 1 100%',
     },
     boardContainer: {
         flex: 1,
@@ -206,6 +221,10 @@ const useStyles = makeStyles({
         minWidth: '200px',
         borderRadius: tokens.borderRadiusLarge,
     },
+    filterSurfaceMobile: {
+        minWidth: 'min(260px, calc(100vw - 2rem))',
+        maxWidth: 'calc(100vw - 2rem)',
+    },
     filterSection: {
         display: 'flex',
         flexDirection: 'column' as const,
@@ -218,6 +237,10 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         minWidth: '220px',
         borderRadius: tokens.borderRadiusLarge,
+    },
+    columnSurfaceMobile: {
+        minWidth: 'min(280px, calc(100vw - 2rem))',
+        maxWidth: 'calc(100vw - 2rem)',
     },
     columnHeader: {
         display: 'flex',
@@ -649,6 +672,7 @@ export function WorkItemsPage() {
                                 icon={<ArrowUploadRegular />}
                                 onClick={handleImportClick}
                                 disabled={importWorkItemsMutation.isPending}
+                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                             >
                                 Import
                             </Button>
@@ -657,6 +681,7 @@ export function WorkItemsPage() {
                                 icon={<ArrowDownloadRegular />}
                                 onClick={() => void handleExportWorkItems()}
                                 disabled={exportWorkItemsMutation.isPending || !projectId}
+                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                             >
                                 Export
                             </Button>
@@ -664,6 +689,7 @@ export function WorkItemsPage() {
                                 appearance="primary"
                                 icon={<AddRegular />}
                                 onClick={() => setCreateDialogOpen(true)}
+                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                             >
                                 New Work Item
                             </Button>
@@ -682,7 +708,7 @@ export function WorkItemsPage() {
                             <Tab value="list" icon={<TextBulletListLtrRegular />}>List</Tab>
                             <Tab value="board" icon={<BoardRegular />}>Board</Tab>
                         </TabList>
-                        <Toolbar>
+                        <Toolbar className={mergeClasses(styles.inlineToolbar, isMobile && styles.inlineToolbarMobile)}>
                             <ToolbarDivider />
                             <Input
                                 className={mergeClasses(styles.searchInput, isMobile && styles.searchInputMobile)}
@@ -706,7 +732,7 @@ export function WorkItemsPage() {
                                         title={isFiltered(filters) ? 'Filters active' : 'Filters'}
                                     />
                                 </PopoverTrigger>
-                                <PopoverSurface className={styles.filterSurface}>
+                                <PopoverSurface className={mergeClasses(styles.filterSurface, isMobile && styles.filterSurfaceMobile)}>
                                     <div className={styles.filterHeader}>
                                         <Text weight="semibold" size={300}>Filters</Text>
                                         {isFiltered(filters) && (
@@ -780,7 +806,7 @@ export function WorkItemsPage() {
                                 <PopoverTrigger disableButtonEnhancement>
                                     <ToolbarButton>Columns</ToolbarButton>
                                 </PopoverTrigger>
-                                <PopoverSurface className={styles.columnSurface}>
+                                <PopoverSurface className={mergeClasses(styles.columnSurface, isMobile && styles.columnSurfaceMobile)}>
                                     <div className={styles.columnHeader}>
                                         <Text weight="semibold" size={300}>Columns</Text>
                                         <Button

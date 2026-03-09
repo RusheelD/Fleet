@@ -22,7 +22,7 @@ import {
 } from '@fluentui/react-components'
 import { BotRegular, RocketRegular } from '@fluentui/react-icons'
 import type { WorkItem } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 
 interface StartExecutionDialogProps {
     open: boolean
@@ -36,6 +36,9 @@ interface StartExecutionDialogProps {
 const useStyles = makeStyles({
     dialogSurface: {
         width: 'min(760px, calc(100vw - 1.5rem))',
+    },
+    dialogSurfaceMobile: {
+        width: 'calc(100vw - 0.75rem)',
     },
     content: {
         display: 'flex',
@@ -136,6 +139,11 @@ const useStyles = makeStyles({
     workItemTopRowCompact: {
         gap: tokens.spacingHorizontalXS,
     },
+    workItemTopRowMobile: {
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: tokens.spacingVerticalXXS,
+    },
     workItemTitleWrap: {
         display: 'flex',
         alignItems: 'baseline',
@@ -154,6 +162,11 @@ const useStyles = makeStyles({
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    workItemTitleMobile: {
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
     },
     workItemMeta: {
         color: tokens.colorNeutralForeground3,
@@ -178,9 +191,22 @@ const useStyles = makeStyles({
     branchField: {
         maxWidth: '320px',
     },
+    branchFieldMobile: {
+        maxWidth: 'unset',
+        width: '100%',
+    },
     emptyState: {
         padding: '2rem 1.5rem',
         textAlign: 'center' as const,
+    },
+    dialogActionsMobile: {
+        width: '100%',
+        justifyContent: 'stretch',
+        display: 'grid',
+        gap: tokens.spacingVerticalXS,
+    },
+    dialogActionButtonMobile: {
+        width: '100%',
     },
 })
 
@@ -215,6 +241,7 @@ export function StartExecutionDialog({
     onStart,
 }: StartExecutionDialogProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
     const [selected, setSelected] = useState<number | null>(null)
@@ -254,7 +281,7 @@ export function StartExecutionDialog({
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => onOpenChange(data.open)}>
-            <DialogSurface className={styles.dialogSurface}>
+            <DialogSurface className={mergeClasses(styles.dialogSurface, isMobile && styles.dialogSurfaceMobile)}>
                 <DialogBody>
                     <DialogTitle>Start Agent Execution</DialogTitle>
                     <DialogContent>
@@ -279,7 +306,7 @@ export function StartExecutionDialog({
                                 <Field
                                     label="PR Target Branch"
                                     hint="Agents will open the draft PR against this branch."
-                                    className={styles.branchField}
+                                    className={mergeClasses(styles.branchField, isMobile && styles.branchFieldMobile)}
                                     required
                                 >
                                     <Input
@@ -310,13 +337,13 @@ export function StartExecutionDialog({
                                                 )}
                                                 value={wi.workItemNumber.toString()}
                                                 label={
-                                                    <span className={styles.radioLabel}>
-                                                        <span className={mergeClasses(styles.workItemTopRow, isCompact && styles.workItemTopRowCompact)}>
+                                                        <span className={styles.radioLabel}>
+                                                        <span className={mergeClasses(styles.workItemTopRow, isCompact && styles.workItemTopRowCompact, isMobile && styles.workItemTopRowMobile)}>
                                                             <span className={mergeClasses(styles.workItemTitleWrap, isCompact && styles.workItemTitleWrapCompact)}>
                                                                 <span className={styles.workItemNumber}>
                                                                     #{wi.workItemNumber}
                                                                 </span>
-                                                                <Text weight="semibold" className={styles.workItemTitle}>
+                                                                <Text weight="semibold" className={mergeClasses(styles.workItemTitle, isMobile && styles.workItemTitleMobile)}>
                                                                     {wi.title}
                                                                 </Text>
                                                             </span>
@@ -352,15 +379,16 @@ export function StartExecutionDialog({
                             </div>
                         )}
                     </DialogContent>
-                    <DialogActions>
+                    <DialogActions className={mergeClasses(isMobile && styles.dialogActionsMobile)}>
                         <DialogTrigger disableButtonEnhancement>
-                            <Button appearance="secondary">Cancel</Button>
+                            <Button appearance="secondary" className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}>Cancel</Button>
                         </DialogTrigger>
                         <Button
                             appearance="primary"
                             icon={<RocketRegular />}
                             disabled={selected === null || targetBranch.trim().length === 0 || isPending}
                             onClick={handleStart}
+                            className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
                         >
                             {isPending ? 'Starting...' : 'Start Execution'}
                         </Button>

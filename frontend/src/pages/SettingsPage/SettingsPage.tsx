@@ -39,6 +39,7 @@ const useStyles = makeStyles({
         marginBottom: '0.875rem',
         overflowX: 'auto',
         paddingBottom: '0.25rem',
+        whiteSpace: 'nowrap',
     },
 })
 

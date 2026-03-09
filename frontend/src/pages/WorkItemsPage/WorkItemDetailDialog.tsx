@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     tokens,
     Button,
     Input,
@@ -24,6 +25,7 @@ import {
 } from '@fluentui/react-icons'
 import { useUpdateWorkItem, useDeleteWorkItem, resolveLevelIcon } from '../../proxies'
 import type { WorkItem, WorkItemLevel } from '../../models'
+import { useIsMobile } from '../../hooks'
 import { StateDot } from './StateDot'
 import { PriorityDot } from './PriorityDot'
 import { formatWorkItemState } from './stateLabel'
@@ -86,7 +88,7 @@ const useStyles = makeStyles({
         top: 0,
         right: 0,
         bottom: 0,
-        width: '960px',
+        width: 'min(960px, 100vw)',
         maxWidth: '100vw',
         backgroundColor: tokens.colorNeutralBackground1,
         boxShadow: tokens.shadow64,
@@ -94,6 +96,10 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+    },
+    panelMobile: {
+        width: '100vw',
+        left: 0,
     },
 
     /* Header bar (type badge + ID + title) */
@@ -108,6 +114,14 @@ const useStyles = makeStyles({
         borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
         backgroundColor: tokens.colorNeutralBackground2,
         flexShrink: 0,
+    },
+    headerBarMobile: {
+        flexWrap: 'wrap',
+        gap: tokens.spacingHorizontalS,
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalS,
+        paddingLeft: tokens.spacingHorizontalM,
+        paddingRight: tokens.spacingHorizontalM,
     },
     headerType: {
         display: 'flex',
@@ -128,6 +142,10 @@ const useStyles = makeStyles({
     headerTitle: {
         flex: 1,
         minWidth: 0,
+    },
+    headerTitleMobile: {
+        flexBasis: '100%',
+        order: 2,
     },
     headerTitleInput: {
         fontWeight: tokens.fontWeightSemibold,
@@ -152,10 +170,22 @@ const useStyles = makeStyles({
         borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
         flexShrink: 0,
     },
+    actionBarMobile: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: tokens.spacingVerticalS,
+        paddingTop: tokens.spacingVerticalS,
+        paddingBottom: tokens.spacingVerticalS,
+        paddingLeft: tokens.spacingHorizontalM,
+        paddingRight: tokens.spacingHorizontalM,
+    },
     actionBarLeft: {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
+    },
+    actionBarLeftMobile: {
+        width: '100%',
     },
     deleteButton: {
         color: tokens.colorPaletteRedForeground1,
@@ -173,6 +203,13 @@ const useStyles = makeStyles({
         paddingRight: tokens.spacingHorizontalXL,
         gap: tokens.spacingVerticalL,
     },
+    bodyMobile: {
+        paddingTop: tokens.spacingVerticalM,
+        paddingBottom: tokens.spacingVerticalL,
+        paddingLeft: tokens.spacingHorizontalM,
+        paddingRight: tokens.spacingHorizontalM,
+        gap: tokens.spacingVerticalM,
+    },
 
     /* Fields grid (compact strip across top) */
     fieldsGrid: {
@@ -183,6 +220,10 @@ const useStyles = makeStyles({
         paddingBottom: tokens.spacingVerticalM,
         borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
     },
+    fieldsGridMobile: {
+        gridTemplateColumns: '1fr',
+        gap: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
+    },
 
     /* Description (full width, fills remaining space) */
     descriptionSection: {
@@ -191,11 +232,19 @@ const useStyles = makeStyles({
         flex: 1,
         minHeight: '200px',
     },
+    descriptionSectionMobile: {
+        minHeight: '140px',
+    },
     descriptionTextarea: {
         marginTop: '8px',
         flex: 1,
         '& > textarea': {
             minHeight: '200px',
+        },
+    },
+    descriptionTextareaMobile: {
+        '& > textarea': {
+            minHeight: '140px',
         },
     },
 
@@ -281,6 +330,7 @@ interface WorkItemDetailDialogProps {
 
 export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClose, onNavigate }: WorkItemDetailDialogProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const updateMutation = useUpdateWorkItem(projectId)
     const deleteMutation = useDeleteWorkItem(projectId)
 
@@ -402,9 +452,9 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             <div className={styles.overlay} onClick={onClose} />
 
             {/* Panel */}
-            <div className={styles.panel}>
+            <div className={mergeClasses(styles.panel, isMobile && styles.panelMobile)}>
                 {/* Header bar */}
-                <div className={styles.headerBar}>
+                <div className={mergeClasses(styles.headerBar, isMobile && styles.headerBarMobile)}>
                     <div className={styles.headerType}>
                         {currentLevel ? (
                             <>
@@ -427,7 +477,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             AI
                         </Badge>
                     )}
-                    <div className={styles.headerTitle}>
+                    <div className={mergeClasses(styles.headerTitle, isMobile && styles.headerTitleMobile)}>
                         <Input
                             className={styles.headerTitleInput}
                             appearance="underline"
@@ -448,8 +498,8 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                 </div>
 
                 {/* Action bar */}
-                <div className={styles.actionBar}>
-                    <div className={styles.actionBarLeft}>
+                <div className={mergeClasses(styles.actionBar, isMobile && styles.actionBarMobile)}>
+                    <div className={mergeClasses(styles.actionBarLeft, isMobile && styles.actionBarLeftMobile)}>
                         <Button
                             appearance="primary"
                             icon={<SaveRegular />}
@@ -476,9 +526,9 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                 </div>
 
                 {/* Body: fields grid -> description -> children */}
-                <div className={styles.body}>
+                <div className={mergeClasses(styles.body, isMobile && styles.bodyMobile)}>
                     {/* Detail fields in a compact grid */}
-                    <div className={styles.fieldsGrid}>
+                    <div className={mergeClasses(styles.fieldsGrid, isMobile && styles.fieldsGridMobile)}>
                         {/* State */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>State</Text>
@@ -647,7 +697,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     </div>
 
                     {/* Full-width description */}
-                    <div className={styles.descriptionSection}>
+                    <div className={mergeClasses(styles.descriptionSection, isMobile && styles.descriptionSectionMobile)}>
                         <Text className={styles.sectionTitle}>Acceptance Criteria</Text>
                         <Textarea
                             value={acceptanceCriteria}
@@ -658,7 +708,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         />
                         <Text className={styles.sectionTitle}>Description</Text>
                         <Textarea
-                            className={styles.descriptionTextarea}
+                            className={mergeClasses(styles.descriptionTextarea, isMobile && styles.descriptionTextareaMobile)}
                             value={description}
                             onChange={(_e, data) => setDescription(data.value)}
                             resize="vertical"

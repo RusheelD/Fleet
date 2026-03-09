@@ -1,11 +1,12 @@
 import {
     makeStyles,
+    mergeClasses,
     Title3,
     Card,
     Divider,
 } from '@fluentui/react-components'
 import { SettingRow } from '../../components/shared'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
 import type { UserPreferences } from '../../models'
 
 const useStyles = makeStyles({
@@ -15,10 +16,18 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '1rem',
     },
+    sectionMobile: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
+        gap: '0.75rem',
+    },
 })
 
 export function NotificationsTab() {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const { preferences, updatePreference } = usePreferences()
 
     if (!preferences) return null
@@ -28,7 +37,7 @@ export function NotificationsTab() {
     }
 
     return (
-        <Card className={styles.section}>
+        <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
             <Title3>Notification Preferences</Title3>
             <Divider />
             <SettingRow

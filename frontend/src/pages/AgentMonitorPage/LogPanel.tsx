@@ -12,6 +12,7 @@ import {
 import { ArrowClockwiseRegular, CodeRegular, DeleteRegular } from '@fluentui/react-icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecution, LogEntry } from '../../models'
+import { useIsMobile } from '../../hooks'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
     info: 'logLevelInfo',
@@ -51,6 +52,10 @@ const useStyles = makeStyles({
         borderLeftColor: tokens.colorNeutralStroke2,
         borderRadius: tokens.borderRadiusMedium,
     },
+    logPanelMobile: {
+        maxHeight: 'none',
+        minHeight: 0,
+    },
     logHeader: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -62,6 +67,23 @@ const useStyles = makeStyles({
         borderBottomWidth: '1px',
         borderBottomStyle: 'solid',
         borderBottomColor: tokens.colorNeutralStroke2,
+    },
+    logHeaderMobile: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: tokens.spacingVerticalXS,
+    },
+    logHeaderTitleRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        minWidth: 0,
+    },
+    logHeaderActions: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        flexWrap: 'wrap',
     },
     logTitle: {
         fontSize: '14px',
@@ -77,6 +99,12 @@ const useStyles = makeStyles({
         fontSize: '12px',
         lineHeight: '20px',
     },
+    logListMobile: {
+        paddingTop: tokens.spacingVerticalXXS,
+        paddingBottom: tokens.spacingVerticalXXS,
+        paddingLeft: tokens.spacingHorizontalXS,
+        paddingRight: tokens.spacingHorizontalXS,
+    },
     logEntry: {
         display: 'grid',
         gridTemplateColumns: '62px auto 14px 1fr',
@@ -91,6 +119,11 @@ const useStyles = makeStyles({
             backgroundColor: tokens.colorNeutralBackground3,
         },
     },
+    logEntryMobile: {
+        gridTemplateColumns: '56px 1fr',
+        gap: tokens.spacingHorizontalS,
+        alignItems: 'start',
+    },
     logTime: {
         color: tokens.colorNeutralForeground4,
         fontVariantNumeric: 'tabular-nums',
@@ -102,6 +135,10 @@ const useStyles = makeStyles({
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    logAgentMobile: {
+        gridColumnStart: 2,
+        gridColumnEnd: 3,
     },
     levelDot: {
         display: 'inline-block',
@@ -126,6 +163,10 @@ const useStyles = makeStyles({
     logMessage: {
         wordBreak: 'break-word',
     },
+    logMessageMobile: {
+        gridColumnStart: 2,
+        gridColumnEnd: 3,
+    },
     logLevelInfo: {
         color: tokens.colorNeutralForeground1,
     },
@@ -147,6 +188,20 @@ const useStyles = makeStyles({
         fontStyle: 'italic',
         paddingTop: tokens.spacingVerticalXXL,
         paddingBottom: tokens.spacingVerticalXXL,
+    },
+    runTabsContainer: {
+        padding: '6px 8px',
+        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    runTabsContainerMobile: {
+        paddingTop: '4px',
+        paddingBottom: '4px',
+        paddingLeft: '6px',
+        paddingRight: '6px',
+    },
+    runTabsList: {
+        overflowX: 'auto',
+        whiteSpace: 'nowrap',
     },
 })
 
@@ -209,6 +264,7 @@ interface LogPanelProps {
 
 export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing = false }: LogPanelProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const [showDetailed, setShowDetailed] = useState(false)
     const [selectedRun, setSelectedRun] = useState<string>('all')
     const logListRef = useRef<HTMLDivElement | null>(null)
@@ -375,13 +431,13 @@ export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing
     }, [latestLogCursor, selectedRun])
 
     return (
-        <div className={styles.logPanel}>
-            <div className={styles.logHeader}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className={mergeClasses(styles.logPanel, isMobile && styles.logPanelMobile)}>
+            <div className={mergeClasses(styles.logHeader, isMobile && styles.logHeaderMobile)}>
+                <div className={styles.logHeaderTitleRow}>
                     <Title3 className={styles.logTitle}>Live Logs</Title3>
                     <Badge appearance="filled" color="informative" size="small">{sortedVisibleLogs.length}</Badge>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <div className={styles.logHeaderActions}>
                     <ToggleButton
                         appearance="subtle"
                         size="small"
@@ -404,11 +460,12 @@ export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing
                     <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" onClick={onRefresh} />
                 </div>
             </div>
-            <div style={{ padding: '6px 8px', borderBottom: `1px solid ${tokens.colorNeutralStroke2}` }}>
+            <div className={mergeClasses(styles.runTabsContainer, isMobile && styles.runTabsContainerMobile)}>
                 <TabList
                     selectedValue={selectedRun}
                     onTabSelect={(_event, data) => setSelectedRun(data.value as string)}
                     size="small"
+                    className={styles.runTabsList}
                 >
                     <Tab value="all">All ({logsWithResolvedExecutionId.length})</Tab>
                     {generalCount > 0 && <Tab value="general">General ({generalCount})</Tab>}
@@ -419,16 +476,16 @@ export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing
                     ))}
                 </TabList>
             </div>
-            <div ref={logListRef} className={styles.logList}>
+            <div ref={logListRef} className={mergeClasses(styles.logList, isMobile && styles.logListMobile)}>
                 {sortedVisibleLogs.length === 0 && (
                     <div className={styles.emptyState}>No log entries yet</div>
                 )}
                 {sortedVisibleLogs.map((log, i) => (
-                    <div key={i} className={styles.logEntry}>
+                    <div key={i} className={mergeClasses(styles.logEntry, isMobile && styles.logEntryMobile)}>
                         <span className={styles.logTime}>{formatLogTime(log.time)}</span>
-                        <span className={styles.logAgent}>{log.agent}</span>
+                        <span className={mergeClasses(styles.logAgent, isMobile && styles.logAgentMobile)}>{log.agent}</span>
                         <span className={mergeClasses(styles.levelDot, styles[LEVEL_DOT_CLASSES[log.level]])} />
-                        <span className={mergeClasses(styles.logMessage, styles[LOG_LEVEL_CLASSES[log.level]])}>{log.message}</span>
+                        <span className={mergeClasses(styles.logMessage, styles[LOG_LEVEL_CLASSES[log.level]], isMobile && styles.logMessageMobile)}>{log.message}</span>
                     </div>
                 ))}
             </div>

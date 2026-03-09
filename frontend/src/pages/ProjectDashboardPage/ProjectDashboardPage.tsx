@@ -66,6 +66,9 @@ const useStyles = makeStyles({
     headerActionsMobile: {
         width: '100%',
     },
+    headerActionButtonMobile: {
+        flex: '1 1 140px',
+    },
     metricsGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
@@ -108,6 +111,11 @@ const useStyles = makeStyles({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.5rem',
+        flexWrap: 'wrap',
+    },
+    sectionHeaderMobile: {
+        alignItems: 'flex-start',
     },
     activityList: {
         display: 'flex',
@@ -196,7 +204,12 @@ export function ProjectDashboardPage() {
                 subtitle={undefined}
                 actions={
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
-                        <Button appearance="primary" icon={<ChatRegular />} onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}>
+                        <Button
+                            appearance="primary"
+                            icon={<ChatRegular />}
+                            onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
+                        >
                             Open Chat
                         </Button>
                         {dashboard.repo ? (
@@ -204,6 +217,7 @@ export function ProjectDashboardPage() {
                                 appearance="secondary"
                                 onClick={() => setUnlinkRepoOpen(true)}
                                 disabled={updateProject.isPending}
+                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                             >
                                 Unlink Repo
                             </Button>
@@ -212,10 +226,11 @@ export function ProjectDashboardPage() {
                             appearance="secondary"
                             onClick={() => setDeleteProjectOpen(true)}
                             disabled={deleteProject.isPending}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                         >
                             Delete Project
                         </Button>
-                        <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${slug}/work-items`)}>
+                        <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${slug}/work-items`)} className={mergeClasses(isMobile && styles.headerActionButtonMobile)}>
                             Work Items
                         </Button>
                     </div>
@@ -278,7 +293,7 @@ export function ProjectDashboardPage() {
             <div className={mergeClasses(styles.twoColumns, isDense && styles.twoColumnsCompact)}>
                 {/* Recent Activity */}
                 <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
-                    <div className={styles.sectionHeader}>
+                    <div className={mergeClasses(styles.sectionHeader, isMobile && styles.sectionHeaderMobile)}>
                         <Title3>Recent Activity</Title3>
                         <Button appearance="transparent" size="small" onClick={() => navigate(`/projects/${slug}/agents`)}>View all</Button>
                     </div>
@@ -292,7 +307,7 @@ export function ProjectDashboardPage() {
 
                 {/* Agent Status */}
                 <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
-                    <div className={styles.sectionHeader}>
+                    <div className={mergeClasses(styles.sectionHeader, isMobile && styles.sectionHeaderMobile)}>
                         <Title3>Agent Status</Title3>
                         <Button
                             appearance="transparent"
