@@ -119,6 +119,13 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
         var entity = await ScopedSessions(ownerId, scopeProjectId)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
+        if (entity is null)
+        {
+            // Scope can drift on the client during project/global transitions.
+            // Allow delete by owner + id as a safe fallback to avoid false 404s.
+            entity = await context.ChatSessions
+                .FirstOrDefaultAsync(s => s.OwnerId == ownerId && s.Id == sessionId);
+        }
         if (entity is null) return false;
 
         context.ChatSessions.Remove(entity);

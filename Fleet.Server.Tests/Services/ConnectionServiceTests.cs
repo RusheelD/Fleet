@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 
 namespace Fleet.Server.Tests.Services;
@@ -159,5 +160,171 @@ public class ConnectionServiceTests
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
             () => _sut.GetGitHubRepositoriesAsync(UserId));
+    }
+
+    [TestMethod]
+    public async Task CreateGitHubRepositoryAsync_InitializesRepositoryWithReadmeAndBranchRef()
+    {
+        var account = new LinkedAccount
+        {
+            Id = 7,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "token-123",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+
+        _connectionRepo.Setup(r => r.GetPrimaryByProviderAsync(UserId, "GitHub"))
+            .ReturnsAsync(account);
+        _connectionRepo.Setup(r => r.GetByProviderAsync(UserId, "GitHub"))
+            .ReturnsAsync(account);
+
+        var sentRequests = new List<(HttpMethod Method, string Url, string? Body)>();
+        var responses = new Queue<HttpResponseMessage>([
+            JsonResponse(HttpStatusCode.Created, """
+                {
+                  "full_name": "octocat/demo-repo",
+                  "name": "demo-repo",
+                  "owner": { "login": "octocat" },
+                  "description": "Demo description",
+                  "private": false,
+                  "html_url": "https://github.com/octocat/demo-repo",
+                  "default_branch": "main"
+                }
+                """),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "blob-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "tree-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "commit-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "ref": "refs/heads/main", "object": { "sha": "commit-sha" } }"""),
+        ]);
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>(async (request, _) =>
+            {
+                var body = request.Content is null
+                    ? null
+                    : await request.Content.ReadAsStringAsync();
+                sentRequests.Add((request.Method, request.RequestUri?.ToString() ?? string.Empty, body));
+
+                if (responses.Count == 0)
+                    throw new InvalidOperationException("No queued HTTP response.");
+
+                return responses.Dequeue();
+            });
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        var result = await _sut.CreateGitHubRepositoryAsync(UserId,
+            new CreateGitHubRepositoryRequest("demo-repo", "Demo description", false, null));
+
+        Assert.AreEqual("octocat/demo-repo", result.FullName);
+        Assert.AreEqual(5, sentRequests.Count);
+
+        Assert.IsTrue(sentRequests[0].Url.EndsWith("/user/repos", StringComparison.Ordinal));
+        using (var createPayload = JsonDocument.Parse(sentRequests[0].Body!))
+        {
+            Assert.AreEqual("demo-repo", createPayload.RootElement.GetProperty("name").GetString());
+            Assert.AreEqual(false, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
+        }
+
+        Assert.IsTrue(sentRequests[1].Url.EndsWith("/repos/octocat/demo-repo/git/blobs", StringComparison.Ordinal));
+        using (var blobPayload = JsonDocument.Parse(sentRequests[1].Body!))
+        {
+            Assert.AreEqual("# demo-repo\n\nDemo description\n", blobPayload.RootElement.GetProperty("content").GetString());
+            Assert.AreEqual("utf-8", blobPayload.RootElement.GetProperty("encoding").GetString());
+        }
+
+        Assert.IsTrue(sentRequests[4].Url.EndsWith("/repos/octocat/demo-repo/git/refs", StringComparison.Ordinal));
+        using (var refPayload = JsonDocument.Parse(sentRequests[4].Body!))
+        {
+            Assert.AreEqual("refs/heads/main", refPayload.RootElement.GetProperty("ref").GetString());
+            Assert.AreEqual("commit-sha", refPayload.RootElement.GetProperty("sha").GetString());
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateGitHubRepositoryAsync_WithEmptyDescription_UsesTitleOnlyReadme()
+    {
+        var account = new LinkedAccount
+        {
+            Id = 7,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "token-123",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+
+        _connectionRepo.Setup(r => r.GetPrimaryByProviderAsync(UserId, "GitHub"))
+            .ReturnsAsync(account);
+        _connectionRepo.Setup(r => r.GetByProviderAsync(UserId, "GitHub"))
+            .ReturnsAsync(account);
+
+        string? blobRequestBody = null;
+        var responses = new Queue<HttpResponseMessage>([
+            JsonResponse(HttpStatusCode.Created, """
+                {
+                  "full_name": "octocat/empty-desc-repo",
+                  "name": "empty-desc-repo",
+                  "owner": { "login": "octocat" },
+                  "description": null,
+                  "private": false,
+                  "html_url": "https://github.com/octocat/empty-desc-repo",
+                  "default_branch": "main"
+                }
+                """),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "blob-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "tree-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "sha": "commit-sha" }"""),
+            JsonResponse(HttpStatusCode.Created, """{ "ref": "refs/heads/main", "object": { "sha": "commit-sha" } }"""),
+        ]);
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>(async (request, _) =>
+            {
+                if ((request.RequestUri?.ToString() ?? string.Empty).EndsWith("/git/blobs", StringComparison.Ordinal))
+                {
+                    blobRequestBody = request.Content is null
+                        ? null
+                        : await request.Content.ReadAsStringAsync();
+                }
+
+                if (responses.Count == 0)
+                    throw new InvalidOperationException("No queued HTTP response.");
+
+                return responses.Dequeue();
+            });
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        await _sut.CreateGitHubRepositoryAsync(UserId,
+            new CreateGitHubRepositoryRequest("empty-desc-repo", null, false, null));
+
+        Assert.IsNotNull(blobRequestBody);
+        using var blobPayload = JsonDocument.Parse(blobRequestBody);
+        Assert.AreEqual("# empty-desc-repo\n", blobPayload.RootElement.GetProperty("content").GetString());
+    }
+
+    private static HttpResponseMessage JsonResponse(HttpStatusCode statusCode, string json)
+    {
+        return new HttpResponseMessage(statusCode)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
     }
 }
