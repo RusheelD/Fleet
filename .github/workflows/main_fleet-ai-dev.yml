@@ -29,96 +29,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create deployment runtime config from GitHub Secrets
-        shell: bash
-        env:
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
-          AZURE_OPENAI_GENERATE_MODEL: ${{ secrets.AZURE_OPENAI_GENERATE_MODEL }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_GENERATE_MODEL: ${{ secrets.LLM_GENERATE_MODEL }}
-          FLEETDB_CONNECTION_STRING: ${{ secrets.FLEETDB_CONNECTION_STRING }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          REDIS_CONNECTION_STRING: ${{ secrets.REDIS_CONNECTION_STRING }}
-          FLEET_REDIS_CONNECTION_STRING: ${{ secrets.FLEET_REDIS_CONNECTION_STRING }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          def pick(*keys):
-              for key in keys:
-                  value = os.getenv(key)
-                  if value and value.strip():
-                      return value.strip()
-              return None
-
-          config = {}
-
-          github_client_id = pick("GITHUB_CLIENT_ID", "GITHUB_OAUTH_CLIENT_ID")
-          github_client_secret = pick("GITHUB_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_SECRET")
-          if github_client_id or github_client_secret:
-              config["GitHub"] = {}
-              if github_client_id:
-                  config["GitHub"]["ClientId"] = github_client_id
-              if github_client_secret:
-                  config["GitHub"]["ClientSecret"] = github_client_secret
-
-          llm_api_key = pick("AZURE_OPENAI_API_KEY")
-          llm_endpoint = pick("AZURE_OPENAI_ENDPOINT")
-          llm_model = pick("AZURE_OPENAI_MODEL", "LLM_MODEL")
-          llm_generate_model = pick("AZURE_OPENAI_GENERATE_MODEL", "LLM_GENERATE_MODEL")
-          if llm_api_key or llm_endpoint or llm_model or llm_generate_model:
-              config["LLM"] = {}
-              if llm_api_key:
-                  config["LLM"]["ApiKey"] = llm_api_key
-              if llm_endpoint:
-                  config["LLM"]["Endpoint"] = llm_endpoint
-              if llm_model:
-                  config["LLM"]["Model"] = llm_model
-              if llm_generate_model:
-                  config["LLM"]["GenerateModel"] = llm_generate_model
-
-          fleetdb_connection = pick("FLEETDB_CONNECTION_STRING", "DATABASE_URL")
-          redis_connection = pick("FLEET_REDIS_CONNECTION_STRING", "REDIS_CONNECTION_STRING")
-          if fleetdb_connection or redis_connection:
-              config["ConnectionStrings"] = {}
-              if fleetdb_connection:
-                  config["ConnectionStrings"]["fleetdb"] = fleetdb_connection
-              if redis_connection:
-                  config["ConnectionStrings"]["cache"] = redis_connection
-
-          output = Path("Fleet.Server/appsettings.Deployment.json")
-          if config:
-              output.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-              print(f"Generated {output} with sections: {', '.join(sorted(config.keys()))}")
-          else:
-              print("No deployment secrets were provided via GitHub Secrets; skipping appsettings.Deployment.json generation.")
-          PY
-
-      - name: Validate runtime secret coverage
-        shell: bash
-        env:
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
-        run: |
-          github_client_id="${GITHUB_CLIENT_ID:-$GITHUB_OAUTH_CLIENT_ID}"
-          github_client_secret="${GITHUB_CLIENT_SECRET:-$GITHUB_OAUTH_CLIENT_SECRET}"
-
-          if [ -z "$github_client_id" ] || [ -z "$github_client_secret" ]; then
-            echo "::warning::GitHub OAuth secrets are missing in GitHub Actions secrets. Production GitHub linking may fail until these are configured."
-          else
-            echo "GitHub OAuth secrets are present."
-          fi
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -152,10 +62,6 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BACKEND_PROJECT }}" --configuration Release --no-restore --output "${{ env.PUBLISH_DIR }}"
 
-      - name: Remove temporary deployment config from workspace
-        if: always()
-        run: rm -f Fleet.Server/appsettings.Deployment.json
-
       - name: Copy frontend into published app
         shell: bash
         run: |
@@ -183,11 +89,6 @@ jobs:
           test -f "${{ env.PUBLISH_DIR }}/Fleet.Server.runtimeconfig.json"
           test ! -f "${{ env.PUBLISH_DIR }}/Fleet.Server.Tests.runtimeconfig.json"
           test -f "${{ env.PUBLISH_DIR }}/wwwroot/index.html"
-          if test -f "${{ env.PUBLISH_DIR }}/appsettings.Deployment.json"; then
-            echo "Runtime deployment override file included."
-          else
-            echo "Runtime deployment override file not included (no deployment secrets file generated)."
-          fi
 
       - name: Create deployment zip
         shell: bash
