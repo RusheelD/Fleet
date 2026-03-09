@@ -83,6 +83,21 @@ public class ChatService(
         return await chatSessionRepository.CreateSessionAsync(projectId, title);
     }
 
+    public async Task<bool> RenameSessionAsync(string projectId, string sessionId, string title)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId
+        });
+
+        logger.CopilotSessionRenaming(
+            projectId.SanitizeForLogging(),
+            sessionId.SanitizeForLogging(),
+            title.SanitizeForLogging());
+        return await chatSessionRepository.RenameSessionAsync(projectId, sessionId, title);
+    }
+
     public async Task<bool> DeleteSessionAsync(string projectId, string sessionId)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>

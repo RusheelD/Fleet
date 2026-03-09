@@ -1,4 +1,4 @@
-import { get, post, del, postForm } from './'
+import { get, post, put, del, postForm } from './'
 import type { ChatData, ChatMessageData, ChatSessionData, SendMessageResponse, ChatAttachment } from '../models'
 
 const GLOBAL_CHAT_BASE = '/api/chat'
@@ -32,6 +32,10 @@ export function buildDeleteAttachmentPath(projectId: string | undefined, session
 }
 
 export function buildDeleteSessionPath(projectId: string | undefined, sessionId: string): string {
+  return `${buildChatSessionsPath(projectId)}/${sessionId}`
+}
+
+export function buildRenameSessionPath(projectId: string | undefined, sessionId: string): string {
   return `${buildChatSessionsPath(projectId)}/${sessionId}`
 }
 
@@ -69,3 +73,6 @@ export function deleteChatSession(projectId: string | undefined, sessionId: stri
   return del<void>(buildDeleteSessionPath(projectId, sessionId))
 }
 
+export function renameChatSession(projectId: string | undefined, sessionId: string, title: string): Promise<void> {
+  return put<void>(buildRenameSessionPath(projectId, sessionId), { title })
+}

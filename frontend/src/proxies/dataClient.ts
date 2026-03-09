@@ -6,7 +6,7 @@ import {
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs, clearLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
-  getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
+  getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
@@ -620,6 +620,17 @@ export function useDeleteSession(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (sessionId: string) => deleteChatSession(projectId, sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
+export function useRenameSession(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      renameChatSession(projectId, sessionId, title),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
     },

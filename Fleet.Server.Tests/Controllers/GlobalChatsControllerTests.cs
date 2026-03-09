@@ -52,4 +52,24 @@ public class GlobalChatsControllerTests
         Assert.IsNotNull(ok);
         Assert.AreSame(response, ok.Value);
     }
+
+    [TestMethod]
+    public async Task RenameSession_Found_ReturnsNoContent()
+    {
+        _chatService
+            .Setup(service => service.RenameSessionAsync("", "sess-1", "Renamed"))
+            .ReturnsAsync(true);
+
+        var result = await _sut.RenameSession("sess-1", new RenameSessionRequest("Renamed"));
+
+        Assert.IsInstanceOfType<NoContentResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RenameSession_EmptyTitle_ReturnsBadRequest()
+    {
+        var result = await _sut.RenameSession("sess-1", new RenameSessionRequest("   "));
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+    }
 }

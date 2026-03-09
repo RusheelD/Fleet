@@ -19,6 +19,9 @@ public static partial class LogMessages
     [LoggerMessage(EventId = 99104, Level = LogLevel.Information, Message = "Deleting chat session. projectId={projectId} sessionId={sessionId}")]
     public static partial void CopilotSessionDeleting(this ILogger logger, string projectId, string sessionId);
 
+    [LoggerMessage(EventId = 99119, Level = LogLevel.Information, Message = "Renaming chat session. projectId={projectId} sessionId={sessionId} title={title}")]
+    public static partial void CopilotSessionRenaming(this ILogger logger, string projectId, string sessionId, string title);
+
     [LoggerMessage(EventId = 99105, Level = LogLevel.Information, Message = "Sending chat message. projectId={projectId} sessionId={sessionId} generateWorkItems={generateWorkItems}")]
     public static partial void CopilotMessageSending(this ILogger logger, string projectId, string sessionId, bool generateWorkItems);
 

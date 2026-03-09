@@ -5,6 +5,7 @@ import {
   buildChatMessagesPath,
   buildDeleteAttachmentPath,
   buildDeleteSessionPath,
+  buildRenameSessionPath,
 } from './chatProxy'
 
 describe('chat proxy scoped paths', () => {
@@ -31,5 +32,11 @@ describe('chat proxy scoped paths', () => {
     expect(buildDeleteSessionPath(undefined, 'sess-9'))
       .toBe('/api/chat/sessions/sess-9')
   })
-})
 
+  it('builds rename endpoints for both scopes', () => {
+    expect(buildRenameSessionPath('proj-1', 'sess-9'))
+      .toBe('/api/projects/proj-1/chat/sessions/sess-9')
+    expect(buildRenameSessionPath(undefined, 'sess-9'))
+      .toBe('/api/chat/sessions/sess-9')
+  })
+})

@@ -96,6 +96,34 @@ public class ChatsControllerTests
         Assert.IsInstanceOfType<NotFoundResult>(result);
     }
 
+    [TestMethod]
+    public async Task RenameSession_Found_ReturnsNoContent()
+    {
+        _chatService.Setup(s => s.RenameSessionAsync(ProjectId, SessionId, "Renamed")).ReturnsAsync(true);
+
+        var result = await _sut.RenameSession(ProjectId, SessionId, new RenameSessionRequest("Renamed"));
+
+        Assert.IsInstanceOfType<NoContentResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RenameSession_EmptyTitle_ReturnsBadRequest()
+    {
+        var result = await _sut.RenameSession(ProjectId, SessionId, new RenameSessionRequest("   "));
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RenameSession_NotFound_Returns404()
+    {
+        _chatService.Setup(s => s.RenameSessionAsync(ProjectId, SessionId, "Renamed")).ReturnsAsync(false);
+
+        var result = await _sut.RenameSession(ProjectId, SessionId, new RenameSessionRequest("Renamed"));
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
     // ── SendMessage ──────────────────────────────────────
 
     [TestMethod]

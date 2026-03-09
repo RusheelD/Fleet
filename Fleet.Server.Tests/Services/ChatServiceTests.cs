@@ -181,6 +181,16 @@ public class ChatServiceTests
         Assert.IsFalse(result);
     }
 
+    [TestMethod]
+    public async Task RenameSessionAsync_DelegatesToRepo()
+    {
+        _chatRepo.Setup(r => r.RenameSessionAsync(ProjectId, SessionId, "Renamed")).ReturnsAsync(true);
+
+        var result = await _sut.RenameSessionAsync(ProjectId, SessionId, "Renamed");
+
+        Assert.IsTrue(result);
+    }
+
     // ── SendMessageAsync ─────────────────────────────────────
 
     [TestMethod]

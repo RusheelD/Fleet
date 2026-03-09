@@ -7,7 +7,7 @@ import { ToolEventMessage } from './ToolEventMessage'
 
 import {
     useChatData, useChatMessages, useCreateChatSession,
-    useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession,
+    useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession,
     sendChatMessage,
 } from '../../proxies'
 import { useChatGenerating, useAuth, usePreferences } from '../../hooks'
@@ -90,6 +90,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const { data: messages } = useChatMessages(projectId, activeSession)
     const createSessionMutation = useCreateChatSession(projectId)
     const deleteSessionMutation = useDeleteSession(projectId)
+    const renameSessionMutation = useRenameSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId, activeSession)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
@@ -258,6 +259,10 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
         })
     }
 
+    const handleRenameSession = (sessionId: string, title: string) => {
+        renameSessionMutation.mutate({ sessionId, title })
+    }
+
     // Show tool events from last response
     const toolEvents = lastSendResponse?.toolEvents ?? []
 
@@ -275,6 +280,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                 activeSessionId={activeSession ?? ''}
                 onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]) }}
                 onDeleteSession={handleDeleteSession}
+                onRenameSession={handleRenameSession}
                 onNewSession={handleNewSession}
             />
 

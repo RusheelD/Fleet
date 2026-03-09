@@ -36,7 +36,7 @@ export {
   getExecutionDocumentation,
 } from './agentsProxy'
 export type { ExecutionStatus, ExecutionDocumentation } from './agentsProxy'
-export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession } from './chatProxy'
+export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
 export {
@@ -101,6 +101,7 @@ export {
   useUploadAttachment,
   useDeleteAttachment,
   useDeleteSession,
+  useRenameSession,
   useNotifications,
   useMarkNotificationAsRead,
   useMarkAllNotificationsAsRead,

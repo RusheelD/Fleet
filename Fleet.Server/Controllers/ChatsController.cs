@@ -59,6 +59,26 @@ public class ChatsController(
         return deleted ? NoContent() : NotFound();
     }
 
+    [HttpPut("sessions/{sessionId}")]
+    public async Task<IActionResult> RenameSession(string projectId, string sessionId, [FromBody] RenameSessionRequest request)
+    {
+        var title = request.Title?.Trim();
+        if (string.IsNullOrWhiteSpace(title))
+            return BadRequest("Session title is required.");
+
+        var renamed = await chatService.RenameSessionAsync(projectId, sessionId, title);
+        if (renamed)
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId });
+        }
+        return renamed ? NoContent() : NotFound();
+    }
+
     [HttpPost("sessions/{sessionId}/messages")]
     public async Task<IActionResult> SendMessage(string projectId, string sessionId, [FromBody] SendMessageRequest request)
     {
