@@ -3,8 +3,20 @@
  * The app URL changes based on the deployment environment.
  */
 
+const PLACEHOLDER_APP_URL = 'https://app.your-domain.com'
+const DEFAULT_APP_URL = 'https://app.fleet-ai.dev'
+
+function normalizeAppUrl(rawValue?: string): string {
+    const value = rawValue?.trim()
+    if (!value || value === PLACEHOLDER_APP_URL) {
+        return DEFAULT_APP_URL
+    }
+
+    return value.replace(/\/+$/, '')
+}
+
 /** The URL where the Fleet app is hosted (for login/signup redirects) */
-export const APP_URL = import.meta.env.VITE_APP_URL as string | undefined ?? 'https://app.fleet-ai.dev'
+export const APP_URL = normalizeAppUrl(import.meta.env.VITE_APP_URL as string | undefined)
 
 /** Current environment name for display purposes */
-export const ENVIRONMENT = import.meta.env.VITE_ENVIRONMENT as string | undefined ?? 'production'
+export const ENVIRONMENT = (import.meta.env.VITE_ENVIRONMENT as string | undefined)?.trim() || 'production'

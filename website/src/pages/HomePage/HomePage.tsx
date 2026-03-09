@@ -33,6 +33,12 @@ const useStyles = makeStyles({
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
         background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        '@media (max-width: 900px)': {
+            paddingTop: '64px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     heroTitle: {
         maxWidth: '700px',
@@ -48,6 +54,16 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalM,
         flexWrap: 'wrap',
         justifyContent: 'center',
+        width: '100%',
+        '@media (max-width: 600px)': {
+            display: 'grid',
+            gap: tokens.spacingVerticalS,
+        },
+    },
+    heroButton: {
+        '@media (max-width: 600px)': {
+            width: '100%',
+        },
     },
 
     // Features
@@ -58,6 +74,12 @@ const useStyles = makeStyles({
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
         overflow: 'hidden',
+        '@media (max-width: 900px)': {
+            paddingTop: '56px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     sectionAlt: {
         backgroundColor: tokens.colorNeutralBackground2,
@@ -142,6 +164,12 @@ const useStyles = makeStyles({
         paddingBottom: '80px',
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
+        '@media (max-width: 900px)': {
+            paddingTop: '56px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
 })
 
@@ -200,6 +228,7 @@ export function HomePage() {
                         iconPosition="after"
                         as="a"
                         href={`${APP_URL}/signup`}
+                        className={styles.heroButton}
                     >
                         Get started free
                     </Button>
@@ -208,6 +237,7 @@ export function HomePage() {
                         size="large"
                         as="a"
                         href="/about"
+                        className={styles.heroButton}
                     >
                         Learn more
                     </Button>
@@ -273,6 +303,7 @@ export function HomePage() {
                     iconPosition="after"
                     as="a"
                     href={`${APP_URL}/signup`}
+                    className={styles.heroButton}
                 >
                     Get started free
                 </Button>

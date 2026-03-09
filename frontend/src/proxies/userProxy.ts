@@ -17,6 +17,10 @@ export function getGitHubOAuthState(): Promise<{ state: string }> {
   return get<{ state: string }>('/api/connections/github/state')
 }
 
+export function getGitHubOAuthClientId(): Promise<{ clientId: string }> {
+  return get<{ clientId: string }>('/api/connections/github/client-id')
+}
+
 export function linkGitHub(code: string, redirectUri: string, state: string): Promise<LinkedAccount> {
   return post<LinkedAccount>('/api/connections/github', { code, redirectUri, state })
 }

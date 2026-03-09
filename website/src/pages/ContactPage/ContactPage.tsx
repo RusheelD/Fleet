@@ -32,6 +32,12 @@ const useStyles = makeStyles({
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
         background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        '@media (max-width: 900px)': {
+            paddingTop: '64px',
+            paddingBottom: '40px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     heroSubtitle: {
         maxWidth: '560px',
@@ -43,6 +49,12 @@ const useStyles = makeStyles({
         paddingBottom: '80px',
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
+        '@media (max-width: 900px)': {
+            paddingTop: '40px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     grid: {
         display: 'grid',
@@ -59,11 +71,13 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalM,
+        minWidth: 0,
     },
     sidebar: {
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalXL,
+        minWidth: 0,
     },
     contactCard: {
         padding: tokens.spacingVerticalL,
@@ -71,6 +85,15 @@ const useStyles = makeStyles({
     contactIcon: {
         fontSize: '24px',
         color: tokens.colorBrandForeground1,
+    },
+    inputControl: {
+        width: '100%',
+        minWidth: 0,
+    },
+    submitButton: {
+        '@media (max-width: 600px)': {
+            width: '100%',
+        },
     },
 })
 
@@ -123,6 +146,7 @@ export function ContactPage() {
                                 value={name}
                                 onChange={(_e, data) => setName(data.value)}
                                 placeholder="Your name"
+                                className={styles.inputControl}
                             />
                         </Field>
 
@@ -132,6 +156,7 @@ export function ContactPage() {
                                 value={email}
                                 onChange={(_e, data) => setEmail(data.value)}
                                 placeholder="you@example.com"
+                                className={styles.inputControl}
                             />
                         </Field>
 
@@ -140,6 +165,7 @@ export function ContactPage() {
                                 value={subject}
                                 onChange={(_e, data) => setSubject(data.value)}
                                 placeholder="What is this about?"
+                                className={styles.inputControl}
                             />
                         </Field>
 
@@ -149,10 +175,11 @@ export function ContactPage() {
                                 onChange={(_e, data) => setMessage(data.value)}
                                 placeholder="Tell us how we can help..."
                                 rows={6}
+                                className={styles.inputControl}
                             />
                         </Field>
 
-                        <Button appearance="primary" size="large" type="submit">
+                        <Button appearance="primary" size="large" type="submit" className={styles.submitButton}>
                             Send message
                         </Button>
                     </form>

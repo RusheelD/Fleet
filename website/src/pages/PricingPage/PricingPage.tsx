@@ -29,6 +29,12 @@ const useStyles = makeStyles({
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
         background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        '@media (max-width: 900px)': {
+            paddingTop: '64px',
+            paddingBottom: '40px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     heroSubtitle: {
         maxWidth: '560px',
@@ -40,6 +46,12 @@ const useStyles = makeStyles({
         paddingBottom: '80px',
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
+        '@media (max-width: 900px)': {
+            paddingTop: '40px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     pricingGrid: {
         display: 'grid',
@@ -65,9 +77,7 @@ const useStyles = makeStyles({
         gap: tokens.spacingVerticalM,
     },
     cardPopular: {
-        borderColor: tokens.colorBrandStroke1,
-        borderWidth: '2px',
-        borderStyle: 'solid',
+        border: `2px solid ${tokens.colorBrandStroke1}`,
     },
     cardHeader: {
         display: 'flex',
@@ -78,11 +88,13 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
+        flexWrap: 'wrap',
     },
     priceRow: {
         display: 'flex',
         alignItems: 'baseline',
         gap: tokens.spacingHorizontalXS,
+        flexWrap: 'wrap',
     },
     priceAmount: {
         fontSize: tokens.fontSizeHero800,
@@ -111,7 +123,6 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
 
-    // FAQ
     sectionAlt: {
         backgroundColor: tokens.colorNeutralBackground2,
     },
@@ -136,7 +147,6 @@ const useStyles = makeStyles({
         gap: tokens.spacingVerticalXS,
     },
 
-    // CTA
     cta: {
         display: 'flex',
         flexDirection: 'column',
@@ -147,6 +157,17 @@ const useStyles = makeStyles({
         paddingBottom: '64px',
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
+        '@media (max-width: 900px)': {
+            paddingTop: '56px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
+    },
+    ctaButton: {
+        '@media (max-width: 600px)': {
+            width: '100%',
+        },
     },
 })
 
@@ -154,14 +175,14 @@ const plans: PlanData[] = [
     {
         name: 'Free',
         price: '$0',
-        period: 'forever',
-        description: 'Everything you need to get started — same features on every plan.',
+        period: '/ month',
+        description: 'Get started with core Fleet workflows and limited monthly usage.',
         features: [
+            'Limited work-item runs / month',
+            'Limited coding runs / month',
+            'Rate-limited API access',
             '1 concurrent agent per task',
-            '1 total agent',
-            'Limited monthly credits',
-            'Base AI model',
-            '3 projects',
+            '1 active execution',
             'GitHub integration',
             'Community support',
         ],
@@ -169,64 +190,63 @@ const plans: PlanData[] = [
         ctaAppearance: 'outline',
     },
     {
-        name: 'Pro',
-        popular: true,
-        price: '$29',
+        name: 'Basic',
+        price: '$200',
         period: '/ month',
-        description: 'More agents, more power — ship faster with parallel execution.',
+        description: 'Designed for small teams that need higher monthly throughput.',
         features: [
-            '5 concurrent agents per task',
-            '10 total agents',
-            'Higher monthly credits',
-            'Base + mid-tier AI models',
-            'Unlimited projects',
+            'Expanded work-item runs / month',
+            'Expanded coding runs / month',
+            'Higher API rate limits',
+            '3 concurrent agents per task',
+            '3 active executions',
             'Priority support',
-        ],
-        cta: 'Start free trial',
-        ctaAppearance: 'primary',
-    },
-    {
-        name: 'Team',
-        price: '$99',
-        period: '/ month',
-        description: 'Maximum scale for teams and organizations.',
-        features: [
-            '10 concurrent agents per task',
-            '25 total agents',
-            'Highest monthly credits',
-            'All AI models including premium',
-            'Unlimited projects',
-            'Priority support',
-            'Team collaboration',
-        ],
-        cta: 'Start free trial',
-        ctaAppearance: 'primary',
-    },
-    {
-        name: 'Enterprise',
-        price: 'Custom',
-        period: '',
-        description: 'For organizations that need security, compliance, and control.',
-        features: [
-            'Custom agent limits',
-            'Unlimited monthly credits',
-            'All AI models including premium',
-            'Unlimited projects',
-            'Dedicated support & SLA',
-            'SSO / Entra ID',
-            'Audit logging',
-            'On-premises option',
         ],
         cta: 'Contact sales',
         ctaAppearance: 'outline',
     },
+    {
+        name: 'Pro',
+        popular: true,
+        price: '$1000',
+        period: '/ month',
+        description: 'High-throughput plan for organizations running multiple agent pipelines.',
+        features: [
+            'High work-item runs / month',
+            'High coding runs / month',
+            'Higher API rate limits',
+            '10 concurrent agents per task',
+            '10 active executions',
+            'Priority support',
+        ],
+        cta: 'Contact sales',
+        ctaAppearance: 'primary',
+    },
+    {
+        name: 'Unlimited',
+        price: '$5000',
+        period: '/ month',
+        description: 'No monthly run caps and no API throttling for large production usage.',
+        features: [
+            'Unlimited work-item runs',
+            'Unlimited coding runs',
+            'Unlimited API rate',
+            'Unlimited concurrent agents / task',
+            'Unlimited active executions',
+            'Unlimited monthly credits',
+            'All AI models including premium',
+            'Dedicated support',
+        ],
+        cta: 'Contact sales',
+        ctaAppearance: 'primary',
+    },
 ]
 
 const faqs = [
-    { q: 'Can I try Fleet before paying?', a: 'Yes! The Free plan is free forever with generous limits. Pro and Team include a 14-day free trial.' },
-    { q: 'How does agent-based pricing work?', a: 'Plans scale based on two dimensions: the total number of agents you can run simultaneously across all tasks, and how many concurrent agents can work on a single task in parallel. All plans include the same core features.' },
+    { q: 'Can I try Fleet before paying?', a: 'Yes. The Free tier is available at $0/month and is intended for evaluation and early usage.' },
+    { q: 'How does agent-based pricing work?', a: 'Plans scale on monthly run capacity, API rate limits, and concurrency for active agent execution.' },
     { q: 'Can I cancel anytime?', a: 'Absolutely. No contracts, no cancellation fees. Downgrade to Free whenever you want.' },
-    { q: 'Do you support GitHub Enterprise?', a: 'Yes, Enterprise plans support GitHub Enterprise Server and GitHub Enterprise Cloud.' },
+    { q: 'Do you support GitHub Enterprise?', a: 'Yes. Unlimited and enterprise engagements support both GitHub Enterprise Server and GitHub Enterprise Cloud.' },
 ]
 
 export function PricingPage() {
@@ -234,15 +254,13 @@ export function PricingPage() {
 
     return (
         <>
-            {/* Hero */}
             <section className={styles.hero}>
                 <Title1 as="h1">Simple, transparent pricing</Title1>
                 <Body1 className={styles.heroSubtitle} as="p">
-                    All plans include the same features. Scale by adding more agents and concurrency.
+                    All plans include the same core platform. Scale by increasing monthly capacity and concurrency.
                 </Body1>
             </section>
 
-            {/* Pricing Cards */}
             <section className={styles.section}>
                 <div className={styles.pricingGrid}>
                     {plans.map((plan) => (
@@ -263,10 +281,10 @@ export function PricingPage() {
                             <Divider />
 
                             <div className={styles.featureList}>
-                                {plan.features.map((f) => (
-                                    <div key={f} className={styles.featureItem}>
+                                {plan.features.map((feature) => (
+                                    <div key={feature} className={styles.featureItem}>
                                         <CheckmarkRegular className={styles.featureCheck} />
-                                        <Body2>{f}</Body2>
+                                        <Body2>{feature}</Body2>
                                     </div>
                                 ))}
                             </div>
@@ -275,7 +293,8 @@ export function PricingPage() {
                                 appearance={plan.ctaAppearance}
                                 size="large"
                                 as="a"
-                                href={plan.name === 'Enterprise' ? '/contact' : `${APP_URL}/login`}
+                                href={plan.name === 'Unlimited' ? '/contact' : `${APP_URL}/login`}
+                                className={styles.ctaButton}
                             >
                                 {plan.cta}
                             </Button>
@@ -284,7 +303,6 @@ export function PricingPage() {
                 </div>
             </section>
 
-            {/* FAQ */}
             <section className={`${styles.section} ${styles.sectionAlt}`}>
                 <div className={styles.faqHeader}>
                     <Title2 as="h2">Frequently asked questions</Title2>
@@ -299,7 +317,6 @@ export function PricingPage() {
                 </div>
             </section>
 
-            {/* CTA */}
             <section className={styles.cta}>
                 <Title2 as="h2">Start building with AI agents today</Title2>
                 <Button
@@ -309,6 +326,7 @@ export function PricingPage() {
                     iconPosition="after"
                     as="a"
                     href={`${APP_URL}/login`}
+                    className={styles.ctaButton}
                 >
                     Get started free
                 </Button>

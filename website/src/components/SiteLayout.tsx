@@ -9,9 +9,11 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         minHeight: '100vh',
         backgroundColor: tokens.colorNeutralBackground1,
+        width: '100%',
     },
     content: {
         flexGrow: 1,
+        minWidth: 0,
     },
 })
 

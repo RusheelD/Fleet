@@ -110,7 +110,7 @@ public class SubscriptionService(
                 UserRoles.Free => "$0",
                 UserRoles.Basic => "$200",
                 UserRoles.Pro => "$1000",
-                _ => "$199",
+                _ => "$5000",
             },
             Period: "/month",
             Description: policy.UnlimitedRateLimit

@@ -17,6 +17,11 @@ const useStyles = makeStyles({
         paddingTop: tokens.spacingVerticalXXL,
         paddingBottom: tokens.spacingVerticalL,
         backgroundColor: tokens.colorNeutralBackground2,
+        '@media (max-width: 900px)': {
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+            paddingTop: tokens.spacingVerticalXL,
+        },
     },
     grid: {
         display: 'grid',
@@ -56,6 +61,7 @@ const useStyles = makeStyles({
         '@media (max-width: 768px)': {
             flexDirection: 'column',
             gap: tokens.spacingVerticalS,
+            alignItems: 'flex-start',
         },
     },
 })

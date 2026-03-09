@@ -30,6 +30,12 @@ const useStyles = makeStyles({
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
         background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        '@media (max-width: 900px)': {
+            paddingTop: '64px',
+            paddingBottom: '48px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     heroSubtitle: {
         maxWidth: '600px',
@@ -46,6 +52,12 @@ const useStyles = makeStyles({
         marginLeft: 'auto',
         marginRight: 'auto',
         overflow: 'hidden',
+        '@media (max-width: 900px)': {
+            paddingTop: '56px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
     },
     sectionAlt: {
         backgroundColor: tokens.colorNeutralBackground2,
@@ -128,6 +140,17 @@ const useStyles = makeStyles({
         paddingBottom: '64px',
         paddingLeft: tokens.spacingHorizontalXXL,
         paddingRight: tokens.spacingHorizontalXXL,
+        '@media (max-width: 900px)': {
+            paddingTop: '56px',
+            paddingBottom: '56px',
+            paddingLeft: tokens.spacingHorizontalM,
+            paddingRight: tokens.spacingHorizontalM,
+        },
+    },
+    ctaButton: {
+        '@media (max-width: 600px)': {
+            width: '100%',
+        },
     },
 })
 
@@ -236,6 +259,7 @@ export function AboutPage() {
                     iconPosition="after"
                     as="a"
                     href={`${APP_URL}/login`}
+                    className={styles.ctaButton}
                 >
                     Get started free
                 </Button>

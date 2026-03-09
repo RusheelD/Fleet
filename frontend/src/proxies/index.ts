@@ -39,7 +39,7 @@ export type { ExecutionStatus, ExecutionDocumentation } from './agentsProxy'
 export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
-export { getUserSettings, updateProfile, updatePreferences, getGitHubOAuthState, linkGitHub, unlinkGitHub, getGitHubRepos } from './userProxy'
+export { getUserSettings, updateProfile, updatePreferences, getGitHubOAuthState, getGitHubOAuthClientId, linkGitHub, unlinkGitHub, getGitHubRepos } from './userProxy'
 export { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 export {
   useDataQuery,

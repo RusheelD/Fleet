@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
     makeStyles,
     Title3,
@@ -15,13 +15,15 @@ import {
     DialogContent,
     DialogActions,
     DialogTrigger,
+    mergeClasses,
 } from '@fluentui/react-components'
 import { PlugConnectedRegular } from '@fluentui/react-icons'
 import { AccountRow } from './'
-import { getGitHubOAuthState, useUnlinkGitHub } from '../../proxies'
+import { getGitHubOAuthState, getGitHubOAuthClientId, useUnlinkGitHub } from '../../proxies'
+import { useIsMobile } from '../../hooks'
 import type { LinkedAccount } from '../../models'
 
-const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined
+const PLACEHOLDER_GITHUB_CLIENT_ID = 'YOUR_GITHUB_OAUTH_CLIENT_ID'
 
 const useStyles = makeStyles({
     section: {
@@ -29,6 +31,12 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
+    },
+    sectionMobile: {
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.75rem',
+        paddingRight: '0.75rem',
     },
     sectionHeader: {
         display: 'flex',
@@ -43,12 +51,33 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.75rem',
     },
+    infoCardMobile: {
+        alignItems: 'flex-start',
+        paddingTop: '0.75rem',
+        paddingBottom: '0.75rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+    },
     infoIcon: {
         fontSize: '24px',
         color: tokens.colorBrandForeground1,
         flexShrink: 0,
     },
+    connectError: {
+        color: tokens.colorPaletteRedForeground1,
+    },
 })
+
+function normalizeGitHubClientId(value?: string | null): string | undefined {
+    const normalized = (value ?? '').trim()
+    if (!normalized || normalized === PLACEHOLDER_GITHUB_CLIENT_ID) {
+        return undefined
+    }
+
+    return normalized
+}
+
+const buildTimeClientId = normalizeGitHubClientId(import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)
 
 function getNormalizedRedirectUri(): string {
     const origin = window.location.origin
@@ -58,11 +87,11 @@ function getNormalizedRedirectUri(): string {
     return origin
 }
 
-function buildGitHubAuthUrl(state: string): string {
+function buildGitHubAuthUrl(clientId: string, state: string): string {
     const baseUri = getNormalizedRedirectUri()
     const redirectUri = `${baseUri}/auth/github/callback`
     const params = new URLSearchParams({
-        client_id: GITHUB_CLIENT_ID ?? '',
+        client_id: clientId,
         redirect_uri: redirectUri,
         scope: 'read:user user:email repo',
         state,
@@ -76,22 +105,83 @@ interface ConnectionsTabProps {
 
 export function ConnectionsTab({ connections }: ConnectionsTabProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const unlinkGitHub = useUnlinkGitHub()
     const [disconnectOpen, setDisconnectOpen] = useState(false)
     const [isConnecting, setIsConnecting] = useState(false)
+    const [isResolvingClientId, setIsResolvingClientId] = useState(!buildTimeClientId)
+    const [connectError, setConnectError] = useState<string | null>(null)
+    const [resolvedGitHubClientId, setResolvedGitHubClientId] = useState<string | undefined>(buildTimeClientId)
 
     const gitHubConnection = connections.find(c => c.provider === 'GitHub')
     const isGitHubConnected = !!gitHubConnection?.connectedAs
 
+    useEffect(() => {
+        let active = true
+
+        const loadClientId = async () => {
+            try {
+                setIsResolvingClientId(true)
+                const { clientId } = await getGitHubOAuthClientId()
+                const normalized = normalizeGitHubClientId(clientId)
+                if (!active) {
+                    return
+                }
+
+                if (normalized) {
+                    setResolvedGitHubClientId(normalized)
+                    setConnectError(null)
+                } else if (!resolvedGitHubClientId) {
+                    setConnectError('GitHub OAuth client ID is missing. Configure GitHub:ClientId on the server.')
+                }
+            } catch {
+                if (!active || resolvedGitHubClientId) {
+                    return
+                }
+                setConnectError('GitHub OAuth client ID is not configured on the server.')
+            } finally {
+                if (active) {
+                    setIsResolvingClientId(false)
+                }
+            }
+        }
+
+        void loadClientId()
+
+        return () => {
+            active = false
+        }
+        // Run once on mount.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     const handleConnectGitHub = useCallback(async () => {
         try {
+            setConnectError(null)
             setIsConnecting(true)
+
+            let clientId = resolvedGitHubClientId
+            if (!clientId) {
+                const response = await getGitHubOAuthClientId()
+                clientId = normalizeGitHubClientId(response.clientId)
+                if (clientId) {
+                    setResolvedGitHubClientId(clientId)
+                }
+            }
+
+            if (!clientId) {
+                throw new Error('GitHub OAuth client ID is not configured on the server.')
+            }
+
             const { state } = await getGitHubOAuthState()
-            window.location.href = buildGitHubAuthUrl(state)
+            window.location.href = buildGitHubAuthUrl(clientId, state)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unable to start GitHub OAuth flow.'
+            setConnectError(message)
         } finally {
             setIsConnecting(false)
         }
-    }, [])
+    }, [resolvedGitHubClientId])
 
     const handleDisconnectGitHub = useCallback(() => {
         unlinkGitHub.mutate(undefined, {
@@ -100,13 +190,13 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
     }, [unlinkGitHub])
 
     return (
-        <Card className={styles.section}>
+        <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
             <div className={styles.sectionHeader}>
                 <Title3>Linked Accounts</Title3>
             </div>
             <Divider />
 
-            <div className={styles.infoCard}>
+            <div className={mergeClasses(styles.infoCard, isMobile && styles.infoCardMobile)}>
                 <PlugConnectedRegular className={styles.infoIcon} />
                 <div>
                     <Text weight="semibold" block>External Connections</Text>
@@ -154,15 +244,18 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
                             appearance="primary"
                             size="small"
                             onClick={handleConnectGitHub}
-                            disabled={!GITHUB_CLIENT_ID || isConnecting}
+                            disabled={isConnecting || isResolvingClientId}
                         >
-                            {isConnecting ? 'Connecting...' : 'Connect GitHub'}
+                            {isResolvingClientId ? 'Loading...' : (isConnecting ? 'Connecting...' : 'Connect GitHub')}
                         </Button>
                     )
                 }
             />
 
-            {/* Show other connections as read-only */}
+            {connectError && !isGitHubConnected && (
+                <Caption1 className={styles.connectError}>{connectError}</Caption1>
+            )}
+
             {connections
                 .filter(c => c.provider !== 'GitHub')
                 .map((account) => (

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     Title3,
     Card,
     Button,
@@ -16,7 +17,7 @@ import {
 } from '@fluentui/react-components'
 import { SaveRegular, CheckmarkRegular } from '@fluentui/react-icons'
 import { useUpdateProfile } from '../../proxies'
-import { useAuth } from '../../hooks'
+import { useAuth, useIsMobile } from '../../hooks'
 import type { UserProfile } from '../../models'
 
 const useStyles = makeStyles({
@@ -25,33 +26,58 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
+        '@media (max-width: 900px)': {
+            paddingTop: '0.875rem',
+            paddingBottom: '0.875rem',
+            paddingLeft: '0.75rem',
+            paddingRight: '0.75rem',
+        },
     },
     sectionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.5rem',
+        flexWrap: 'wrap',
     },
     profileRow: {
         display: 'flex',
         gap: '1.5rem',
         alignItems: 'flex-start',
+        flexWrap: 'wrap',
+        '@media (max-width: 900px)': {
+            gap: '0.875rem',
+            flexDirection: 'column',
+        },
     },
     avatarColumn: {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         gap: '0.5rem',
+        '@media (max-width: 900px)': {
+            alignItems: 'flex-start',
+        },
     },
     profileForm: {
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
+        minWidth: 0,
+        width: '100%',
     },
     formRow: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
         gap: '0.75rem',
+        minWidth: 0,
+        '@media (max-width: 900px)': {
+            gridTemplateColumns: '1fr',
+        },
+    },
+    saveButtonMobile: {
+        width: '100%',
     },
 })
 
@@ -61,6 +87,7 @@ interface ProfileTabProps {
 
 export function ProfileTab({ profile }: ProfileTabProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const { updateUser } = useAuth()
     const updateMutation = useUpdateProfile()
     const toasterId = useId('profile-toaster')
@@ -105,6 +132,7 @@ export function ProfileTab({ profile }: ProfileTabProps) {
                     icon={hasChanges ? <SaveRegular /> : <CheckmarkRegular />}
                     onClick={handleSave}
                     disabled={updateMutation.isPending || !hasChanges}
+                    className={mergeClasses(isMobile && styles.saveButtonMobile)}
                 >
                     {updateMutation.isPending ? 'Saving...' : hasChanges ? 'Save Changes' : 'Saved'}
                 </Button>
