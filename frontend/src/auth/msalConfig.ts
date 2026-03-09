@@ -28,13 +28,15 @@ function withProviderHints(
   domainHint: string | undefined,
   idpHint: string | undefined,
   fallbackDomainHint: string,
-  fallbackIdpHint: string,
 ): RedirectRequest['extraQueryParameters'] {
+  const resolvedDomainHint = normalizeHint(domainHint, fallbackDomainHint)
+  const resolvedIdpHint = idpHint?.trim()
+
   return {
     // domain_hint helps issuer acceleration in Entra/B2C user flows.
-    domain_hint: normalizeHint(domainHint, fallbackDomainHint),
-    // idp works in many B2C/External ID flows to jump directly to the provider.
-    idp: normalizeHint(idpHint, fallbackIdpHint),
+    domain_hint: resolvedDomainHint,
+    // idp is optional and tenant-specific; only send it when explicitly configured.
+    ...(resolvedIdpHint && resolvedIdpHint.length > 0 ? { idp: resolvedIdpHint } : {}),
   }
 }
 
@@ -84,7 +86,6 @@ export const googleLoginRequest: RedirectRequest = {
     googleDomainHint,
     googleIdpHint,
     'google.com',
-    'google.com',
   ),
 }
 
@@ -95,7 +96,6 @@ export const githubLoginRequest: RedirectRequest = {
   extraQueryParameters: withProviderHints(
     githubDomainHint,
     githubIdpHint,
-    'github.com',
     'github.com',
   ),
 }
