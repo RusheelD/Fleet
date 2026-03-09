@@ -7,6 +7,7 @@ export interface ProjectCreationGateInput {
   hasSelectedRepo: boolean
   hasSelectedAccount: boolean
   newRepoNameValid: boolean
+  newRepoNameTaken: boolean
   isPending: boolean
 }
 
@@ -22,7 +23,7 @@ export function canCreateProject(input: ProjectCreationGateInput): boolean {
   }
 
   if (input.repoMode === 'new') {
-    return input.hasSelectedAccount && input.newRepoNameValid
+    return input.hasSelectedAccount && input.newRepoNameValid && !input.newRepoNameTaken
   }
 
   return input.hasSelectedRepo

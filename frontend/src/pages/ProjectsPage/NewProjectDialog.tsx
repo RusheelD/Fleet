@@ -87,6 +87,30 @@ const useStyles = makeStyles({
     slugUnavailable: {
         color: tokens.colorPaletteRedForeground1,
     },
+    repoAvailabilityRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalXS,
+        marginTop: tokens.spacingVerticalXS,
+        backgroundColor: tokens.colorNeutralBackground2,
+        borderRadius: tokens.borderRadiusMedium,
+        paddingTop: '2px',
+        paddingBottom: '2px',
+        paddingLeft: '6px',
+        paddingRight: '6px',
+        width: 'fit-content',
+    },
+    repoAvailabilityText: {
+        color: tokens.colorNeutralForeground3,
+        fontSize: tokens.fontSizeBase200,
+        fontFamily: tokens.fontFamilyMonospace,
+    },
+    repoAvailabilityAvailable: {
+        color: tokens.colorPaletteGreenForeground1,
+    },
+    repoAvailabilityUnavailable: {
+        color: tokens.colorPaletteRedForeground1,
+    },
     repoOption: {
         display: 'flex',
         flexDirection: 'column',
@@ -210,7 +234,27 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
     const hasSelectedRepo = repos?.some((item) => item.fullName === repo.trim()) ?? false
     const hasSelectedAccount = typeof selectedAccountId === 'number'
         && gitHubConnections.some((account) => account.id === selectedAccountId)
+    const selectedAccountLogin = selectedAccount?.connectedAs?.trim() ?? ''
     const newRepoNameValid = normalizedNewRepoName.length > 0 && isValidGitHubRepoName(normalizedNewRepoName)
+    const canCheckNewRepoAvailability =
+        repoMode === 'new'
+        && hasSelectedAccount
+        && selectedAccountLogin.length > 0
+        && normalizedNewRepoName.length > 0
+        && newRepoNameValid
+    const isCheckingNewRepoAvailability = canCheckNewRepoAvailability && isLoadingRepos
+    const isNewRepoNameTaken = useMemo(() => {
+        if (!canCheckNewRepoAvailability || !repos) {
+            return false
+        }
+
+        const owner = selectedAccountLogin.toLowerCase()
+        const candidateName = normalizedNewRepoName.toLowerCase()
+        return repos.some((item) =>
+            item.owner.toLowerCase() === owner
+            && item.name.toLowerCase() === candidateName,
+        )
+    }, [canCheckNewRepoAvailability, repos, selectedAccountLogin, normalizedNewRepoName])
     const isPending = createMutation.isPending || createRepoMutation.isPending
 
     const canCreate = canCreateProject({
@@ -222,6 +266,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         hasSelectedRepo,
         hasSelectedAccount,
         newRepoNameValid,
+        newRepoNameTaken: isNewRepoNameTaken,
         isPending,
     })
 
@@ -443,9 +488,11 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                     <Field
                                         label="New Repository Name"
                                         required
-                                        validationState={normalizedNewRepoName.length > 0 && !newRepoNameValid ? 'error' : undefined}
-                                        validationMessage={normalizedNewRepoName.length > 0 && !newRepoNameValid
-                                            ? 'Use letters, numbers, dots, underscores, or dashes.'
+                                        validationState={normalizedNewRepoName.length > 0 && (!newRepoNameValid || isNewRepoNameTaken) ? 'error' : undefined}
+                                        validationMessage={normalizedNewRepoName.length > 0
+                                            ? (!newRepoNameValid
+                                                ? 'Use letters, numbers, dots, underscores, or dashes.'
+                                                : (isNewRepoNameTaken ? 'This repository name is already in use for the selected account.' : undefined))
                                             : undefined}
                                     >
                                         <Input
@@ -453,6 +500,25 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                             value={newRepoName}
                                             onChange={(_event, data) => setNewRepoName(data.value)}
                                         />
+                                        {canCheckNewRepoAvailability && (
+                                            <div className={styles.repoAvailabilityRow}>
+                                                {isCheckingNewRepoAvailability ? (
+                                                    <Spinner size="extra-tiny" />
+                                                ) : isNewRepoNameTaken ? (
+                                                    <DismissCircle16Filled className={styles.repoAvailabilityUnavailable} />
+                                                ) : (
+                                                    <CheckmarkCircle16Filled className={styles.repoAvailabilityAvailable} />
+                                                )}
+                                                <Text className={styles.repoAvailabilityText}>
+                                                    {selectedAccountLogin}/{normalizedNewRepoName}
+                                                </Text>
+                                                <Caption1 className={isNewRepoNameTaken ? styles.repoAvailabilityUnavailable : styles.repoAvailabilityAvailable}>
+                                                    {isCheckingNewRepoAvailability
+                                                        ? 'Checking...'
+                                                        : (isNewRepoNameTaken ? 'Unavailable' : 'Available')}
+                                                </Caption1>
+                                            </div>
+                                        )}
                                     </Field>
 
                                     <Field label="Repository Description">

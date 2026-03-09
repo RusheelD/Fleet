@@ -10,6 +10,7 @@ const validInput: ProjectCreationGateInput = {
   hasSelectedRepo: true,
   hasSelectedAccount: true,
   newRepoNameValid: true,
+  newRepoNameTaken: false,
   isPending: false,
 }
 
@@ -39,5 +40,6 @@ describe('canCreateProject', () => {
     expect(canCreateProject(newModeInput)).toBe(true)
     expect(canCreateProject({ ...newModeInput, hasSelectedAccount: false })).toBe(false)
     expect(canCreateProject({ ...newModeInput, newRepoNameValid: false })).toBe(false)
+    expect(canCreateProject({ ...newModeInput, newRepoNameTaken: true })).toBe(false)
   })
 })
