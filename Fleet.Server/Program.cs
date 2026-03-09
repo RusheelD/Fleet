@@ -22,6 +22,8 @@ using System.Security.Claims;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.Deployment.json", optional: true, reloadOnChange: false);
+ApplyEnvironmentAliases(builder.Configuration);
 
 #if DEBUG
 builder.Logging.AddSimpleConsole(options =>
@@ -351,3 +353,27 @@ app.MapDefaultEndpoints();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+static void ApplyEnvironmentAliases(ConfigurationManager configuration)
+{
+    SetIfMissing(configuration, "GitHub:ClientId", "GITHUB_CLIENT_ID", "GITHUB_OAUTH_CLIENT_ID");
+    SetIfMissing(configuration, "GitHub:ClientSecret", "GITHUB_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_SECRET");
+}
+
+static void SetIfMissing(ConfigurationManager configuration, string targetKey, params string[] environmentAliases)
+{
+    if (!string.IsNullOrWhiteSpace(configuration[targetKey]))
+    {
+        return;
+    }
+
+    foreach (var alias in environmentAliases)
+    {
+        var value = Environment.GetEnvironmentVariable(alias);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            configuration[targetKey] = value;
+            return;
+        }
+    }
+}

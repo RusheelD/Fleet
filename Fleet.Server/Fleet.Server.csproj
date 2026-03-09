@@ -31,6 +31,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="appsettings.Deployment.json" Condition="Exists('appsettings.Deployment.json')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Update="wwwroot\**\*">
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
