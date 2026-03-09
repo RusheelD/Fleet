@@ -1,4 +1,4 @@
-name: Azure Static Web Apps CI/CD (black-island)
+name: Azure Static Web Apps CI/CD (website)
 
 on:
   push:
@@ -50,3 +50,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BLACK_ISLAND_0C460421E }}
           action: "close"
+
