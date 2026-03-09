@@ -30,9 +30,8 @@ public class GitHubApiService(
 
     public async Task<GitHubRepoStats> GetRepoStatsAsync(int userId, string repoFullName)
     {
-        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
-        if (account is null || string.IsNullOrEmpty(accessToken))
+        var accessToken = await ResolveAccessTokenForRepoAsync(userId, repoFullName);
+        if (string.IsNullOrEmpty(accessToken))
         {
             logger.GitHubNoToken(userId);
             return new GitHubRepoStats(0, 0, 0, []);
@@ -57,9 +56,8 @@ public class GitHubApiService(
 
     public async Task<IReadOnlyList<GitHubWorkItemReference>> GetWorkItemReferencesAsync(int userId, string repoFullName)
     {
-        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
-        if (account is null || string.IsNullOrEmpty(accessToken))
+        var accessToken = await ResolveAccessTokenForRepoAsync(userId, repoFullName);
+        if (string.IsNullOrEmpty(accessToken))
         {
             logger.GitHubNoToken(userId);
             return [];
@@ -95,9 +93,8 @@ public class GitHubApiService(
         if (!TryParsePullRequestUrl(pullRequestUrl, out var repoFullName, out var pullRequestNumber))
             return null;
 
-        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-        var accessToken = tokenProtector.Unprotect(account?.AccessToken);
-        if (account is null || string.IsNullOrEmpty(accessToken))
+        var accessToken = await ResolveAccessTokenForRepoAsync(userId, repoFullName);
+        if (string.IsNullOrEmpty(accessToken))
         {
             logger.GitHubNoToken(userId);
             return null;
@@ -366,6 +363,44 @@ public class GitHubApiService(
         var repo = match.Groups["repo"].Value;
         repoFullName = $"{owner}/{repo}";
         return true;
+    }
+
+    private async Task<string?> ResolveAccessTokenForRepoAsync(int userId, string repoFullName)
+    {
+        var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+        if (accounts.Count == 0)
+            return null;
+
+        var candidates = accounts
+            .Select(account => tokenProtector.Unprotect(account.AccessToken))
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .Select(token => token!)
+            .ToList();
+
+        if (candidates.Count == 0)
+            return null;
+
+        if (candidates.Count == 1)
+            return candidates[0];
+
+        var client = httpClientFactory.CreateClient("GitHub");
+        foreach (var candidate in candidates)
+        {
+            if (await HasRepoAccessAsync(client, candidate, repoFullName))
+                return candidate;
+        }
+
+        return candidates[0];
+    }
+
+    private static async Task<bool> HasRepoAccessAsync(HttpClient client, string accessToken, string repoFullName)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{GitHubApiBase}/repos/{repoFullName}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request);
+        return response.IsSuccessStatusCode;
     }
 
     // ── GitHub API response models ────────────────────────────

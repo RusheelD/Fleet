@@ -8,6 +8,7 @@ export interface UserProfile {
 }
 
 export interface LinkedAccount {
+  id: number
   provider: string
   connectedAs?: string
   externalUserId?: string

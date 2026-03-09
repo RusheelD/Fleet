@@ -136,6 +136,9 @@ export function useDeleteProject() {
     mutationFn: (id: string) => deleteProject(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
     },
   })
 }
@@ -457,15 +460,21 @@ export function useExecutionDocumentation(projectId: string | undefined) {
 export function useUnlinkGitHub() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => unlinkGitHub(),
+    mutationFn: (accountId?: number) => unlinkGitHub(accountId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
     },
   })
 }
 
-export function useGitHubRepos(enabled = true) {
-  return useDataQuery('github-repos', getGitHubRepos, [], [], { enableFetch: enabled })
+export function useGitHubRepos(enabled = true, accountId?: number) {
+  return useDataQuery(
+    'github-repos',
+    () => getGitHubRepos(accountId),
+    [],
+    [accountId],
+    { enableFetch: enabled },
+  )
 }
 
 export function useNotifications(unreadOnly = false) {

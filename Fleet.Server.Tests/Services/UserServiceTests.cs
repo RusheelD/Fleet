@@ -30,7 +30,7 @@ public class UserServiceTests
         var profile = new UserProfileDto("John", "john@test.com", "Dev", "NYC", "");
         var connections = new List<LinkedAccountDto>
         {
-            new("GitHub", "octocat", "123", DateTime.UtcNow)
+            new(1, "GitHub", "octocat", "123", DateTime.UtcNow)
         };
         var prefs = new UserPreferencesDto(true, true, false, false, true, false, false);
 

@@ -5,4 +5,6 @@ export interface GitHubRepo {
   description?: string
   private: boolean
   htmlUrl: string
+  linkedAccountId?: number
+  linkedAccountLogin?: string
 }

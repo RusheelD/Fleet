@@ -6,5 +6,7 @@ public record GitHubRepoDto(
     string Owner,
     string? Description,
     bool Private,
-    string HtmlUrl
+    string HtmlUrl,
+    int? LinkedAccountId = null,
+    string? LinkedAccountLogin = null
 );

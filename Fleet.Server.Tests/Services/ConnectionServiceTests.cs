@@ -46,7 +46,7 @@ public class ConnectionServiceTests
     {
         var connections = new List<LinkedAccountDto>
         {
-            new("GitHub", "octocat", "12345", DateTime.UtcNow)
+            new(1, "GitHub", "octocat", "12345", DateTime.UtcNow)
         };
         _connectionRepo.Setup(r => r.GetAllAsync(UserId)).ReturnsAsync(connections);
 
@@ -136,8 +136,8 @@ public class ConnectionServiceTests
     [TestMethod]
     public async Task GetGitHubRepositoriesAsync_NoAccount_Throws()
     {
-        _connectionRepo.Setup(r => r.GetByProviderAsync(UserId, "GitHub"))
-            .ReturnsAsync((LinkedAccount?)null);
+        _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
+            .ReturnsAsync([]);
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
             () => _sut.GetGitHubRepositoriesAsync(UserId));
@@ -154,7 +154,8 @@ public class ConnectionServiceTests
             AccessToken = null,
             UserProfileId = UserId
         };
-        _connectionRepo.Setup(r => r.GetByProviderAsync(UserId, "GitHub")).ReturnsAsync(account);
+        _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
+            .ReturnsAsync([account]);
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(
             () => _sut.GetGitHubRepositoriesAsync(UserId));

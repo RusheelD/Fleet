@@ -519,7 +519,32 @@ public class ProjectService(
             AccessToken = "test-token",
             UserProfileId = userId,
         });
-        public Task<IReadOnlyList<LinkedAccountDto>> GetAllAsync(int userId) => Task.FromResult<IReadOnlyList<LinkedAccountDto>>([]);
+        public Task<IReadOnlyList<LinkedAccount>> GetByProviderAllAsync(int userId, string provider) =>
+            Task.FromResult<IReadOnlyList<LinkedAccount>>(
+            [
+                new LinkedAccount
+                {
+                    Id = 1,
+                    Provider = provider,
+                    AccessToken = "test-token",
+                    UserProfileId = userId,
+                    ConnectedAt = DateTime.UtcNow,
+                }
+            ]);
+        public Task<LinkedAccount?> GetByIdAsync(int userId, int accountId) =>
+            Task.FromResult<LinkedAccount?>(new LinkedAccount
+            {
+                Id = accountId,
+                Provider = "GitHub",
+                AccessToken = "test-token",
+                UserProfileId = userId,
+                ConnectedAt = DateTime.UtcNow,
+            });
+        public Task<IReadOnlyList<LinkedAccountDto>> GetAllAsync(int userId) =>
+            Task.FromResult<IReadOnlyList<LinkedAccountDto>>(
+            [
+                new LinkedAccountDto(1, "GitHub", "test-user", "1", DateTime.UtcNow)
+            ]);
         public Task<LinkedAccount> CreateAsync(LinkedAccount account) => Task.FromResult(account);
         public Task UpdateAsync(LinkedAccount account) => Task.CompletedTask;
         public Task DeleteAsync(LinkedAccount account) => Task.CompletedTask;

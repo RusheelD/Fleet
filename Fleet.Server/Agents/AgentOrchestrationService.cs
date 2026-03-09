@@ -351,13 +351,11 @@ public class AgentOrchestrationService(
             await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.Coding, cancellationToken);
             codingRunCharged = true;
 
-            // 5. Get the user's GitHub access token
-            var linkedAccount = await connectionRepository.GetByProviderAsync(userId, "GitHub")
-                ?? throw new InvalidOperationException("No GitHub account linked. Please connect your GitHub account first.");
+            // 5. Resolve a GitHub access token that can access this repository.
+            var accessToken = await ResolveGitHubAccessTokenForRepoAsync(userId, project.Repo, cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"No linked GitHub account can access '{project.Repo}'. Link/re-link a GitHub account with repository access.");
 
-            var accessToken = tokenProtector.Unprotect(linkedAccount.AccessToken);
-            if (string.IsNullOrWhiteSpace(accessToken))
-                throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
             var repoFullName = project.Repo;
             var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
                 accessToken,
@@ -2096,6 +2094,51 @@ public class AgentOrchestrationService(
             prResponse.IsSuccessStatusCode,
             prResponse.StatusCode,
             prResponseBody);
+    }
+
+    private async Task<string?> ResolveGitHubAccessTokenForRepoAsync(
+        int userId,
+        string repoFullName,
+        CancellationToken cancellationToken)
+    {
+        var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+        if (accounts.Count == 0)
+            return null;
+
+        var candidates = accounts
+            .Select(account => tokenProtector.Unprotect(account.AccessToken))
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .Select(token => token!)
+            .ToList();
+
+        if (candidates.Count == 0)
+            return null;
+
+        if (candidates.Count == 1)
+            return candidates[0];
+
+        var client = httpClientFactory.CreateClient("GitHub");
+        foreach (var candidate in candidates)
+        {
+            if (await RepoExistsForTokenAsync(client, candidate, repoFullName, cancellationToken))
+                return candidate;
+        }
+
+        return candidates[0];
+    }
+
+    private static async Task<bool> RepoExistsForTokenAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{repoFullName}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        return response.IsSuccessStatusCode;
     }
 
     private async Task<string> ResolvePullRequestTargetBranchAsync(

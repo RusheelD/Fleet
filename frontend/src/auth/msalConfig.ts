@@ -12,6 +12,10 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
+const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
+const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
+const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
+const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
 
 // Normalize redirect URI for localhost: Azure AD requires 'http://localhost:5250', not custom subdomains
 const getRedirectUri = () => {
@@ -54,13 +58,21 @@ export const apiLoginRequest: RedirectRequest = {
 /** Login request that hints the user should sign in via Google */
 export const googleLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
-  domainHint: 'google.com',
+  authority: googleAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
+  prompt: 'select_account',
+  extraQueryParameters: {
+    domain_hint: googleDomainHint ?? 'google.com',
+  },
 }
 
 /** Login request that hints the user should sign in via GitHub */
 export const githubLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
-  domainHint: 'github.com',
+  authority: githubAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
+  prompt: 'select_account',
+  extraQueryParameters: {
+    domain_hint: githubDomainHint ?? 'github.com',
+  },
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)

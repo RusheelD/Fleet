@@ -63,12 +63,21 @@ public class ConnectionsController(
         return NoContent();
     }
 
-    /// <summary>GET /api/connections/github/repos — List the user's GitHub repositories.</summary>
-    [HttpGet("github/repos")]
-    public async Task<IActionResult> GetGitHubRepos()
+    /// <summary>DELETE /api/connections/github/{accountId} — Unlink a specific GitHub account.</summary>
+    [HttpDelete("github/{accountId:int}")]
+    public async Task<IActionResult> UnlinkGitHubById(int accountId)
     {
         var userId = await authService.GetCurrentUserIdAsync();
-        var repos = await connectionService.GetGitHubRepositoriesAsync(userId);
+        await connectionService.UnlinkGitHubAsync(userId, accountId);
+        return NoContent();
+    }
+
+    /// <summary>GET /api/connections/github/repos — List the user's GitHub repositories.</summary>
+    [HttpGet("github/repos")]
+    public async Task<IActionResult> GetGitHubRepos([FromQuery] int? accountId = null)
+    {
+        var userId = await authService.GetCurrentUserIdAsync();
+        var repos = await connectionService.GetGitHubRepositoriesAsync(userId, accountId);
         return Ok(repos);
     }
 }

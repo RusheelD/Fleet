@@ -59,9 +59,6 @@ public class ConnectionService(
         var sanitizedRedirect = LogSanitizer.SanitizeUrl(redirectUri);
         logger.ConnectionsLinkGitHubRequested(userId, sanitizedRedirect.SanitizeForLogging());
 
-        // Check if already linked
-        var existing = await connectionRepository.GetByProviderAsync(userId, "GitHub");
-
         // Exchange authorization code for access token
         var clientId = configuration["GitHub:ClientId"]
             ?? throw new InvalidOperationException("GitHub:ClientId is not configured.");
@@ -102,6 +99,11 @@ public class ConnectionService(
         if (gitHubUser is null)
             throw new InvalidOperationException("Failed to retrieve GitHub user profile.");
 
+        var externalUserId = gitHubUser.Id.ToString();
+        var linkedAccounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+        var existing = linkedAccounts.FirstOrDefault(a =>
+            string.Equals(a.ExternalUserId, externalUserId, StringComparison.Ordinal));
+
         logger.ConnectionsLinkingGitHubAccount(userId, gitHubUser.Login.SanitizeForLogging(), gitHubUser.Id);
 
         if (existing is not null)
@@ -109,30 +111,30 @@ public class ConnectionService(
             // Update the existing linked account with fresh token/profile
             existing.ConnectedAs = gitHubUser.Login;
             existing.AccessToken = _tokenProtector.Protect(tokenBody.AccessToken);
-            existing.ExternalUserId = gitHubUser.Id.ToString();
+            existing.ExternalUserId = externalUserId;
             existing.ConnectedAt = DateTime.UtcNow;
             await connectionRepository.UpdateAsync(existing);
 
-            return new LinkedAccountDto("GitHub", gitHubUser.Login, gitHubUser.Id.ToString(), existing.ConnectedAt);
+            return new LinkedAccountDto(existing.Id, "GitHub", gitHubUser.Login, externalUserId, existing.ConnectedAt);
         }
 
-        // Store the linked account
+        // Store an additional linked account for this distinct external GitHub user.
         var linkedAccount = new LinkedAccount
         {
             Provider = "GitHub",
             ConnectedAs = gitHubUser.Login,
             AccessToken = _tokenProtector.Protect(tokenBody.AccessToken),
-            ExternalUserId = gitHubUser.Id.ToString(),
+            ExternalUserId = externalUserId,
             ConnectedAt = DateTime.UtcNow,
             UserProfileId = userId,
         };
 
         await connectionRepository.CreateAsync(linkedAccount);
 
-        return new LinkedAccountDto("GitHub", gitHubUser.Login, gitHubUser.Id.ToString(), linkedAccount.ConnectedAt);
+        return new LinkedAccountDto(linkedAccount.Id, "GitHub", gitHubUser.Login, externalUserId, linkedAccount.ConnectedAt);
     }
 
-    public async Task UnlinkGitHubAsync(int userId)
+    public async Task UnlinkGitHubAsync(int userId, int? accountId = null)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
@@ -140,8 +142,22 @@ public class ConnectionService(
             ["Provider"] = "GitHub"
         });
 
-        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub")
-            ?? throw new InvalidOperationException("No GitHub account is linked.");
+        LinkedAccount? account = null;
+        if (accountId is > 0)
+        {
+            var byId = await connectionRepository.GetByIdAsync(userId, accountId.Value);
+            if (byId is not null && string.Equals(byId.Provider, "GitHub", StringComparison.OrdinalIgnoreCase))
+            {
+                account = byId;
+            }
+        }
+        else
+        {
+            account = await connectionRepository.GetByProviderAsync(userId, "GitHub");
+        }
+
+        if (account is null)
+            throw new InvalidOperationException("No matching GitHub account is linked.");
 
         logger.ConnectionsUnlinkingGitHubAccount(userId, (account.ConnectedAs ?? string.Empty).SanitizeForLogging());
 
@@ -158,7 +174,7 @@ public class ConnectionService(
         return await connectionRepository.GetAllAsync(userId);
     }
 
-    public async Task<IReadOnlyList<GitHubRepoDto>> GetGitHubRepositoriesAsync(int userId)
+    public async Task<IReadOnlyList<GitHubRepoDto>> GetGitHubRepositoriesAsync(int userId, int? accountId = null)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
@@ -166,40 +182,83 @@ public class ConnectionService(
             ["Provider"] = "GitHub"
         });
 
-        var account = await connectionRepository.GetByProviderAsync(userId, "GitHub")
-            ?? throw new InvalidOperationException("No GitHub account is linked.");
+        IReadOnlyList<LinkedAccount> accounts;
+        if (accountId is > 0)
+        {
+            var specific = await connectionRepository.GetByIdAsync(userId, accountId.Value);
+            if (specific is null || !string.Equals(specific.Provider, "GitHub", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("No matching GitHub account is linked.");
+            }
+            accounts = [specific];
+        }
+        else
+        {
+            accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+        }
 
-        var accessToken = _tokenProtector.Unprotect(account.AccessToken);
-        if (string.IsNullOrEmpty(accessToken))
-            throw new InvalidOperationException("GitHub access token is missing.");
+        if (accounts.Count == 0)
+            throw new InvalidOperationException("No GitHub account is linked.");
 
         var httpClient = httpClientFactory.CreateClient("GitHub");
-        var repos = new List<GitHubRepoDto>();
-        var page = 1;
+        var reposByFullName = new Dictionary<string, GitHubRepoDto>(StringComparer.OrdinalIgnoreCase);
+        var hasUsableToken = false;
 
-        // Paginate through all repos (GitHub returns max 100 per page)
-        while (true)
+        foreach (var account in accounts)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get,
-                $"https://api.github.com/user/repos?per_page=100&page={page}&sort=updated&direction=desc");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+            var accessToken = _tokenProtector.Unprotect(account.AccessToken);
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                if (accountId is > 0)
+                    throw new InvalidOperationException("GitHub access token is missing.");
+                continue;
+            }
 
-            var response = await httpClient.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            hasUsableToken = true;
+            var page = 1;
+            while (true)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    $"https://api.github.com/user/repos?per_page=100&page={page}&sort=updated&direction=desc");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                request.Headers.UserAgent.ParseAdd("Fleet/1.0");
 
-            var pageRepos = await response.Content.ReadFromJsonAsync<List<GitHubRepoListItem>>();
-            if (pageRepos is null || pageRepos.Count == 0)
-                break;
+                var response = await httpClient.SendAsync(request);
+                response.EnsureSuccessStatusCode();
 
-            repos.AddRange(pageRepos.Select(r => new GitHubRepoDto(
-                r.FullName, r.Name, r.Owner?.Login ?? "", r.Description, r.Private, r.HtmlUrl)));
+                var pageRepos = await response.Content.ReadFromJsonAsync<List<GitHubRepoListItem>>();
+                if (pageRepos is null || pageRepos.Count == 0)
+                    break;
 
-            if (pageRepos.Count < 100)
-                break;
+                foreach (var repo in pageRepos)
+                {
+                    if (!reposByFullName.ContainsKey(repo.FullName))
+                    {
+                        reposByFullName[repo.FullName] = new GitHubRepoDto(
+                            repo.FullName,
+                            repo.Name,
+                            repo.Owner?.Login ?? string.Empty,
+                            repo.Description,
+                            repo.Private,
+                            repo.HtmlUrl,
+                            account.Id,
+                            account.ConnectedAs);
+                    }
+                }
 
-            page++;
+                if (pageRepos.Count < 100)
+                    break;
+
+                page++;
+            }
         }
+
+        if (!hasUsableToken)
+            throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
+
+        var repos = reposByFullName.Values
+            .OrderBy(r => r.FullName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         logger.ConnectionsFetchedGitHubRepositories(userId, repos.Count);
         return repos;

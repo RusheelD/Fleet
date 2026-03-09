@@ -25,10 +25,16 @@ export function linkGitHub(code: string, redirectUri: string, state: string): Pr
   return post<LinkedAccount>('/api/connections/github', { code, redirectUri, state })
 }
 
-export function unlinkGitHub(): Promise<void> {
+export function unlinkGitHub(accountId?: number): Promise<void> {
+  if (typeof accountId === 'number') {
+    return del<void>(`/api/connections/github/${accountId}`)
+  }
   return del<void>('/api/connections/github')
 }
 
-export function getGitHubRepos(): Promise<GitHubRepo[]> {
-  return get<GitHubRepo[]>('/api/connections/github/repos')
+export function getGitHubRepos(accountId?: number): Promise<GitHubRepo[]> {
+  const query = typeof accountId === 'number'
+    ? `?accountId=${encodeURIComponent(accountId)}`
+    : ''
+  return get<GitHubRepo[]>(`/api/connections/github/repos${query}`)
 }

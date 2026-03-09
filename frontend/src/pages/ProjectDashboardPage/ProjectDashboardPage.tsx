@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
@@ -9,6 +10,13 @@ import {
     Divider,
     Spinner,
     Text,
+    Dialog,
+    DialogSurface,
+    DialogBody,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    DialogTrigger,
 } from '@fluentui/react-components'
 import {
     ChatRegular,
@@ -20,7 +28,7 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
-import { useProjectDashboardBySlug, resolveIcon } from '../../proxies'
+import { useProjectDashboardBySlug, useDeleteProject, useUpdateProject, resolveIcon } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 
 const useStyles = makeStyles({
@@ -143,6 +151,35 @@ export function ProjectDashboardPage() {
     const isDense = isCompact || isMobile
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
+    const deleteProject = useDeleteProject()
+    const updateProject = useUpdateProject()
+    const [unlinkRepoOpen, setUnlinkRepoOpen] = useState(false)
+    const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
+
+    const handleUnlinkRepo = useCallback(() => {
+        if (!dashboard) {
+            return
+        }
+        updateProject.mutate(
+            { id: dashboard.id, data: { repo: '' } },
+            { onSuccess: () => setUnlinkRepoOpen(false) },
+        )
+    }, [dashboard, updateProject])
+
+    const handleDeleteProject = useCallback(() => {
+        if (!dashboard) {
+            return
+        }
+        deleteProject.mutate(
+            dashboard.id,
+            {
+                onSuccess: () => {
+                    setDeleteProjectOpen(false)
+                    navigate('/projects', { replace: true })
+                },
+            },
+        )
+    }, [dashboard, deleteProject, navigate])
 
     if (isLoading || !dashboard) {
         return (
@@ -162,6 +199,22 @@ export function ProjectDashboardPage() {
                         <Button appearance="primary" icon={<ChatRegular />} onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}>
                             Open Chat
                         </Button>
+                        {dashboard.repo ? (
+                            <Button
+                                appearance="secondary"
+                                onClick={() => setUnlinkRepoOpen(true)}
+                                disabled={updateProject.isPending}
+                            >
+                                Unlink Repo
+                            </Button>
+                        ) : null}
+                        <Button
+                            appearance="secondary"
+                            onClick={() => setDeleteProjectOpen(true)}
+                            disabled={deleteProject.isPending}
+                        >
+                            Delete Project
+                        </Button>
                         <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${slug}/work-items`)}>
                             Work Items
                         </Button>
@@ -169,11 +222,15 @@ export function ProjectDashboardPage() {
                 }
             />
 
-            <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
-                <LinkRegular />
-                {dashboard.repo}
-                <OpenRegular className={styles.openLinkIcon} />
-            </span>
+            {dashboard.repo ? (
+                <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
+                    <LinkRegular />
+                    {dashboard.repo}
+                    <OpenRegular className={styles.openLinkIcon} />
+                </span>
+            ) : (
+                <Text size={200}>No repository linked to this project.</Text>
+            )}
 
             {/* Quick Actions */}
             <div className={mergeClasses(styles.quickActions, isDense && styles.quickActionsCompact, isMobile && styles.quickActionsMobile)}>
@@ -265,6 +322,44 @@ export function ProjectDashboardPage() {
                     </div>
                 </Card>
             </div>
+
+            <Dialog open={unlinkRepoOpen} onOpenChange={(_e, data) => setUnlinkRepoOpen(data.open)}>
+                <DialogSurface>
+                    <DialogBody>
+                        <DialogTitle>Unlink Repository</DialogTitle>
+                        <DialogContent>
+                            This will disconnect the repository from this project. Existing work items remain, but agent and PR workflows that require a repo will stop until you link one again.
+                        </DialogContent>
+                        <DialogActions>
+                            <DialogTrigger disableButtonEnhancement>
+                                <Button appearance="secondary">Cancel</Button>
+                            </DialogTrigger>
+                            <Button appearance="primary" onClick={handleUnlinkRepo} disabled={updateProject.isPending}>
+                                {updateProject.isPending ? 'Unlinking...' : 'Unlink Repo'}
+                            </Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
+
+            <Dialog open={deleteProjectOpen} onOpenChange={(_e, data) => setDeleteProjectOpen(data.open)}>
+                <DialogSurface>
+                    <DialogBody>
+                        <DialogTitle>Delete Project</DialogTitle>
+                        <DialogContent>
+                            Delete <b>{dashboard.title}</b>? This permanently removes the project, work items, logs, and executions.
+                        </DialogContent>
+                        <DialogActions>
+                            <DialogTrigger disableButtonEnhancement>
+                                <Button appearance="secondary">Cancel</Button>
+                            </DialogTrigger>
+                            <Button appearance="primary" onClick={handleDeleteProject} disabled={deleteProject.isPending}>
+                                {deleteProject.isPending ? 'Deleting...' : 'Delete Project'}
+                            </Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     )
 }
