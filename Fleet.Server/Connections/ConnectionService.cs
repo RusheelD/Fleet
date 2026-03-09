@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
@@ -336,7 +338,7 @@ public class ConnectionService(
             repositoryName,
             normalizedDescription,
             request.Private,
-            false));
+            true));
 
         var createResponse = await httpClient.SendAsync(createRequest);
         if (!createResponse.IsSuccessStatusCode)
@@ -356,7 +358,7 @@ public class ConnectionService(
         var defaultBranch = string.IsNullOrWhiteSpace(createdRepo.DefaultBranch) ? "main" : createdRepo.DefaultBranch;
         var readmeContent = BuildReadmeContent(repositoryName, normalizedDescription);
 
-        await InitializeRepositoryWithReadmeAsync(httpClient, accessToken, createdRepo.FullName, defaultBranch, readmeContent);
+        await UpsertReadmeAsync(httpClient, accessToken, createdRepo.FullName, defaultBranch, readmeContent);
 
         return new GitHubRepoDto(
             createdRepo.FullName,
@@ -369,120 +371,58 @@ public class ConnectionService(
             account.ConnectedAs);
     }
 
-    private async Task InitializeRepositoryWithReadmeAsync(
+    private async Task UpsertReadmeAsync(
         HttpClient httpClient,
         string accessToken,
         string repositoryFullName,
         string defaultBranch,
         string readmeContent)
     {
-        var blobSha = await CreateGitBlobAsync(httpClient, accessToken, repositoryFullName, readmeContent);
-        var treeSha = await CreateGitTreeAsync(httpClient, accessToken, repositoryFullName, blobSha);
-        var commitSha = await CreateGitCommitAsync(httpClient, accessToken, repositoryFullName, treeSha);
-        await CreateGitReferenceAsync(httpClient, accessToken, repositoryFullName, defaultBranch, commitSha);
-    }
+        var readmeUrl = $"https://api.github.com/repos/{repositoryFullName}/contents/README.md";
+        string? existingSha = null;
 
-    private async Task<string> CreateGitBlobAsync(
-        HttpClient httpClient,
-        string accessToken,
-        string repositoryFullName,
-        string content)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.github.com/repos/{repositoryFullName}/git/blobs");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-        request.Content = JsonContent.Create(new GitHubCreateBlobRequest(content, "utf-8"));
-
-        var response = await httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
+        using (var getRequest = new HttpRequestMessage(HttpMethod.Get, $"{readmeUrl}?ref={Uri.EscapeDataString(defaultBranch)}"))
         {
-            var details = await GetGitHubErrorDetailsAsync(response);
-            throw new InvalidOperationException(
-                $"GitHub repository initialization failed while creating README blob: {details}");
+            getRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            getRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+            var getResponse = await httpClient.SendAsync(getRequest);
+            if (getResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                existingSha = null;
+            }
+            else if (!getResponse.IsSuccessStatusCode)
+            {
+                var details = await GetGitHubErrorDetailsAsync(getResponse);
+                throw new InvalidOperationException(
+                    $"GitHub repository initialization failed while reading README metadata: {details}");
+            }
+            else
+            {
+                var existingReadme = await getResponse.Content.ReadFromJsonAsync<GitHubContentFileResponse>();
+                if (existingReadme is null || string.IsNullOrWhiteSpace(existingReadme.Sha))
+                    throw new InvalidOperationException("GitHub repository initialization failed: README SHA was missing.");
+
+                existingSha = existingReadme.Sha;
+            }
         }
 
-        var payload = await response.Content.ReadFromJsonAsync<GitHubGitObjectResponse>();
-        if (payload is null || string.IsNullOrWhiteSpace(payload.Sha))
-            throw new InvalidOperationException("GitHub repository initialization failed: blob SHA was missing.");
-
-        return payload.Sha;
-    }
-
-    private async Task<string> CreateGitTreeAsync(
-        HttpClient httpClient,
-        string accessToken,
-        string repositoryFullName,
-        string blobSha)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.github.com/repos/{repositoryFullName}/git/trees");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-        request.Content = JsonContent.Create(new GitHubCreateTreeRequest([
-            new GitHubCreateTreeEntry("README.md", "100644", "blob", blobSha),
-        ]));
-
-        var response = await httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
-        {
-            var details = await GetGitHubErrorDetailsAsync(response);
-            throw new InvalidOperationException(
-                $"GitHub repository initialization failed while creating README tree: {details}");
-        }
-
-        var payload = await response.Content.ReadFromJsonAsync<GitHubGitObjectResponse>();
-        if (payload is null || string.IsNullOrWhiteSpace(payload.Sha))
-            throw new InvalidOperationException("GitHub repository initialization failed: tree SHA was missing.");
-
-        return payload.Sha;
-    }
-
-    private async Task<string> CreateGitCommitAsync(
-        HttpClient httpClient,
-        string accessToken,
-        string repositoryFullName,
-        string treeSha)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.github.com/repos/{repositoryFullName}/git/commits");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-        request.Content = JsonContent.Create(new GitHubCreateCommitRequest(
+        var encodedReadme = Convert.ToBase64String(Encoding.UTF8.GetBytes(readmeContent));
+        using var putRequest = new HttpRequestMessage(HttpMethod.Put, readmeUrl);
+        putRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        putRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+        putRequest.Content = JsonContent.Create(new GitHubUpsertFileRequest(
             "chore: initialize repository",
-            treeSha,
-            []));
+            encodedReadme,
+            defaultBranch,
+            existingSha));
 
-        var response = await httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
+        var putResponse = await httpClient.SendAsync(putRequest);
+        if (!putResponse.IsSuccessStatusCode)
         {
-            var details = await GetGitHubErrorDetailsAsync(response);
+            var details = await GetGitHubErrorDetailsAsync(putResponse);
             throw new InvalidOperationException(
-                $"GitHub repository initialization failed while creating initial commit: {details}");
-        }
-
-        var payload = await response.Content.ReadFromJsonAsync<GitHubGitObjectResponse>();
-        if (payload is null || string.IsNullOrWhiteSpace(payload.Sha))
-            throw new InvalidOperationException("GitHub repository initialization failed: commit SHA was missing.");
-
-        return payload.Sha;
-    }
-
-    private async Task CreateGitReferenceAsync(
-        HttpClient httpClient,
-        string accessToken,
-        string repositoryFullName,
-        string branchName,
-        string commitSha)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://api.github.com/repos/{repositoryFullName}/git/refs");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-        request.Content = JsonContent.Create(new GitHubCreateReferenceRequest($"refs/heads/{branchName}", commitSha));
-
-        var response = await httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
-        {
-            var details = await GetGitHubErrorDetailsAsync(response);
-            throw new InvalidOperationException(
-                $"GitHub repository initialization failed while creating branch reference: {details}");
+                $"GitHub repository initialization failed while writing README: {details}");
         }
     }
 
@@ -618,29 +558,13 @@ public class ConnectionService(
         [property: JsonPropertyName("private")] bool Private,
         [property: JsonPropertyName("auto_init")] bool AutoInit);
 
-    private sealed record GitHubCreateBlobRequest(
-        [property: JsonPropertyName("content")] string Content,
-        [property: JsonPropertyName("encoding")] string Encoding);
-
-    private sealed record GitHubCreateTreeRequest(
-        [property: JsonPropertyName("tree")] IReadOnlyList<GitHubCreateTreeEntry> Tree);
-
-    private sealed record GitHubCreateTreeEntry(
-        [property: JsonPropertyName("path")] string Path,
-        [property: JsonPropertyName("mode")] string Mode,
-        [property: JsonPropertyName("type")] string Type,
-        [property: JsonPropertyName("sha")] string Sha);
-
-    private sealed record GitHubCreateCommitRequest(
+    private sealed record GitHubUpsertFileRequest(
         [property: JsonPropertyName("message")] string Message,
-        [property: JsonPropertyName("tree")] string Tree,
-        [property: JsonPropertyName("parents")] IReadOnlyList<string> Parents);
+        [property: JsonPropertyName("content")] string Content,
+        [property: JsonPropertyName("branch")] string Branch,
+        [property: JsonPropertyName("sha")] string? Sha);
 
-    private sealed record GitHubCreateReferenceRequest(
-        [property: JsonPropertyName("ref")] string Ref,
-        [property: JsonPropertyName("sha")] string Sha);
-
-    private sealed class GitHubGitObjectResponse
+    private sealed class GitHubContentFileResponse
     {
         [JsonPropertyName("sha")]
         public string Sha { get; set; } = string.Empty;

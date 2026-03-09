@@ -163,7 +163,7 @@ public class ConnectionServiceTests
     }
 
     [TestMethod]
-    public async Task CreateGitHubRepositoryAsync_InitializesRepositoryWithReadmeAndBranchRef()
+    public async Task CreateGitHubRepositoryAsync_InitializesRepositoryWithReadmeUsingContentsApi()
     {
         var account = new LinkedAccount
         {
@@ -193,10 +193,8 @@ public class ConnectionServiceTests
                   "default_branch": "main"
                 }
                 """),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "blob-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "tree-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "commit-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "ref": "refs/heads/main", "object": { "sha": "commit-sha" } }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "sha": "existing-readme-sha" }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "content": { "sha": "new-readme-sha" }, "commit": { "sha": "commit-sha" } }"""),
         ]);
 
         var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
@@ -226,27 +224,28 @@ public class ConnectionServiceTests
             new CreateGitHubRepositoryRequest("demo-repo", "Demo description", false, null));
 
         Assert.AreEqual("octocat/demo-repo", result.FullName);
-        Assert.AreEqual(5, sentRequests.Count);
+        Assert.AreEqual(3, sentRequests.Count);
 
         Assert.IsTrue(sentRequests[0].Url.EndsWith("/user/repos", StringComparison.Ordinal));
         using (var createPayload = JsonDocument.Parse(sentRequests[0].Body!))
         {
             Assert.AreEqual("demo-repo", createPayload.RootElement.GetProperty("name").GetString());
-            Assert.AreEqual(false, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
+            Assert.AreEqual(true, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
         }
 
-        Assert.IsTrue(sentRequests[1].Url.EndsWith("/repos/octocat/demo-repo/git/blobs", StringComparison.Ordinal));
-        using (var blobPayload = JsonDocument.Parse(sentRequests[1].Body!))
-        {
-            Assert.AreEqual("# demo-repo\n\nDemo description\n", blobPayload.RootElement.GetProperty("content").GetString());
-            Assert.AreEqual("utf-8", blobPayload.RootElement.GetProperty("encoding").GetString());
-        }
+        Assert.IsTrue(
+            sentRequests[1].Url.EndsWith("/repos/octocat/demo-repo/contents/README.md?ref=main", StringComparison.Ordinal));
 
-        Assert.IsTrue(sentRequests[4].Url.EndsWith("/repos/octocat/demo-repo/git/refs", StringComparison.Ordinal));
-        using (var refPayload = JsonDocument.Parse(sentRequests[4].Body!))
+        Assert.IsTrue(sentRequests[2].Url.EndsWith("/repos/octocat/demo-repo/contents/README.md", StringComparison.Ordinal));
+        using (var putPayload = JsonDocument.Parse(sentRequests[2].Body!))
         {
-            Assert.AreEqual("refs/heads/main", refPayload.RootElement.GetProperty("ref").GetString());
-            Assert.AreEqual("commit-sha", refPayload.RootElement.GetProperty("sha").GetString());
+            Assert.AreEqual("chore: initialize repository", putPayload.RootElement.GetProperty("message").GetString());
+            Assert.AreEqual("main", putPayload.RootElement.GetProperty("branch").GetString());
+            Assert.AreEqual("existing-readme-sha", putPayload.RootElement.GetProperty("sha").GetString());
+
+            var encodedContent = putPayload.RootElement.GetProperty("content").GetString();
+            var decodedContent = Encoding.UTF8.GetString(Convert.FromBase64String(encodedContent!));
+            Assert.AreEqual("# demo-repo\n\nDemo description\n", decodedContent);
         }
     }
 
@@ -268,7 +267,7 @@ public class ConnectionServiceTests
         _connectionRepo.Setup(r => r.GetByProviderAsync(UserId, "GitHub"))
             .ReturnsAsync(account);
 
-        string? blobRequestBody = null;
+        string? putRequestBody = null;
         var responses = new Queue<HttpResponseMessage>([
             JsonResponse(HttpStatusCode.Created, """
                 {
@@ -281,10 +280,8 @@ public class ConnectionServiceTests
                   "default_branch": "main"
                 }
                 """),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "blob-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "tree-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "commit-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "ref": "refs/heads/main", "object": { "sha": "commit-sha" } }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "sha": "existing-readme-sha" }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "content": { "sha": "new-readme-sha" }, "commit": { "sha": "commit-sha" } }"""),
         ]);
 
         var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
@@ -296,9 +293,11 @@ public class ConnectionServiceTests
                 ItExpr.IsAny<CancellationToken>())
             .Returns<HttpRequestMessage, CancellationToken>(async (request, _) =>
             {
-                if ((request.RequestUri?.ToString() ?? string.Empty).EndsWith("/git/blobs", StringComparison.Ordinal))
+                if (request.Method == HttpMethod.Put &&
+                    (request.RequestUri?.ToString() ?? string.Empty)
+                        .EndsWith("/repos/octocat/empty-desc-repo/contents/README.md", StringComparison.Ordinal))
                 {
-                    blobRequestBody = request.Content is null
+                    putRequestBody = request.Content is null
                         ? null
                         : await request.Content.ReadAsStringAsync();
                 }
@@ -315,9 +314,11 @@ public class ConnectionServiceTests
         await _sut.CreateGitHubRepositoryAsync(UserId,
             new CreateGitHubRepositoryRequest("empty-desc-repo", null, false, null));
 
-        Assert.IsNotNull(blobRequestBody);
-        using var blobPayload = JsonDocument.Parse(blobRequestBody);
-        Assert.AreEqual("# empty-desc-repo\n", blobPayload.RootElement.GetProperty("content").GetString());
+        Assert.IsNotNull(putRequestBody);
+        using var putPayload = JsonDocument.Parse(putRequestBody);
+        var encodedContent = putPayload.RootElement.GetProperty("content").GetString();
+        var decodedContent = Encoding.UTF8.GetString(Convert.FromBase64String(encodedContent!));
+        Assert.AreEqual("# empty-desc-repo\n", decodedContent);
     }
 
     private static HttpResponseMessage JsonResponse(HttpStatusCode statusCode, string json)
