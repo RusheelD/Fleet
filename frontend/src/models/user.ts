@@ -13,6 +13,7 @@ export interface LinkedAccount {
   connectedAs?: string
   externalUserId?: string
   connectedAt?: string
+  isPrimary?: boolean
 }
 
 export interface UserPreferences {

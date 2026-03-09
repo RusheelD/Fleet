@@ -65,9 +65,10 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
     {
         return await context.LinkedAccounts
             .Where(a => a.UserProfileId == userId)
-            .OrderByDescending(a => a.ConnectedAt)
+            .OrderByDescending(a => a.IsPrimary)
+            .ThenByDescending(a => a.ConnectedAt)
             .ThenByDescending(a => a.Id)
-            .Select(a => new LinkedAccountDto(a.Id, a.Provider, a.ConnectedAs, a.ExternalUserId, a.ConnectedAt))
+            .Select(a => new LinkedAccountDto(a.Id, a.Provider, a.ConnectedAs, a.ExternalUserId, a.ConnectedAt, a.IsPrimary))
             .ToListAsync();
     }
 

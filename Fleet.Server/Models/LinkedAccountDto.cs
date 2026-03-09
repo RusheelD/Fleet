@@ -5,5 +5,6 @@ public record LinkedAccountDto(
     string Provider,
     string? ConnectedAs,
     string? ExternalUserId = null,
-    DateTime? ConnectedAt = null
+    DateTime? ConnectedAt = null,
+    bool IsPrimary = false
 );

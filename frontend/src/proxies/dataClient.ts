@@ -9,7 +9,7 @@ import {
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession,
   search,
   getSubscription,
-  getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, getGitHubRepos,
+  getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
   getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
 } from './'
 import type {
@@ -463,6 +463,18 @@ export function useUnlinkGitHub() {
     mutationFn: (accountId?: number) => unlinkGitHub(accountId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['github-repos'] })
+    },
+  })
+}
+
+export function useSetPrimaryGitHubAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (accountId: number) => setPrimaryGitHubAccount(accountId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['github-repos'] })
     },
   })
 }
@@ -475,6 +487,18 @@ export function useGitHubRepos(enabled = true, accountId?: number) {
     [accountId],
     { enableFetch: enabled },
   )
+}
+
+export function useCreateGitHubRepo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (request: { name: string; description?: string; private: boolean; accountId?: number }) =>
+      createGitHubRepo(request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['github-repos'] })
+      void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+    },
+  })
 }
 
 export function useNotifications(unreadOnly = false) {

@@ -178,11 +178,18 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         {
             builder.HasKey(a => a.Id);
             builder.Property(a => a.Id).ValueGeneratedOnAdd();
+            builder.Property(a => a.IsPrimary).HasDefaultValue(false);
 
             builder.HasOne(a => a.UserProfile)
                 .WithMany(u => u.LinkedAccounts)
                 .HasForeignKey(a => a.UserProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(a => new { a.UserProfileId, a.Provider });
+
+            builder.HasIndex(a => new { a.UserProfileId, a.Provider, a.IsPrimary })
+                .HasFilter("\"IsPrimary\" = true AND \"Provider\" = 'GitHub'")
+                .IsUnique();
         });
 
         // ── Subscription ───────────────────────────────────────────

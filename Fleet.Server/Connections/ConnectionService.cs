@@ -100,9 +100,10 @@ public class ConnectionService(
             throw new InvalidOperationException("Failed to retrieve GitHub user profile.");
 
         var externalUserId = gitHubUser.Id.ToString();
-        var linkedAccounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+        var linkedAccounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub") ?? [];
         var existing = linkedAccounts.FirstOrDefault(a =>
             string.Equals(a.ExternalUserId, externalUserId, StringComparison.Ordinal));
+        var hasPrimary = linkedAccounts.Any(a => a.IsPrimary);
 
         logger.ConnectionsLinkingGitHubAccount(userId, gitHubUser.Login.SanitizeForLogging(), gitHubUser.Id);
 
@@ -113,9 +114,11 @@ public class ConnectionService(
             existing.AccessToken = _tokenProtector.Protect(tokenBody.AccessToken);
             existing.ExternalUserId = externalUserId;
             existing.ConnectedAt = DateTime.UtcNow;
+            if (!hasPrimary)
+                existing.IsPrimary = true;
             await connectionRepository.UpdateAsync(existing);
 
-            return new LinkedAccountDto(existing.Id, "GitHub", gitHubUser.Login, externalUserId, existing.ConnectedAt);
+            return ToDto(existing);
         }
 
         // Store an additional linked account for this distinct external GitHub user.
@@ -127,11 +130,50 @@ public class ConnectionService(
             ExternalUserId = externalUserId,
             ConnectedAt = DateTime.UtcNow,
             UserProfileId = userId,
+            IsPrimary = linkedAccounts.Count == 0 || !hasPrimary,
         };
 
         await connectionRepository.CreateAsync(linkedAccount);
 
-        return new LinkedAccountDto(linkedAccount.Id, "GitHub", gitHubUser.Login, externalUserId, linkedAccount.ConnectedAt);
+        return ToDto(linkedAccount);
+    }
+
+    public async Task<LinkedAccountDto> SetPrimaryGitHubAccountAsync(int userId, int accountId)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["Provider"] = "GitHub",
+            ["AccountId"] = accountId
+        });
+
+        var linkedAccounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub") ?? [];
+        if (linkedAccounts.Count == 0)
+            throw new InvalidOperationException("No GitHub account is linked.");
+
+        var target = linkedAccounts.FirstOrDefault(a => a.Id == accountId);
+        if (target is null)
+            throw new InvalidOperationException("No matching GitHub account is linked.");
+
+        var hasUpdates = false;
+        foreach (var account in linkedAccounts)
+        {
+            var shouldBePrimary = account.Id == target.Id;
+            if (account.IsPrimary == shouldBePrimary)
+                continue;
+
+            account.IsPrimary = shouldBePrimary;
+            await connectionRepository.UpdateAsync(account);
+            hasUpdates = true;
+        }
+
+        if (!hasUpdates && !target.IsPrimary)
+        {
+            target.IsPrimary = true;
+            await connectionRepository.UpdateAsync(target);
+        }
+
+        return ToDto(target);
     }
 
     public async Task UnlinkGitHubAsync(int userId, int? accountId = null)
@@ -162,6 +204,7 @@ public class ConnectionService(
         logger.ConnectionsUnlinkingGitHubAccount(userId, (account.ConnectedAs ?? string.Empty).SanitizeForLogging());
 
         await connectionRepository.DeleteAsync(account);
+        await EnsureSinglePrimaryGitHubAsync(userId);
     }
 
     public async Task<IReadOnlyList<LinkedAccountDto>> GetConnectionsAsync(int userId)
@@ -194,7 +237,7 @@ public class ConnectionService(
         }
         else
         {
-            accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
+            accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub") ?? [];
         }
 
         if (accounts.Count == 0)
@@ -264,7 +307,106 @@ public class ConnectionService(
         return repos;
     }
 
-    // ── GitHub API response models ─────────────────────────────
+    public async Task<GitHubRepoDto> CreateGitHubRepositoryAsync(int userId, CreateGitHubRepositoryRequest request)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["Provider"] = "GitHub",
+            ["AccountId"] = request.AccountId
+        });
+
+        var repositoryName = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(repositoryName))
+            throw new InvalidOperationException("Repository name is required.");
+
+        var account = await ResolveGitHubAccountAsync(userId, request.AccountId);
+        var accessToken = _tokenProtector.Unprotect(account.AccessToken);
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
+
+        var httpClient = httpClientFactory.CreateClient("GitHub");
+        using var createRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.github.com/user/repos");
+        createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        createRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+        createRequest.Content = JsonContent.Create(new GitHubCreateRepoRequest(
+            repositoryName,
+            string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+            request.Private));
+
+        var createResponse = await httpClient.SendAsync(createRequest);
+        if (!createResponse.IsSuccessStatusCode)
+        {
+            var error = await createResponse.Content.ReadFromJsonAsync<GitHubApiErrorResponse>();
+            var errorMessage = error?.Message?.Trim();
+            if (!string.IsNullOrWhiteSpace(errorMessage))
+                throw new InvalidOperationException($"GitHub repository creation failed: {errorMessage}");
+
+            throw new InvalidOperationException(
+                $"GitHub repository creation failed with status code {(int)createResponse.StatusCode} ({createResponse.StatusCode}).");
+        }
+
+        var createdRepo = await createResponse.Content.ReadFromJsonAsync<GitHubRepoListItem>();
+        if (createdRepo is null || string.IsNullOrWhiteSpace(createdRepo.FullName))
+            throw new InvalidOperationException("GitHub repository creation succeeded but returned an invalid response.");
+
+        return new GitHubRepoDto(
+            createdRepo.FullName,
+            createdRepo.Name,
+            createdRepo.Owner?.Login ?? account.ConnectedAs ?? string.Empty,
+            createdRepo.Description,
+            createdRepo.Private,
+            createdRepo.HtmlUrl,
+            account.Id,
+            account.ConnectedAs);
+    }
+
+    private async Task<LinkedAccount> ResolveGitHubAccountAsync(int userId, int? accountId)
+    {
+        if (accountId is > 0)
+        {
+            var specific = await connectionRepository.GetByIdAsync(userId, accountId.Value);
+            if (specific is null || !string.Equals(specific.Provider, "GitHub", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("No matching GitHub account is linked.");
+
+            return specific;
+        }
+
+        return await connectionRepository.GetPrimaryByProviderAsync(userId, "GitHub")
+            ?? await connectionRepository.GetByProviderAsync(userId, "GitHub")
+            ?? throw new InvalidOperationException("No GitHub account is linked.");
+    }
+
+    private async Task EnsureSinglePrimaryGitHubAsync(int userId)
+    {
+        var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub") ?? [];
+        if (accounts.Count == 0)
+            return;
+
+        var primaryAccount = accounts.FirstOrDefault(a => a.IsPrimary) ?? accounts[0];
+        var primaryCount = accounts.Count(a => a.IsPrimary);
+        if (primaryCount == 1 && primaryAccount.IsPrimary)
+            return;
+
+        foreach (var account in accounts)
+        {
+            var shouldBePrimary = account.Id == primaryAccount.Id;
+            if (account.IsPrimary == shouldBePrimary)
+                continue;
+
+            account.IsPrimary = shouldBePrimary;
+            await connectionRepository.UpdateAsync(account);
+        }
+    }
+
+    private static LinkedAccountDto ToDto(LinkedAccount account) =>
+        new(
+            account.Id,
+            account.Provider,
+            account.ConnectedAs,
+            account.ExternalUserId,
+            account.ConnectedAt,
+            account.IsPrimary);
 
     private sealed class GitHubTokenResponse
     {
@@ -321,6 +463,17 @@ public class ConnectionService(
     {
         [JsonPropertyName("login")]
         public string Login { get; set; } = string.Empty;
+    }
+
+    private sealed record GitHubCreateRepoRequest(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("description")] string? Description,
+        [property: JsonPropertyName("private")] bool Private);
+
+    private sealed class GitHubApiErrorResponse
+    {
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
     }
 
     private sealed class NoOpTokenProtector : IGitHubTokenProtector

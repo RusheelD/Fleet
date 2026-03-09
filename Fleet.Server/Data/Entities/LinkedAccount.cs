@@ -8,6 +8,7 @@ public class LinkedAccount
     public string? AccessToken { get; set; }
     public string? ExternalUserId { get; set; }
     public DateTime? ConnectedAt { get; set; }
+    public bool IsPrimary { get; set; }
 
     // Foreign key
     public int UserProfileId { get; set; }

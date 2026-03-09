@@ -3,15 +3,27 @@ export interface ProjectCreationGateInput {
   slugPreview: string
   slugAvailable: boolean
   hasGitHub: boolean
+  repoMode: 'existing' | 'new'
   hasSelectedRepo: boolean
+  hasSelectedAccount: boolean
+  newRepoNameValid: boolean
   isPending: boolean
 }
 
 export function canCreateProject(input: ProjectCreationGateInput): boolean {
-  return input.title.trim().length > 0
+  const baseChecksPass = input.title.trim().length > 0
     && input.slugPreview.length > 0
     && input.slugAvailable
     && input.hasGitHub
-    && input.hasSelectedRepo
     && !input.isPending
+
+  if (!baseChecksPass) {
+    return false
+  }
+
+  if (input.repoMode === 'new') {
+    return input.hasSelectedAccount && input.newRepoNameValid
+  }
+
+  return input.hasSelectedRepo
 }

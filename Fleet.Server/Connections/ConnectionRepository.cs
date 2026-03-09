@@ -11,6 +11,18 @@ public class ConnectionRepository(FleetDbContext context) : IConnectionRepositor
     {
         return await context.LinkedAccounts
             .Where(a => a.UserProfileId == userId && a.Provider == provider)
+            .OrderByDescending(a => a.IsPrimary)
+            .ThenByDescending(a => a.ConnectedAt)
+            .ThenByDescending(a => a.Id)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<LinkedAccount?> GetPrimaryByProviderAsync(int userId, string provider)
+    {
+        return await context.LinkedAccounts
+            .Where(a => a.UserProfileId == userId &&
+                        a.Provider == provider &&
+                        a.IsPrimary)
             .OrderByDescending(a => a.ConnectedAt)
             .ThenByDescending(a => a.Id)
             .FirstOrDefaultAsync();
@@ -20,7 +32,8 @@ public class ConnectionRepository(FleetDbContext context) : IConnectionRepositor
     {
         return await context.LinkedAccounts
             .Where(a => a.UserProfileId == userId && a.Provider == provider)
-            .OrderByDescending(a => a.ConnectedAt)
+            .OrderByDescending(a => a.IsPrimary)
+            .ThenByDescending(a => a.ConnectedAt)
             .ThenByDescending(a => a.Id)
             .ToListAsync();
     }
@@ -35,9 +48,10 @@ public class ConnectionRepository(FleetDbContext context) : IConnectionRepositor
     {
         return await context.LinkedAccounts
             .Where(a => a.UserProfileId == userId)
-            .OrderByDescending(a => a.ConnectedAt)
+            .OrderByDescending(a => a.IsPrimary)
+            .ThenByDescending(a => a.ConnectedAt)
             .ThenByDescending(a => a.Id)
-            .Select(a => new LinkedAccountDto(a.Id, a.Provider, a.ConnectedAs, a.ExternalUserId, a.ConnectedAt))
+            .Select(a => new LinkedAccountDto(a.Id, a.Provider, a.ConnectedAs, a.ExternalUserId, a.ConnectedAt, a.IsPrimary))
             .ToListAsync();
     }
 

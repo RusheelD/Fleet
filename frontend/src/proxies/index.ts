@@ -39,7 +39,19 @@ export type { ExecutionStatus, ExecutionDocumentation } from './agentsProxy'
 export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
-export { getUserSettings, updateProfile, updatePreferences, getGitHubOAuthState, getGitHubOAuthClientId, linkGitHub, unlinkGitHub, getGitHubRepos } from './userProxy'
+export {
+  getUserSettings,
+  updateProfile,
+  updatePreferences,
+  getGitHubOAuthState,
+  getGitHubOAuthClientId,
+  linkGitHub,
+  unlinkGitHub,
+  setPrimaryGitHubAccount,
+  getGitHubRepos,
+  createGitHubRepo,
+} from './userProxy'
+export type { CreateGitHubRepoRequest } from './userProxy'
 export { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 export {
   useDataQuery,
@@ -73,7 +85,9 @@ export {
   useUpdatePreferences,
   useLinkGitHub,
   useUnlinkGitHub,
+  useSetPrimaryGitHubAccount,
   useGitHubRepos,
+  useCreateGitHubRepo,
   useCreateWorkItem,
   useUpdateWorkItem,
   useBulkUpdateWorkItems,

@@ -17,6 +17,13 @@ const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string
 const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
 const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
 
+function withDomainHint(domainHint: string | undefined, fallback: string): RedirectRequest['extraQueryParameters'] {
+  const normalized = domainHint?.trim()
+  return {
+    domain_hint: normalized && normalized.length > 0 ? normalized : fallback,
+  }
+}
+
 // Normalize redirect URI for localhost: Azure AD requires 'http://localhost:5250', not custom subdomains
 const getRedirectUri = () => {
   const origin = window.location.origin
@@ -59,20 +66,16 @@ export const apiLoginRequest: RedirectRequest = {
 export const googleLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: googleAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  prompt: 'select_account',
-  extraQueryParameters: {
-    domain_hint: googleDomainHint ?? 'google.com',
-  },
+  // Issuer acceleration for External ID customer flows.
+  extraQueryParameters: withDomainHint(googleDomainHint, 'Google'),
 }
 
 /** Login request that hints the user should sign in via GitHub */
 export const githubLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: githubAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  prompt: 'select_account',
-  extraQueryParameters: {
-    domain_hint: githubDomainHint ?? 'github.com',
-  },
+  // For GitHub this may vary by provider type (built-in vs custom OIDC).
+  extraQueryParameters: withDomainHint(githubDomainHint, 'github.com'),
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)

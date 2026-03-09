@@ -108,4 +108,31 @@ public class ConnectionsControllerTests
         Assert.IsNotNull(ok);
         Assert.AreSame(repos, ok.Value);
     }
+
+    [TestMethod]
+    public async Task SetPrimaryGitHubAccount_ReturnsOk()
+    {
+        var dto = new LinkedAccountDto(7, "GitHub", "user123", "ext-1", DateTime.UtcNow, true);
+        _connectionService.Setup(s => s.SetPrimaryGitHubAccountAsync(UserId, 7)).ReturnsAsync(dto);
+
+        var result = await _sut.SetPrimaryGitHubAccount(7);
+
+        var ok = result as OkObjectResult;
+        Assert.IsNotNull(ok);
+        Assert.AreSame(dto, ok.Value);
+    }
+
+    [TestMethod]
+    public async Task CreateGitHubRepo_ReturnsOk()
+    {
+        var request = new CreateGitHubRepositoryRequest("repo-one", "desc", true, 7);
+        var repo = new GitHubRepoDto("user123/repo-one", "repo-one", "user123", "desc", true, "https://github.com/user123/repo-one", 7, "user123");
+        _connectionService.Setup(s => s.CreateGitHubRepositoryAsync(UserId, request)).ReturnsAsync(repo);
+
+        var result = await _sut.CreateGitHubRepo(request);
+
+        var ok = result as OkObjectResult;
+        Assert.IsNotNull(ok);
+        Assert.AreSame(repo, ok.Value);
+    }
 }

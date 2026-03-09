@@ -32,9 +32,24 @@ export function unlinkGitHub(accountId?: number): Promise<void> {
   return del<void>('/api/connections/github')
 }
 
+export function setPrimaryGitHubAccount(accountId: number): Promise<LinkedAccount> {
+  return put<LinkedAccount>(`/api/connections/github/${accountId}/primary`)
+}
+
 export function getGitHubRepos(accountId?: number): Promise<GitHubRepo[]> {
   const query = typeof accountId === 'number'
     ? `?accountId=${encodeURIComponent(accountId)}`
     : ''
   return get<GitHubRepo[]>(`/api/connections/github/repos${query}`)
+}
+
+export interface CreateGitHubRepoRequest {
+  name: string
+  description?: string
+  private: boolean
+  accountId?: number
+}
+
+export function createGitHubRepo(data: CreateGitHubRepoRequest): Promise<GitHubRepo> {
+  return post<GitHubRepo>('/api/connections/github/repos', data)
 }

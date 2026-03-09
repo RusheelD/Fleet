@@ -72,6 +72,14 @@ public class ConnectionsController(
         return NoContent();
     }
 
+    [HttpPut("github/{accountId:int}/primary")]
+    public async Task<IActionResult> SetPrimaryGitHubAccount(int accountId)
+    {
+        var userId = await authService.GetCurrentUserIdAsync();
+        var account = await connectionService.SetPrimaryGitHubAccountAsync(userId, accountId);
+        return Ok(account);
+    }
+
     /// <summary>GET /api/connections/github/repos — List the user's GitHub repositories.</summary>
     [HttpGet("github/repos")]
     public async Task<IActionResult> GetGitHubRepos([FromQuery] int? accountId = null)
@@ -79,5 +87,13 @@ public class ConnectionsController(
         var userId = await authService.GetCurrentUserIdAsync();
         var repos = await connectionService.GetGitHubRepositoriesAsync(userId, accountId);
         return Ok(repos);
+    }
+
+    [HttpPost("github/repos")]
+    public async Task<IActionResult> CreateGitHubRepo([FromBody] CreateGitHubRepositoryRequest request)
+    {
+        var userId = await authService.GetCurrentUserIdAsync();
+        var repo = await connectionService.CreateGitHubRepositoryAsync(userId, request);
+        return Ok(repo);
     }
 }
