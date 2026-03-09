@@ -14,13 +14,27 @@ const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
 const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
+const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | undefined
 const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
 const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
+const githubIdpHint = import.meta.env.VITE_ENTRA_GITHUB_IDP_HINT as string | undefined
 
-function withDomainHint(domainHint: string | undefined, fallback: string): RedirectRequest['extraQueryParameters'] {
-  const normalized = domainHint?.trim()
+function normalizeHint(value: string | undefined, fallback: string): string {
+  const normalized = value?.trim()
+  return normalized && normalized.length > 0 ? normalized : fallback
+}
+
+function withProviderHints(
+  domainHint: string | undefined,
+  idpHint: string | undefined,
+  fallbackDomainHint: string,
+  fallbackIdpHint: string,
+): RedirectRequest['extraQueryParameters'] {
   return {
-    domain_hint: normalized && normalized.length > 0 ? normalized : fallback,
+    // domain_hint helps issuer acceleration in Entra/B2C user flows.
+    domain_hint: normalizeHint(domainHint, fallbackDomainHint),
+    // idp works in many B2C/External ID flows to jump directly to the provider.
+    idp: normalizeHint(idpHint, fallbackIdpHint),
   }
 }
 
@@ -66,16 +80,24 @@ export const apiLoginRequest: RedirectRequest = {
 export const googleLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: googleAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  // Issuer acceleration for External ID customer flows.
-  extraQueryParameters: withDomainHint(googleDomainHint, 'Google'),
+  extraQueryParameters: withProviderHints(
+    googleDomainHint,
+    googleIdpHint,
+    'google.com',
+    'google.com',
+  ),
 }
 
 /** Login request that hints the user should sign in via GitHub */
 export const githubLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: githubAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  // For GitHub this may vary by provider type (built-in vs custom OIDC).
-  extraQueryParameters: withDomainHint(githubDomainHint, 'github.com'),
+  extraQueryParameters: withProviderHints(
+    githubDomainHint,
+    githubIdpHint,
+    'github.com',
+    'github.com',
+  ),
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)
