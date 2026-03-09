@@ -52,3 +52,30 @@ html[data-density='compact'] .fui-Tab {
     transition-duration: 0.01ms !important;
   }
 }
+
+@media (max-width: 900px) {
+  .fui-DialogSurface {
+    width: calc(100vw - 0.75rem) !important;
+    max-width: calc(100vw - 0.75rem) !important;
+    max-height: calc(100vh - 0.75rem) !important;
+    margin: 0.375rem !important;
+  }
+
+  .fui-DialogContent {
+    overflow: auto;
+  }
+
+  .fui-Field .fui-Input,
+  .fui-Field .fui-Textarea,
+  .fui-Field .fui-Dropdown,
+  .fui-Field .fui-Combobox {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .fui-TabList {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}

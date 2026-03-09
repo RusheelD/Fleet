@@ -37,6 +37,10 @@ import {
 import type { WorkItemLevel } from '../../models'
 
 const useStyles = makeStyles({
+    dialogSurface: {
+        width: 'min(760px, calc(100vw - 1rem))',
+        maxHeight: 'calc(100vh - 1rem)',
+    },
     levelList: {
         display: 'flex',
         flexDirection: 'column',
@@ -49,6 +53,10 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         padding: '0.375rem 0.5rem',
         borderRadius: tokens.borderRadiusMedium,
+        '@media (max-width: 900px)': {
+            gridTemplateColumns: '24px 1fr',
+            rowGap: '0.375rem',
+        },
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
@@ -72,6 +80,12 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '2px',
+        '@media (max-width: 900px)': {
+            gridColumnStart: 1,
+            gridColumnEnd: 3,
+            justifyContent: 'flex-end',
+            flexWrap: 'wrap',
+        },
     },
     editForm: {
         display: 'flex',
@@ -85,6 +99,10 @@ const useStyles = makeStyles({
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
         gap: '0.75rem',
+        '@media (max-width: 900px)': {
+            gridTemplateColumns: '1fr',
+            gap: '0.5rem',
+        },
     },
     colorPreview: {
         width: '24px',
@@ -149,6 +167,20 @@ const useStyles = makeStyles({
         gap: '0.75rem',
         maxHeight: '60vh',
         overflow: 'auto',
+    },
+    editActions: {
+        display: 'flex',
+        gap: '0.5rem',
+        justifyContent: 'flex-end',
+        '@media (max-width: 900px)': {
+            flexDirection: 'column',
+            alignItems: 'stretch',
+        },
+    },
+    editActionButtonMobile: {
+        '@media (max-width: 900px)': {
+            width: '100%',
+        },
     },
 })
 
@@ -269,7 +301,7 @@ export function ManageLevelsDialog({ projectId, open, onOpenChange }: ManageLeve
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => onOpenChange(data.open)}>
-            <DialogSurface>
+            <DialogSurface className={styles.dialogSurface}>
                 <DialogBody>
                     <DialogTitle>Manage Work Item Levels</DialogTitle>
                     <DialogContent>
@@ -450,13 +482,14 @@ function LevelEditForm({ editState, setEditState, onSave, onCancel, isBusy, styl
                     </div>
                 </Field>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <div className={styles.editActions}>
                 <Button
                     appearance="subtle"
                     icon={<DismissRegular />}
                     onClick={onCancel}
                     disabled={isBusy}
                     size="small"
+                    className={styles.editActionButtonMobile}
                 >
                     Cancel
                 </Button>
@@ -466,6 +499,7 @@ function LevelEditForm({ editState, setEditState, onSave, onCancel, isBusy, styl
                     onClick={onSave}
                     disabled={!editState.name.trim() || isBusy}
                     size="small"
+                    className={styles.editActionButtonMobile}
                 >
                     {editState.id === null ? 'Add' : 'Save'}
                 </Button>

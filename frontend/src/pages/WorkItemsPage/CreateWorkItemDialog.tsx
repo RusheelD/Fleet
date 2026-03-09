@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     Button,
     Input,
     Dropdown,
@@ -18,6 +19,7 @@ import {
 import { useCreateWorkItem } from '../../proxies'
 import { resolveLevelIcon } from '../../proxies'
 import type { WorkItem, WorkItemLevel } from '../../models'
+import { useIsMobile } from '../../hooks'
 
 const PRIORITY_MAP: Record<string, number> = {
     'P1 - Critical': 1,
@@ -50,15 +52,35 @@ function getAgentSettings(label: string): { isAI: boolean; assignmentMode: 'auto
 }
 
 const useStyles = makeStyles({
+    dialogSurface: {
+        width: 'min(780px, calc(100vw - 1rem))',
+        maxHeight: 'calc(100vh - 1rem)',
+    },
     dialogForm: {
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
     },
+    dialogFormMobile: {
+        gap: '0.75rem',
+    },
     dialogFormGrid: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
         gap: '0.75rem',
+    },
+    dialogFormGridMobile: {
+        gridTemplateColumns: '1fr',
+        gap: '0.5rem',
+    },
+    dialogActionsMobile: {
+        width: '100%',
+        justifyContent: 'stretch',
+        display: 'grid',
+        gap: '0.5rem',
+    },
+    dialogActionButtonMobile: {
+        width: '100%',
     },
 })
 
@@ -72,6 +94,7 @@ interface CreateWorkItemDialogProps {
 
 export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpenChange }: CreateWorkItemDialogProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const createMutation = useCreateWorkItem(projectId)
 
     const [title, setTitle] = useState('')
@@ -138,11 +161,11 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => { onOpenChange(data.open); if (!data.open) resetForm() }}>
-            <DialogSurface>
+            <DialogSurface className={styles.dialogSurface}>
                 <DialogBody>
                     <DialogTitle>Create Work Item</DialogTitle>
                     <DialogContent>
-                        <div className={styles.dialogForm}>
+                        <div className={mergeClasses(styles.dialogForm, isMobile && styles.dialogFormMobile)}>
                             <Field label="Title" required>
                                 <Input
                                     placeholder="Enter work item title"
@@ -168,7 +191,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                     onChange={(_e, data) => setAcceptanceCriteria(data.value)}
                                 />
                             </Field>
-                            <div className={styles.dialogFormGrid}>
+                            <div className={mergeClasses(styles.dialogFormGrid, isMobile && styles.dialogFormGridMobile)}>
                                 <Field label="Level">
                                     <Dropdown
                                         placeholder="Select level"
@@ -262,14 +285,15 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                             </Field>
                         </div>
                     </DialogContent>
-                    <DialogActions>
+                    <DialogActions className={mergeClasses(isMobile && styles.dialogActionsMobile)}>
                         <DialogTrigger disableButtonEnhancement>
-                            <Button appearance="secondary">Cancel</Button>
+                            <Button appearance="secondary" className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}>Cancel</Button>
                         </DialogTrigger>
                         <Button
                             appearance="primary"
                             onClick={handleCreate}
                             disabled={!title.trim() || createMutation.isPending}
+                            className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
                         >
                             {createMutation.isPending ? 'Creating...' : 'Create'}
                         </Button>

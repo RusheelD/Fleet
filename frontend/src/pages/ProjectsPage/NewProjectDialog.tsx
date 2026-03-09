@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type SyntheticEvent } from 'react'
 import {
     makeStyles,
+    mergeClasses,
     Button,
     Input,
     Textarea,
@@ -24,6 +25,7 @@ import {
 } from '@fluentui/react-components'
 import { CheckmarkCircle16Filled, DismissCircle16Filled, LockClosedRegular } from '@fluentui/react-icons'
 import { useCreateGitHubRepo, useCreateProject, useCheckSlug, useGitHubRepos, useUserSettings } from '../../proxies'
+import { useIsMobile } from '../../hooks'
 import { canCreateProject } from './projectCreationGate'
 
 function generateSlugPreview(name: string): string {
@@ -44,10 +46,17 @@ const useStyles = makeStyles({
     dialogSurface: {
         width: 'min(680px, calc(100vw - 2rem))',
     },
+    dialogSurfaceMobile: {
+        width: 'calc(100vw - 0.75rem)',
+        maxHeight: 'calc(100vh - 0.75rem)',
+    },
     dialogForm: {
         display: 'flex',
         flexDirection: 'column',
         gap: '1.125rem',
+    },
+    dialogFormMobile: {
+        gap: '0.875rem',
     },
     repoModeGroup: {
         display: 'flex',
@@ -66,6 +75,7 @@ const useStyles = makeStyles({
     slugRow: {
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: tokens.spacingHorizontalXS,
         marginTop: tokens.spacingVerticalXS,
         backgroundColor: tokens.colorNeutralBackground2,
@@ -74,7 +84,7 @@ const useStyles = makeStyles({
         paddingBottom: '2px',
         paddingLeft: '6px',
         paddingRight: '6px',
-        width: 'fit-content',
+        width: '100%',
     },
     slugText: {
         color: tokens.colorNeutralForeground3,
@@ -90,6 +100,7 @@ const useStyles = makeStyles({
     repoAvailabilityRow: {
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: tokens.spacingHorizontalXS,
         marginTop: tokens.spacingVerticalXS,
         backgroundColor: tokens.colorNeutralBackground2,
@@ -98,7 +109,7 @@ const useStyles = makeStyles({
         paddingBottom: '2px',
         paddingLeft: '6px',
         paddingRight: '6px',
-        width: 'fit-content',
+        width: '100%',
     },
     repoAvailabilityText: {
         color: tokens.colorNeutralForeground3,
@@ -128,6 +139,10 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         maxWidth: '320px',
     },
+    repoDescriptionMobile: {
+        maxWidth: 'unset',
+        whiteSpace: 'normal',
+    },
     privateIcon: {
         color: tokens.colorNeutralForeground3,
         fontSize: '12px',
@@ -143,6 +158,15 @@ const useStyles = makeStyles({
     privacyToggle: {
         marginTop: tokens.spacingVerticalXXS,
     },
+    dialogActionsMobile: {
+        width: '100%',
+        justifyContent: 'stretch',
+        display: 'grid',
+        gap: tokens.spacingVerticalXS,
+    },
+    dialogActionButtonMobile: {
+        width: '100%',
+    },
 })
 
 interface NewProjectDialogProps {
@@ -153,6 +177,7 @@ interface NewProjectDialogProps {
 
 export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDialogProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
     const createMutation = useCreateProject()
     const createRepoMutation = useCreateGitHubRepo()
 
@@ -310,11 +335,11 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => { onOpenChange(data.open); if (!data.open) resetForm() }}>
-            <DialogSurface className={styles.dialogSurface}>
+            <DialogSurface className={mergeClasses(styles.dialogSurface, isMobile && styles.dialogSurfaceMobile)}>
                 <DialogBody>
                     <DialogTitle>Create New Project</DialogTitle>
                     <DialogContent>
-                        <div className={styles.dialogForm}>
+                        <div className={mergeClasses(styles.dialogForm, isMobile && styles.dialogFormMobile)}>
                             <Field
                                 label="Project Title"
                                 required
@@ -417,7 +442,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                                                 </Caption1>
                                                             )}
                                                             {item.description && (
-                                                                <Caption1 className={styles.repoDescription}>
+                                                                <Caption1 className={mergeClasses(styles.repoDescription, isMobile && styles.repoDescriptionMobile)}>
                                                                     {item.description}
                                                                 </Caption1>
                                                             )}
@@ -541,14 +566,19 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                             )}
                         </div>
                     </DialogContent>
-                    <DialogActions>
-                        <Button appearance="secondary" onClick={() => { onOpenChange(false); resetForm() }}>
+                    <DialogActions className={mergeClasses(isMobile && styles.dialogActionsMobile)}>
+                        <Button
+                            appearance="secondary"
+                            onClick={() => { onOpenChange(false); resetForm() }}
+                            className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
+                        >
                             Cancel
                         </Button>
                         <Button
                             appearance="primary"
                             onClick={() => void handleCreate()}
                             disabled={!canCreate}
+                            className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
                         >
                             {createMutation.isPending
                                 ? 'Creating Project...'

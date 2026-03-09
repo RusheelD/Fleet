@@ -16,6 +16,7 @@ body {
   width: 100%;
   height: 100%;
   overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 #root {
@@ -31,5 +32,19 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .fui-Button {
+    min-height: 40px;
+  }
+
+  .fui-Field .fui-Input,
+  .fui-Field .fui-Textarea,
+  .fui-Field .fui-Dropdown,
+  .fui-Field .fui-Combobox {
+    width: 100%;
+    min-width: 0;
   }
 }

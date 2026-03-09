@@ -186,6 +186,11 @@ const useStyles = makeStyles({
     },
     actionBarLeftMobile: {
         width: '100%',
+        display: 'grid',
+        gap: tokens.spacingVerticalXS,
+    },
+    actionButtonMobile: {
+        width: '100%',
     },
     deleteButton: {
         color: tokens.colorPaletteRedForeground1,
@@ -277,6 +282,10 @@ const useStyles = makeStyles({
         fontSize: '13px',
         minHeight: '28px',
     },
+    fieldValueMobile: {
+        flexWrap: 'wrap',
+        alignItems: 'flex-start',
+    },
     fieldDropdown: {
         minWidth: 0,
         width: '100%',
@@ -295,6 +304,10 @@ const useStyles = makeStyles({
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
     },
+    childRowMobile: {
+        flexWrap: 'wrap',
+        rowGap: '2px',
+    },
     childIcon: {
         fontSize: '14px',
         display: 'flex',
@@ -306,6 +319,12 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
         flex: 1,
+    },
+    childTitleMobile: {
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
+        flexBasis: '100%',
     },
     childId: {
         color: tokens.colorNeutralForeground3,
@@ -506,10 +525,11 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             size="small"
                             onClick={handleSave}
                             disabled={!title.trim() || updateMutation.isPending}
+                            className={mergeClasses(isMobile && styles.actionButtonMobile)}
                         >
                             {updateMutation.isPending ? 'Saving...' : 'Save'}
                         </Button>
-                        <Button appearance="subtle" size="small" onClick={onClose}>
+                        <Button appearance="subtle" size="small" onClick={onClose} className={mergeClasses(isMobile && styles.actionButtonMobile)}>
                             Cancel
                         </Button>
                     </div>
@@ -520,6 +540,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         className={styles.deleteButton}
                         onClick={handleDelete}
                         disabled={deleteMutation.isPending}
+                        style={isMobile ? { width: '100%' } : undefined}
                     >
                         Delete
                     </Button>
@@ -613,7 +634,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         {/* Agent Assignment */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Agent Assignment</Text>
-                            <div className={styles.fieldValue}>
+                            <div className={mergeClasses(styles.fieldValue, isMobile && styles.fieldValueMobile)}>
                                 {agentLabel !== 'Manual assignment' ? <BotRegular /> : <PersonRegular />}
                                 <Dropdown
                                     className={styles.fieldDropdown}
@@ -648,7 +669,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                     placeholder="Enter name..."
                                 />
                             ) : (
-                                <div className={styles.fieldValue}>
+                                <div className={mergeClasses(styles.fieldValue, isMobile && styles.fieldValueMobile)}>
                                     <BotRegular />
                                     <Text size={200}>{assignedTo}</Text>
                                 </div>
@@ -728,7 +749,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                 return (
                                     <div
                                         key={child.workItemNumber}
-                                        className={styles.childRow}
+                                        className={mergeClasses(styles.childRow, isMobile && styles.childRowMobile)}
                                         onClick={() => onNavigate?.(child)}
                                         style={{ cursor: onNavigate ? 'pointer' : 'default' }}
                                     >
@@ -739,7 +760,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                         )}
                                         <Text className={styles.childId}>{child.workItemNumber}</Text>
                                         <ChevronRightRegular fontSize={10} />
-                                        <Text className={styles.childTitle}>{child.title}</Text>
+                                        <Text className={mergeClasses(styles.childTitle, isMobile && styles.childTitleMobile)}>{child.title}</Text>
                                         <StateDot state={child.state} />
                                         <Caption1>{formatWorkItemState(child.state)}</Caption1>
                                     </div>

@@ -57,7 +57,12 @@ const useStyles = makeStyles({
     },
     actionsSlotMobile: {
         width: '100%',
-        justifyContent: 'flex-start',
+        justifyContent: 'stretch',
+        display: 'grid',
+        gap: '0.5rem',
+        '> .fui-Button': {
+            width: '100%',
+        },
     },
 })
 
