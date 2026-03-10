@@ -14,29 +14,13 @@ const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const knownAuthoritiesEnv = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
-const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
 const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
-const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
-const googlePrompt = import.meta.env.VITE_ENTRA_GOOGLE_PROMPT as string | undefined
-const githubPrompt = import.meta.env.VITE_ENTRA_GITHUB_PROMPT as string | undefined
 
 export type AuthProvider = 'microsoft' | 'google' | 'github'
 
 function normalizeOptional(value: string | undefined): string | undefined {
   const normalized = value?.trim()
   return normalized && normalized.length > 0 ? normalized : undefined
-}
-
-function resolvePrompt(value: string | undefined, fallback: RedirectRequest['prompt']): RedirectRequest['prompt'] {
-  const normalized = normalizeOptional(value)
-  if (!normalized) {
-    return fallback
-  }
-
-  const allowedPrompts: RedirectRequest['prompt'][] = ['login', 'none', 'consent', 'select_account', 'create']
-  return allowedPrompts.includes(normalized as RedirectRequest['prompt'])
-    ? normalized as RedirectRequest['prompt']
-    : fallback
 }
 
 function parseAuthorityHost(authorityValue: string | undefined): string | undefined {
@@ -79,18 +63,14 @@ function buildKnownAuthorities(): string[] {
 
 function createProviderLoginRequest(
   providerAuthority: string | undefined,
-  providerDomainHint: string | undefined,
-  providerPrompt: string | undefined,
 ): RedirectRequest {
   const resolvedAuthority = providerAuthority ?? authority ?? 'https://login.microsoftonline.com/common'
-  const resolvedDomainHint = normalizeOptional(providerDomainHint)
 
   return {
     ...apiLoginRequest,
     authority: resolvedAuthority,
-    // In provider-specific flows force an interactive challenge by default.
-    prompt: resolvePrompt(providerPrompt, 'login'),
-    ...(resolvedDomainHint ? { domainHint: resolvedDomainHint } : {}),
+    // Provider-specific flow should challenge directly without account picker hints.
+    prompt: 'login',
   }
 }
 
@@ -115,8 +95,13 @@ if (!clientId) {
 
 if (!normalizeOptional(googleAuthority)) {
   console.warn(
-    'VITE_ENTRA_GOOGLE_AUTHORITY is not set. Google sign-in will use the shared authority, ' +
-    'which may still show provider selection in Entra.'
+    'VITE_ENTRA_GOOGLE_AUTHORITY is not set. For direct Google sign-in, configure a Google-only flow authority.'
+  )
+}
+
+if (!normalizeOptional(githubAuthority)) {
+  console.warn(
+    'VITE_ENTRA_GITHUB_AUTHORITY is not set. For direct GitHub sign-in, configure a GitHub-only flow authority.'
   )
 }
 
@@ -141,22 +126,14 @@ export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : ['User.Read'],
 }
 
-/** Login request that hints the user should sign in via Google */
+/** Login request that targets Google-specific authority */
 export const googleLoginRequest: RedirectRequest = {
-  ...createProviderLoginRequest(
-    googleAuthority,
-    googleDomainHint,
-    googlePrompt,
-  ),
+  ...createProviderLoginRequest(googleAuthority),
 }
 
-/** Login request that hints the user should sign in via GitHub */
+/** Login request that targets GitHub-specific authority */
 export const githubLoginRequest: RedirectRequest = {
-  ...createProviderLoginRequest(
-    githubAuthority,
-    githubDomainHint,
-    githubPrompt,
-  ),
+  ...createProviderLoginRequest(githubAuthority),
 }
 
 export function getLoginRequest(provider: AuthProvider = 'microsoft'): RedirectRequest {
