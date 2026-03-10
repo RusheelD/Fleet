@@ -62,9 +62,24 @@ function buildKnownAuthorities(): string[] {
 }
 
 function createProviderLoginRequest(
+  provider: 'google' | 'github',
   providerAuthority: string | undefined,
 ): RedirectRequest {
-  const resolvedAuthority = providerAuthority ?? authority ?? 'https://login.microsoftonline.com/common'
+  const resolvedAuthority = normalizeOptional(providerAuthority)
+  if (!resolvedAuthority) {
+    throw new Error(
+      `VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY is required for "${provider}" login. ` +
+      'Use your External ID ciamlogin.com user-flow authority.'
+    )
+  }
+
+  const authorityHost = parseAuthorityHost(resolvedAuthority)
+  if (authorityHost?.toLowerCase() === 'login.microsoftonline.com') {
+    throw new Error(
+      `VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY must not use login.microsoftonline.com. ` +
+      'Use your External ID ciamlogin.com user-flow authority.'
+    )
+  }
 
   return {
     ...apiLoginRequest,
@@ -124,25 +139,16 @@ const msalConfig: Configuration = {
  */
 export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : ['User.Read'],
-}
-
-/** Login request that targets Google-specific authority */
-export const googleLoginRequest: RedirectRequest = {
-  ...createProviderLoginRequest(googleAuthority),
-}
-
-/** Login request that targets GitHub-specific authority */
-export const githubLoginRequest: RedirectRequest = {
-  ...createProviderLoginRequest(githubAuthority),
+  authority: authority ?? 'https://login.microsoftonline.com/common',
 }
 
 export function getLoginRequest(provider: AuthProvider = 'microsoft'): RedirectRequest {
   if (provider === 'google') {
-    return googleLoginRequest
+    return createProviderLoginRequest('google', googleAuthority)
   }
 
   if (provider === 'github') {
-    return githubLoginRequest
+    return createProviderLoginRequest('github', githubAuthority)
   }
 
   return apiLoginRequest

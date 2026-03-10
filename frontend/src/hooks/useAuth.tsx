@@ -35,8 +35,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
             const resolvedProvider: AuthProvider = provider ?? 'microsoft'
             lastProviderRef.current = resolvedProvider
             window.sessionStorage.setItem(LastAuthProviderStorageKey, resolvedProvider)
-            const request = getLoginRequest(resolvedProvider)
-            await instance.loginRedirect(request)
+            try {
+                const request = getLoginRequest(resolvedProvider)
+                console.info('[auth] loginRedirect request', {
+                    provider: resolvedProvider,
+                    authority: request.authority ?? '(msal default)',
+                })
+                await instance.loginRedirect(request)
+            } catch (error) {
+                console.error('[auth] Unable to start login redirect', {
+                    provider: resolvedProvider,
+                    error: error instanceof Error ? error.message : String(error),
+                })
+            }
         }
     }, [instance, inProgress])
 
@@ -75,7 +86,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     // Guard against multiple concurrent redirects.
                     if (!redirectingRef.current && inProgress === InteractionStatus.None) {
                         redirectingRef.current = true
-                        await instance.loginRedirect(getLoginRequest(lastProviderRef.current))
+                        try {
+                            const request = getLoginRequest(lastProviderRef.current)
+                            console.info('[auth] interaction-required loginRedirect request', {
+                                provider: lastProviderRef.current,
+                                authority: request.authority ?? '(msal default)',
+                            })
+                            await instance.loginRedirect(request)
+                        } catch (redirectError) {
+                            console.error('[auth] interaction-required redirect failed', {
+                                provider: lastProviderRef.current,
+                                error: redirectError instanceof Error ? redirectError.message : String(redirectError),
+                            })
+                            await instance.loginRedirect(apiLoginRequest)
+                        }
                     }
                 } else {
                     console.warn('Silent token acquisition failed (non-interactive):', error)
