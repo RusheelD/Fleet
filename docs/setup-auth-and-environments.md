@@ -230,10 +230,10 @@ The frontend uses `.env` files (loaded by Vite) for Entra ID and environment con
 # Application (client) ID of the Fleet SPA app registration
 VITE_ENTRA_CLIENT_ID=your-spa-client-id
 
-# Authority — https://login.microsoftonline.com/{tenantId}
-VITE_ENTRA_AUTHORITY=https://login.microsoftonline.com/your-tenant-id
+# Authority - https://{tenant}.ciamlogin.com/{tenantId}
+VITE_ENTRA_AUTHORITY=https://your-tenant.ciamlogin.com/your-tenant-id
 
-# API scope — api://{apiClientId}/access_as_user
+# API scope - api://{apiClientId}/access_as_user
 VITE_ENTRA_API_SCOPE=api://your-api-client-id/access_as_user
 
 # Environment label
@@ -354,7 +354,7 @@ dotnet publish Fleet.Server -c Release -o ./publish
 | ---------- | ------- | ----- | --------- | ------------ |
 | `ASPNETCORE_ENVIRONMENT` | Server | `Development` | `Staging` | `Production` |
 | `VITE_ENTRA_CLIENT_ID` | Frontend | SPA client ID | SPA client ID | SPA client ID |
-| `VITE_ENTRA_AUTHORITY` | Frontend | `https://login.microsoftonline.com/{tid}` | Same | Same |
+| `VITE_ENTRA_AUTHORITY` | Frontend | `https://{tenant}.ciamlogin.com/{tid}` | Same | Same |
 | `VITE_ENTRA_API_SCOPE` | Frontend | `api://{id}/access_as_user` | Same | Same |
 | `VITE_ENVIRONMENT` | Frontend + Website | `development` | `staging` | `production` |
 | `VITE_WEBSITE_URL` | Frontend | `https://fleet-ai.dev` | `https://fleet-ai.dev` | `https://fleet-ai.dev` |
@@ -392,3 +392,4 @@ All subdomains should have **TLS certificates** configured (use a wildcard cert 
 - [ ] Set up DNS records for `fleet-ai.dev` and subdomains
 - [ ] Deploy backend, frontend, and website per environment (Section 7)
 - [ ] Add all environment redirect URIs to the SPA app registration
+

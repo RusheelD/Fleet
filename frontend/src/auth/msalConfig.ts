@@ -5,7 +5,7 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
  *
  * Replace the placeholder values with your Entra ID app registration details:
  * - VITE_ENTRA_CLIENT_ID: The Application (client) ID of your SPA app registration
- * - VITE_ENTRA_AUTHORITY: https://login.microsoftonline.com/{tenantId}
+ * - VITE_ENTRA_AUTHORITY: https://{tenant}.ciamlogin.com/{tenantId}
  * - VITE_ENTRA_API_SCOPE: api://{apiClientId}/access_as_user
  */
 
@@ -13,10 +13,13 @@ const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const knownAuthoritiesEnv = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
-const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
-const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
 
 export type AuthProvider = 'microsoft' | 'google' | 'github'
+
+const providerDomainHints: Record<Exclude<AuthProvider, 'microsoft'>, string> = {
+  google: 'google.com',
+  github: 'github.com',
+}
 
 function normalizeOptional(value: string | undefined): string | undefined {
   const normalized = value?.trim()
@@ -46,7 +49,7 @@ function buildKnownAuthorities(): string[] {
     }
   }
 
-  for (const authorityValue of [authority, googleAuthority, githubAuthority]) {
+  for (const authorityValue of [authority]) {
     const host = parseAuthorityHost(authorityValue)
     if (!host) {
       continue
@@ -63,30 +66,16 @@ function buildKnownAuthorities(): string[] {
 
 function createProviderLoginRequest(
   provider: 'google' | 'github',
-  providerAuthority: string | undefined,
 ): RedirectRequest {
-  const defaultAuthority = authority ?? 'https://login.microsoftonline.com/common'
-  const resolvedAuthority = normalizeOptional(providerAuthority) ?? defaultAuthority
-
-  if (!normalizeOptional(providerAuthority)) {
-    console.warn(
-      `[auth] VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY is not set. ` +
-      'Falling back to VITE_ENTRA_AUTHORITY.'
-    )
-  }
-
-  const authorityHost = parseAuthorityHost(resolvedAuthority)
-  if (authorityHost?.toLowerCase() === 'login.microsoftonline.com' && normalizeOptional(providerAuthority)) {
-    console.warn(
-      `[auth] VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY points to login.microsoftonline.com. ` +
-      'Use a ciamlogin.com user-flow authority for direct social sign-in.'
-    )
-  }
+  const resolvedAuthority = authority ?? 'https://login.microsoftonline.com/common'
+  const domainHint = providerDomainHints[provider]
 
   return {
     ...apiLoginRequest,
     authority: resolvedAuthority,
-    // Provider-specific flow should challenge directly without account picker hints.
+    // With a single app authority, provider hints accelerate home-realm discovery.
+    domainHint,
+    extraQueryParameters: { domain_hint: domainHint },
     prompt: 'login',
   }
 }
@@ -107,18 +96,6 @@ if (!clientId) {
   console.warn(
     'VITE_ENTRA_CLIENT_ID is not set. Authentication will not work. ' +
     'Create a .env file with your Entra ID configuration.'
-  )
-}
-
-if (!normalizeOptional(googleAuthority)) {
-  console.warn(
-    'VITE_ENTRA_GOOGLE_AUTHORITY is not set. For direct Google sign-in, configure a Google-only flow authority.'
-  )
-}
-
-if (!normalizeOptional(githubAuthority)) {
-  console.warn(
-    'VITE_ENTRA_GITHUB_AUTHORITY is not set. For direct GitHub sign-in, configure a GitHub-only flow authority.'
   )
 }
 
@@ -146,11 +123,11 @@ export const apiLoginRequest: RedirectRequest = {
 
 export function getLoginRequest(provider: AuthProvider = 'microsoft'): RedirectRequest {
   if (provider === 'google') {
-    return createProviderLoginRequest('google', googleAuthority)
+    return createProviderLoginRequest('google')
   }
 
   if (provider === 'github') {
-    return createProviderLoginRequest('github', githubAuthority)
+    return createProviderLoginRequest('github')
   }
 
   return apiLoginRequest
