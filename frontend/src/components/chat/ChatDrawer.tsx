@@ -282,6 +282,11 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
                 onDeleteSession={handleDeleteSession}
                 onRenameSession={handleRenameSession}
                 onNewSession={handleNewSession}
+                actionsDisabled={
+                    createSessionMutation.isPending
+                    || deleteSessionMutation.isPending
+                    || renameSessionMutation.isPending
+                }
             />
 
             {loadingChat ? (
