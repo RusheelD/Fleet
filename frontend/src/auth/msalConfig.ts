@@ -65,19 +65,21 @@ function createProviderLoginRequest(
   provider: 'google' | 'github',
   providerAuthority: string | undefined,
 ): RedirectRequest {
-  const resolvedAuthority = normalizeOptional(providerAuthority)
-  if (!resolvedAuthority) {
-    throw new Error(
-      `VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY is required for "${provider}" login. ` +
-      'Use your External ID ciamlogin.com user-flow authority.'
+  const defaultAuthority = authority ?? 'https://login.microsoftonline.com/common'
+  const resolvedAuthority = normalizeOptional(providerAuthority) ?? defaultAuthority
+
+  if (!normalizeOptional(providerAuthority)) {
+    console.warn(
+      `[auth] VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY is not set. ` +
+      'Falling back to VITE_ENTRA_AUTHORITY.'
     )
   }
 
   const authorityHost = parseAuthorityHost(resolvedAuthority)
-  if (authorityHost?.toLowerCase() === 'login.microsoftonline.com') {
-    throw new Error(
-      `VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY must not use login.microsoftonline.com. ` +
-      'Use your External ID ciamlogin.com user-flow authority.'
+  if (authorityHost?.toLowerCase() === 'login.microsoftonline.com' && normalizeOptional(providerAuthority)) {
+    console.warn(
+      `[auth] VITE_ENTRA_${provider.toUpperCase()}_AUTHORITY points to login.microsoftonline.com. ` +
+      'Use a ciamlogin.com user-flow authority for direct social sign-in.'
     )
   }
 
