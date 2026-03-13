@@ -125,4 +125,33 @@ public class RepoSandboxTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [TestMethod]
+    public void BuildGitProcessPath_AppendsCommonGitDirectories()
+    {
+        var initial = OperatingSystem.IsWindows() ? @"C:\tools" : "/app/bin";
+
+        var result = RepoSandbox.BuildGitProcessPath(initial);
+
+        if (OperatingSystem.IsWindows())
+        {
+            StringAssert.Contains(result, @"C:\tools");
+            StringAssert.Contains(result, "Git");
+        }
+        else
+        {
+            StringAssert.Contains(result, "/app/bin");
+            StringAssert.Contains(result, "/usr/bin");
+        }
+    }
+
+    [TestMethod]
+    public void ResolveGitExecutable_ReturnsConfiguredPathWhenProvided()
+    {
+        const string configuredPath = "/custom/git";
+
+        var result = RepoSandbox.ResolveGitExecutable(configuredPath);
+
+        Assert.AreEqual(configuredPath, result);
+    }
 }

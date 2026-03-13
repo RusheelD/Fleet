@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileSystemGlobbing;
@@ -35,6 +36,21 @@ public class RepoSandbox : IRepoSandbox
         ".pdf", ".woff", ".woff2", ".ttf", ".eot",
         ".lock", ".min.js", ".min.css",
     };
+
+    private static readonly string[] CommonUnixGitLocations =
+    [
+        "/usr/bin/git",
+        "/usr/local/bin/git",
+        "/bin/git",
+    ];
+
+    private static readonly string[] CommonWindowsGitLocations =
+    [
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "cmd", "git.exe"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "git.exe"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "cmd", "git.exe"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "bin", "git.exe"),
+    ];
 
     public RepoSandbox(ILogger<RepoSandbox> logger)
     {
@@ -605,6 +621,94 @@ public class RepoSandbox : IRepoSandbox
         return effectiveWorkingDir;
     }
 
+    internal static string BuildGitProcessPath(string? existingPath = null)
+    {
+        var separator = OperatingSystem.IsWindows() ? ';' : ':';
+        var segments = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(existingPath))
+        {
+            segments.AddRange(existingPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        foreach (var extra in (OperatingSystem.IsWindows() ? CommonWindowsGitLocations : CommonUnixGitLocations).Select(Path.GetDirectoryName))
+        {
+            if (string.IsNullOrWhiteSpace(extra))
+                continue;
+
+            if (segments.Any(path => string.Equals(path, extra, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            segments.Add(extra);
+        }
+
+        return string.Join(separator, segments);
+    }
+
+    internal static string ResolveGitExecutable(string? configuredPath = null, string? pathEnvironment = null)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+            return configuredPath;
+
+        var envPath = Environment.GetEnvironmentVariable("GIT_EXECUTABLE_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath))
+            return envPath;
+
+        foreach (var candidate in GetGitExecutableCandidates(pathEnvironment))
+        {
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return "git";
+    }
+
+    private static IEnumerable<string> GetGitExecutableCandidates(string? pathEnvironment)
+    {
+        var fileName = OperatingSystem.IsWindows() ? "git.exe" : "git";
+
+        foreach (var candidate in OperatingSystem.IsWindows() ? CommonWindowsGitLocations : CommonUnixGitLocations)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+                yield return candidate;
+        }
+
+        if (string.IsNullOrWhiteSpace(pathEnvironment))
+            yield break;
+
+        var separator = OperatingSystem.IsWindows() ? ';' : ':';
+        foreach (var segment in pathEnvironment.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            yield return Path.Combine(segment, fileName);
+        }
+    }
+
+    private static InvalidOperationException CreateGitStartException(
+        Win32Exception exception,
+        string workingDirectory,
+        string gitExecutable,
+        string pathEnvironment)
+    {
+        if (!Directory.Exists(workingDirectory))
+        {
+            return new InvalidOperationException(
+                $"Git working directory '{workingDirectory}' is missing before launch. The repo sandbox could not prepare a usable workspace.",
+                exception);
+        }
+
+        var gitOnPath = GetGitExecutableCandidates(pathEnvironment).Any(File.Exists);
+        if (!gitOnPath && gitExecutable.Equals("git", StringComparison.OrdinalIgnoreCase))
+        {
+            return new InvalidOperationException(
+                "Git executable could not be found. Install git on the host, add it to PATH, or set GIT_EXECUTABLE_PATH to the full git binary path.",
+                exception);
+        }
+
+        return new InvalidOperationException(
+            $"Failed to start git from '{gitExecutable}' in working directory '{workingDirectory}'. PATH='{pathEnvironment}'.",
+            exception);
+    }
+
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)
     {
         // Prepend flags that disable all credential helpers and interactive prompts.
@@ -612,10 +716,12 @@ public class RepoSandbox : IRepoSandbox
         // asking the user to pick an account — which blocks headless server execution.
         var fullArgs = $"-c credential.helper= {arguments}";
         var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot);
+        var processPath = BuildGitProcessPath(Environment.GetEnvironmentVariable("PATH"));
+        var gitExecutable = ResolveGitExecutable(pathEnvironment: processPath);
 
         var psi = new ProcessStartInfo
         {
-            FileName = "git",
+            FileName = gitExecutable,
             Arguments = fullArgs,
             WorkingDirectory = effectiveWorkingDir,
             RedirectStandardOutput = true,
@@ -625,6 +731,7 @@ public class RepoSandbox : IRepoSandbox
         };
 
         // Prevent any interactive credential prompt from GCM or git itself
+        psi.Environment["PATH"] = processPath;
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["GCM_INTERACTIVE"] = "never";
         psi.Environment["GIT_ASKPASS"] = "";
@@ -642,7 +749,14 @@ public class RepoSandbox : IRepoSandbox
             if (e.Data is not null) stderr.AppendLine(e.Data);
         };
 
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (Win32Exception ex)
+        {
+            throw CreateGitStartException(ex, effectiveWorkingDir, gitExecutable, processPath);
+        }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
