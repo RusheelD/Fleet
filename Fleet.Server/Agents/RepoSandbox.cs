@@ -58,7 +58,7 @@ public class RepoSandbox : IRepoSandbox
         _accessToken = accessToken;
 
         // Create a unique temp directory underneath a concrete git working directory.
-        var sandboxTempRoot = EnsureGitWorkingDirectory(GetSandboxTempRoot(), repoRoot: string.Empty);
+        var sandboxTempRoot = EnsureSandboxWorkspaceRoot();
         _repoRoot = Path.Combine(sandboxTempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repoRoot);
 
@@ -555,6 +555,35 @@ public class RepoSandbox : IRepoSandbox
         return Path.Combine(tempRoot, "fleet-agent");
     }
 
+    internal static string GetAppOwnedSandboxRoot(string? appBaseOverride = null)
+    {
+        var appBase = string.IsNullOrWhiteSpace(appBaseOverride)
+            ? AppContext.BaseDirectory
+            : appBaseOverride;
+
+        if (string.IsNullOrWhiteSpace(appBase))
+            throw new InvalidOperationException("An app-owned base directory is required to create a repo sandbox fallback.");
+
+        return Path.Combine(appBase, ".fleet-agent");
+    }
+
+    internal static string EnsureSandboxWorkspaceRoot(string? tempPathOverride = null, string? appBaseOverride = null)
+    {
+        var preferredRoot = GetSandboxTempRoot(tempPathOverride);
+
+        try
+        {
+            Directory.CreateDirectory(preferredRoot);
+            return preferredRoot;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            var fallbackRoot = GetAppOwnedSandboxRoot(appBaseOverride);
+            Directory.CreateDirectory(fallbackRoot);
+            return fallbackRoot;
+        }
+    }
+
     internal static string EnsureGitWorkingDirectory(string? workingDir, string repoRoot, string? tempPathOverride = null)
     {
         var effectiveWorkingDir = string.IsNullOrWhiteSpace(workingDir)
@@ -562,7 +591,7 @@ public class RepoSandbox : IRepoSandbox
             : workingDir;
 
         if (string.IsNullOrWhiteSpace(effectiveWorkingDir))
-            effectiveWorkingDir = GetSandboxTempRoot(tempPathOverride);
+            effectiveWorkingDir = EnsureSandboxWorkspaceRoot(tempPathOverride);
 
         Directory.CreateDirectory(effectiveWorkingDir);
         return effectiveWorkingDir;
