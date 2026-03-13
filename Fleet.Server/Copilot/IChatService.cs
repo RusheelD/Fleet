@@ -9,7 +9,12 @@ public interface IChatService
     Task<ChatSessionDto> CreateSessionAsync(string projectId, string title);
     Task<bool> RenameSessionAsync(string projectId, string sessionId, string title);
     Task<bool> DeleteSessionAsync(string projectId, string sessionId);
-    Task<SendMessageResponseDto> SendMessageAsync(string projectId, string sessionId, string content, bool generateWorkItems = false);
+    Task<SendMessageResponseDto> SendMessageAsync(
+        string projectId,
+        string sessionId,
+        string content,
+        bool generateWorkItems = false,
+        CancellationToken cancellationToken = default);
 
     // Attachments
     Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content);

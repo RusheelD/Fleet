@@ -51,9 +51,36 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
                 (scopeProjectId == null
                     ? m.ChatSession.ProjectId == null
                     : m.ChatSession.ProjectId == scopeProjectId))
+            .OrderBy(m => m.Timestamp)
             .ToListAsync();
 
-        return entities.Select(m => new ChatMessageDto(m.Id, m.Role, m.Content, m.Timestamp)).ToList();
+        var messageIds = entities
+            .Select(m => m.Id)
+            .ToArray();
+
+        Dictionary<string, ChatAttachmentDto[]> attachmentsByMessageId = [];
+        if (messageIds.Length > 0)
+        {
+            attachmentsByMessageId = await context.ChatAttachments
+                .AsNoTracking()
+                .Where(a =>
+                    a.ChatMessageId != null &&
+                    messageIds.Contains(a.ChatMessageId) &&
+                    a.ChatSession.OwnerId == ownerId &&
+                    (scopeProjectId == null
+                        ? a.ChatSession.ProjectId == null
+                        : a.ChatSession.ProjectId == scopeProjectId))
+                .OrderBy(a => a.UploadedAt)
+                .GroupBy(a => a.ChatMessageId!)
+                .ToDictionaryAsync(
+                    group => group.Key,
+                    group => group.Select(ToAttachmentDto).ToArray());
+        }
+
+        return entities.Select(m => new ChatMessageDto(m.Id, m.Role, m.Content, m.Timestamp)
+        {
+            Attachments = attachmentsByMessageId.GetValueOrDefault(m.Id, [])
+        }).ToList();
     }
 
     public Task<string[]> GetSuggestionsAsync(string projectId)
@@ -221,13 +248,34 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             .AsNoTracking()
             .Where(a =>
                 a.ChatSessionId == sessionId &&
+                a.ChatMessageId == null &&
                 a.ChatSession.OwnerId == ownerId &&
                 (scopeProjectId == null
                     ? a.ChatSession.ProjectId == null
                     : a.ChatSession.ProjectId == scopeProjectId))
+            .OrderByDescending(a => a.UploadedAt)
             .ToListAsync();
 
-        return entities.Select(a => new ChatAttachmentDto(a.Id, a.FileName, a.Content.Length, a.UploadedAt)).ToList();
+        return entities.Select(ToAttachmentDto).ToList();
+    }
+
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId)
+    {
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var scopeProjectId = NormalizeProjectId(projectId);
+
+        var entities = await context.ChatAttachments
+            .AsNoTracking()
+            .Where(a =>
+                a.ChatSessionId == sessionId &&
+                a.ChatSession.OwnerId == ownerId &&
+                (scopeProjectId == null
+                    ? a.ChatSession.ProjectId == null
+                    : a.ChatSession.ProjectId == scopeProjectId))
+            .OrderBy(a => a.UploadedAt)
+            .ToListAsync();
+
+        return entities.Select(ToAttachmentDto).ToList();
     }
 
     public Task<string?> GetAttachmentContentAsync(string attachmentId)
@@ -248,6 +296,32 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
                     : a.ChatSession.ProjectId == scopeProjectId));
 
         return entity?.Content;
+    }
+
+    public async Task AssignPendingAttachmentsToMessageAsync(string projectId, string sessionId, string messageId)
+    {
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var scopeProjectId = NormalizeProjectId(projectId);
+
+        var entities = await context.ChatAttachments
+            .Where(a =>
+                a.ChatSessionId == sessionId &&
+                a.ChatMessageId == null &&
+                a.ChatSession.OwnerId == ownerId &&
+                (scopeProjectId == null
+                    ? a.ChatSession.ProjectId == null
+                    : a.ChatSession.ProjectId == scopeProjectId))
+            .ToListAsync();
+
+        if (entities.Count == 0)
+            return;
+
+        foreach (var entity in entities)
+        {
+            entity.ChatMessageId = messageId;
+        }
+
+        await context.SaveChangesAsync();
     }
 
     public Task<bool> DeleteAttachmentAsync(string attachmentId)
@@ -280,6 +354,9 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             ? query.Where(s => s.ProjectId == null)
             : query.Where(s => s.ProjectId == scopeProjectId);
     }
+
+    private static ChatAttachmentDto ToAttachmentDto(ChatAttachment entity)
+        => new(entity.Id, entity.FileName, entity.Content.Length, entity.UploadedAt);
 
     private static string? NormalizeProjectId(string projectId)
         => IsGlobalScope(projectId) ? null : projectId.Trim();

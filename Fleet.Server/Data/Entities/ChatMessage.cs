@@ -10,4 +10,6 @@ public class ChatMessage
     // Foreign key
     public string ChatSessionId { get; set; } = string.Empty;
     public ChatSession ChatSession { get; set; } = null!;
+
+    public List<ChatAttachment> Attachments { get; set; } = [];
 }

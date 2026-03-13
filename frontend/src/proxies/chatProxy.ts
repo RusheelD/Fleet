@@ -2,6 +2,7 @@ import { get, post, put, del, postForm } from './'
 import type { ChatData, ChatMessageData, ChatSessionData, SendMessageResponse, ChatAttachment } from '../models'
 
 const GLOBAL_CHAT_BASE = '/api/chat'
+const activeChatRequests = new Map<string, AbortController>()
 
 function isProjectScoped(projectId?: string): projectId is string {
   return typeof projectId === 'string' && projectId.trim().length > 0
@@ -39,6 +40,10 @@ export function buildRenameSessionPath(projectId: string | undefined, sessionId:
   return `${buildChatSessionsPath(projectId)}/${sessionId}`
 }
 
+function buildSessionRequestKey(projectId: string | undefined, sessionId: string): string {
+  return `${projectId?.trim() ?? '__global__'}::${sessionId}`
+}
+
 export function getChatData(projectId?: string): Promise<ChatData> {
   return get<ChatData>(buildChatDataPath(projectId))
 }
@@ -51,8 +56,28 @@ export function createChatSession(projectId: string | undefined, title: string):
   return post<ChatSessionData>(buildChatSessionsPath(projectId), { title })
 }
 
-export function sendChatMessage(projectId: string | undefined, sessionId: string, content: string, generateWorkItems = false): Promise<SendMessageResponse> {
-  return post<SendMessageResponse>(buildChatMessagesPath(projectId, sessionId), { content, generateWorkItems })
+export async function sendChatMessage(
+  projectId: string | undefined,
+  sessionId: string,
+  content: string,
+  generateWorkItems = false,
+): Promise<SendMessageResponse> {
+  const requestKey = buildSessionRequestKey(projectId, sessionId)
+  const controller = new AbortController()
+  activeChatRequests.set(requestKey, controller)
+
+  try {
+    return await post<SendMessageResponse>(
+      buildChatMessagesPath(projectId, sessionId),
+      { content, generateWorkItems },
+      { signal: controller.signal },
+    )
+  } finally {
+    const current = activeChatRequests.get(requestKey)
+    if (current === controller) {
+      activeChatRequests.delete(requestKey)
+    }
+  }
 }
 
 export function getAttachments(projectId: string | undefined, sessionId: string): Promise<ChatAttachment[]> {
@@ -75,4 +100,15 @@ export function deleteChatSession(projectId: string | undefined, sessionId: stri
 
 export function renameChatSession(projectId: string | undefined, sessionId: string, title: string): Promise<void> {
   return put<void>(buildRenameSessionPath(projectId, sessionId), { title })
+}
+
+export function cancelChatSessionRequests(projectId: string | undefined, sessionId: string): void {
+  const requestKey = buildSessionRequestKey(projectId, sessionId)
+  const controller = activeChatRequests.get(requestKey)
+  if (!controller) {
+    return
+  }
+
+  activeChatRequests.delete(requestKey)
+  controller.abort()
 }

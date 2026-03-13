@@ -159,6 +159,23 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<ChatAttachment>(builder =>
+        {
+            builder.HasKey(a => a.Id);
+
+            builder.HasOne(a => a.ChatSession)
+                .WithMany(s => s.Attachments)
+                .HasForeignKey(a => a.ChatSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasOne(a => a.ChatMessage)
+                .WithMany(m => m.Attachments)
+                .HasForeignKey(a => a.ChatMessageId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            builder.HasIndex(a => new { a.ChatSessionId, a.ChatMessageId });
+        });
+
         // ── UserProfile ────────────────────────────────────────────
         modelBuilder.Entity<UserProfile>(builder =>
         {

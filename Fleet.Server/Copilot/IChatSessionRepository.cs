@@ -21,8 +21,10 @@ public interface IChatSessionRepository
     Task<ChatAttachmentDto> AddAttachmentAsync(string projectId, string sessionId, string fileName, string content);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string projectId, string sessionId);
+    Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId);
     Task<string?> GetAttachmentContentAsync(string attachmentId);
     Task<string?> GetAttachmentContentAsync(string projectId, string attachmentId);
+    Task AssignPendingAttachmentsToMessageAsync(string projectId, string sessionId, string messageId);
     Task<bool> DeleteAttachmentAsync(string attachmentId);
     Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId);
 }

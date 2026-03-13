@@ -107,36 +107,39 @@ export async function get<T>(url: string): Promise<T> {
 }
 
 /** HTTP POST */
-export async function post<T>(url: string, body?: unknown): Promise<T> {
+export async function post<T>(url: string, body?: unknown, init?: RequestInit): Promise<T> {
   const response = await fetch(resolveRequestUrl(url), {
+    ...init,
     method: 'POST',
-    headers: await buildHeaders(),
+    headers: init?.headers ?? await buildHeaders(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   return handleResponse<T>(response)
 }
 
 /** HTTP PUT */
-export async function put<T>(url: string, body?: unknown): Promise<T> {
+export async function put<T>(url: string, body?: unknown, init?: RequestInit): Promise<T> {
   const response = await fetch(resolveRequestUrl(url), {
+    ...init,
     method: 'PUT',
-    headers: await buildHeaders(),
+    headers: init?.headers ?? await buildHeaders(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   return handleResponse<T>(response)
 }
 
 /** HTTP DELETE */
-export async function del<T>(url: string): Promise<T> {
+export async function del<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(resolveRequestUrl(url), {
+    ...init,
     method: 'DELETE',
-    headers: await buildHeaders(),
+    headers: init?.headers ?? await buildHeaders(),
   })
   return handleResponse<T>(response)
 }
 
 /** HTTP POST with FormData (multipart/form-data for file uploads) */
-export async function postForm<T>(url: string, formData: FormData): Promise<T> {
+export async function postForm<T>(url: string, formData: FormData, init?: RequestInit): Promise<T> {
   // Don't set Content-Type — browser generates the boundary automatically
   const headers: HeadersInit = {}
   const token = tokenGetter ? await tokenGetter() : undefined
@@ -144,8 +147,9 @@ export async function postForm<T>(url: string, formData: FormData): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`
   }
   const response = await fetch(resolveRequestUrl(url), {
+    ...init,
     method: 'POST',
-    headers,
+    headers: init?.headers ?? headers,
     body: formData,
   })
   return handleResponse<T>(response)

@@ -78,7 +78,10 @@ public class GlobalChatsController(
     }
 
     [HttpPost("sessions/{sessionId}/messages")]
-    public async Task<IActionResult> SendMessage(string sessionId, [FromBody] SendMessageRequest request)
+    public async Task<IActionResult> SendMessage(
+        string sessionId,
+        [FromBody] SendMessageRequest request,
+        CancellationToken cancellationToken = default)
     {
         if (request.GenerateWorkItems)
         {
@@ -91,7 +94,21 @@ public class GlobalChatsController(
             });
         }
 
-        var response = await chatService.SendMessageAsync(GlobalProjectScope, sessionId, request.Content, false);
+        SendMessageResponseDto response;
+        try
+        {
+            response = await chatService.SendMessageAsync(
+                GlobalProjectScope,
+                sessionId,
+                request.Content,
+                false,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new EmptyResult();
+        }
+
         var userId = await authService.GetCurrentUserIdAsync();
         await eventPublisher.PublishUserEventAsync(
             userId,

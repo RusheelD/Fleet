@@ -80,9 +80,27 @@ public class ChatsController(
     }
 
     [HttpPost("sessions/{sessionId}/messages")]
-    public async Task<IActionResult> SendMessage(string projectId, string sessionId, [FromBody] SendMessageRequest request)
+    public async Task<IActionResult> SendMessage(
+        string projectId,
+        string sessionId,
+        [FromBody] SendMessageRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var response = await chatService.SendMessageAsync(projectId, sessionId, request.Content, request.GenerateWorkItems);
+        SendMessageResponseDto response;
+        try
+        {
+            response = await chatService.SendMessageAsync(
+                projectId,
+                sessionId,
+                request.Content,
+                request.GenerateWorkItems,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new EmptyResult();
+        }
+
         var userId = await authService.GetCurrentUserIdAsync();
         await eventPublisher.PublishProjectEventAsync(
             userId,

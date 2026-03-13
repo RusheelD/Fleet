@@ -191,6 +191,40 @@ public class ChatServiceTests
         Assert.IsTrue(result);
     }
 
+    [TestMethod]
+    public async Task DeleteSessionAsync_CancelsInFlightMessageRequest()
+    {
+        var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "2024-01-01");
+        var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Hello"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.DeleteSessionAsync(ProjectId, SessionId))
+            .ReturnsAsync(true);
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<LLMRequest, CancellationToken>(async (_, cancellationToken) =>
+            {
+                requestStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new LLMResponse("unreachable", null);
+            });
+
+        var sendTask = _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+        await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var deleted = await _sut.DeleteSessionAsync(ProjectId, SessionId);
+
+        Assert.IsTrue(deleted);
+        await Assert.ThrowsExceptionAsync<TaskCanceledException>(async () => await sendTask);
+    }
+
     // ── SendMessageAsync ─────────────────────────────────────
 
     [TestMethod]
@@ -249,6 +283,33 @@ public class ChatServiceTests
         var result = await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
 
         Assert.AreEqual("I wasn't able to generate a response.", result.AssistantMessage.Content);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_ClaimsPendingAttachmentsForUserMessage()
+    {
+        var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "2024-01-01");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Hi there!", "2024-01-01");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Hello"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Hi there!"))
+            .ReturnsAsync(assistantMsg);
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LLMResponse("Hi there!", null));
+
+        await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+
+        _chatRepo.Verify(
+            r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id),
+            Times.Once);
     }
 
     [TestMethod]
@@ -463,7 +524,7 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>
             {
                 new("att-1", "spec.md", 50, "2024-01-01"),

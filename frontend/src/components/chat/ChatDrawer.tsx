@@ -8,7 +8,7 @@ import { ToolEventMessage } from './ToolEventMessage'
 import {
     useChatData, useChatMessages, useCreateChatSession,
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession,
-    sendChatMessage,
+    cancelChatSessionRequests, sendChatMessage,
 } from '../../proxies'
 import { useChatGenerating, useAuth, usePreferences } from '../../hooks'
 import type { ChatAttachment, ChatMessageData, SendMessageResponse } from '../../models'
@@ -75,6 +75,10 @@ type PendingAttachment = ChatAttachment & {
     isUploading: true
 }
 
+function buildAttachmentsQueryKey(projectId: string | undefined, sessionId: string) {
+    return ['chat-attachments', JSON.stringify([sessionId, projectId])]
+}
+
 function normalizeMessageContent(value: string): string {
     return value.replace(/\s+/g, ' ').trim().toLowerCase()
 }
@@ -99,6 +103,7 @@ export function ChatDrawer({
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
+    const deletingSessionIdsRef = useRef<Set<string>>(new Set())
 
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
     const { data: messages } = useChatMessages(projectId, activeSession)
@@ -116,6 +121,11 @@ export function ChatDrawer({
         () => [...pendingAttachments, ...(attachments ?? [])],
         [pendingAttachments, attachments]
     )
+    const attachmentsForNextMessage = useMemo(
+        () => attachments ?? [],
+        [attachments]
+    )
+    const hasUploadingAttachments = pendingAttachments.length > 0 || uploadMutation.isPending
 
     // Detect if the active session has a pending generate on the server (e.g. after page refresh)
     const activeSessionData = useMemo(
@@ -234,13 +244,21 @@ export function ChatDrawer({
         return () => window.cancelAnimationFrame(frame)
     }, [displayMessages, chatWidth, maxChatWidth, onRequestChatWidth])
 
-    const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
+    const doSend = (
+        sessionId: string,
+        userContent: string,
+        generateWorkItems: boolean,
+        messageAttachments: ChatAttachment[],
+    ) => {
         setMessage('')
 
         // If generating with no user input, use the default generate message
         const contentToSend = generateWorkItems && !userContent
             ? DEFAULT_GENERATE_MESSAGE
             : userContent
+
+        const attachmentsQueryKey = buildAttachmentsQueryKey(projectId, sessionId)
+        const previousAttachments = queryClient.getQueryData<ChatAttachment[]>(attachmentsQueryKey) ?? []
 
         // Optimistic: show user message immediately
         const displayContent = contentToSend
@@ -249,9 +267,20 @@ export function ChatDrawer({
             role: 'user',
             content: displayContent,
             timestamp: new Date().toISOString(),
+            attachments: messageAttachments,
         }])
         setIsThinking(true)
         setIsGenerating(generateWorkItems)
+        setLastSendResponse(null)
+
+        if (messageAttachments.length > 0) {
+            queryClient.setQueryData<ChatAttachment[]>(
+                attachmentsQueryKey,
+                (current) => (current ?? []).filter(
+                    (attachment) => !messageAttachments.some((sentAttachment) => sentAttachment.id === attachment.id),
+                ),
+            )
+        }
 
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
@@ -262,6 +291,7 @@ export function ChatDrawer({
                 // so the user message never flashes away
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+                await queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
                 setIsThinking(false)
                 setIsGenerating(false)
                 setOptimisticMessages([])
@@ -270,6 +300,10 @@ export function ChatDrawer({
                 }
             })
             .catch(() => {
+                if (!deletingSessionIdsRef.current.has(sessionId)) {
+                    queryClient.setQueryData<ChatAttachment[]>(attachmentsQueryKey, previousAttachments)
+                    void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
+                }
                 setIsThinking(false)
                 setIsGenerating(false)
                 setOptimisticMessages([])
@@ -279,21 +313,24 @@ export function ChatDrawer({
     const handleSend = (generateWorkItems = false) => {
         const userContent = message.trim()
         if (isThinking || createSessionMutation.isPending) return
+        if (hasUploadingAttachments) return
         if (generateWorkItems && !allowGenerateWorkItems) return
         if (!userContent && !generateWorkItems) return
+
+        const messageAttachments = attachmentsForNextMessage
 
         // Auto-create a session if none exists, then send
         if (!activeSession) {
             createSessionMutation.mutate('New Chat', {
                 onSuccess: (session) => {
                     setActiveSession(session.id)
-                    doSend(session.id, userContent, generateWorkItems)
+                    doSend(session.id, userContent, generateWorkItems, messageAttachments)
                 },
             })
             return
         }
 
-        doSend(activeSession, userContent, generateWorkItems)
+        doSend(activeSession, userContent, generateWorkItems, messageAttachments)
     }
 
     const handleNewSession = () => {
@@ -306,14 +343,28 @@ export function ChatDrawer({
     }
 
     const handleDeleteSession = (sessionId: string) => {
+        deletingSessionIdsRef.current.add(sessionId)
+        cancelChatSessionRequests(projectId, sessionId)
+
+        if (activeSession === sessionId) {
+            setIsThinking(false)
+            setIsGenerating(false)
+            setLastSendResponse(null)
+            setOptimisticMessages([])
+        }
+
         deleteSessionMutation.mutate(sessionId, {
             onSuccess: () => {
+                deletingSessionIdsRef.current.delete(sessionId)
                 // If deleted session was active, switch to first remaining session or clear
                 if (activeSession === sessionId) {
                     const remainingSessions = sessions.filter(s => s.id !== sessionId)
                     setActiveSession(remainingSessions.length > 0 ? remainingSessions[0].id : undefined)
                 }
                 setOptimisticMessages([])
+            },
+            onError: () => {
+                deletingSessionIdsRef.current.delete(sessionId)
             },
         })
     }
@@ -432,7 +483,7 @@ export function ChatDrawer({
                 onGenerate={allowGenerateWorkItems ? () => handleSend(true) : undefined}
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
-                disabled={isThinking || createSessionMutation.isPending}
+                disabled={isThinking || createSessionMutation.isPending || hasUploadingAttachments}
                 uploading={uploadMutation.isPending}
             />
         </div>

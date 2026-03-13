@@ -3,6 +3,7 @@ export interface ChatMessageData {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
+  attachments?: ChatAttachment[]
 }
 
 export interface ChatSessionData {

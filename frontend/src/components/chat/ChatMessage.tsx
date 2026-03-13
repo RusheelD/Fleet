@@ -3,10 +3,12 @@ import {
     mergeClasses,
     tokens,
     Avatar,
+    Badge,
     Text,
     Link,
+    Tooltip,
 } from '@fluentui/react-components'
-import { BotRegular, PersonRegular } from '@fluentui/react-icons'
+import { BotRegular, DocumentRegular, PersonRegular } from '@fluentui/react-icons'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessageData } from '../../models'
@@ -97,6 +99,55 @@ const useStyles = makeStyles({
     },
     messageTimeAssistant: {
         textAlign: 'left',
+    },
+    attachmentList: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '0.375rem',
+        marginTop: '0.375rem',
+        maxWidth: '100%',
+    },
+    attachmentListCompact: {
+        gap: '0.25rem',
+        marginTop: '0.25rem',
+    },
+    attachmentChip: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.375rem',
+        padding: '0.25rem 0.5rem',
+        borderRadius: tokens.borderRadiusMedium,
+        backgroundColor: tokens.colorNeutralBackground1,
+        border: `1px solid ${tokens.colorNeutralStroke2}`,
+        maxWidth: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+    },
+    attachmentChipUser: {
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderTopColor: 'rgba(255,255,255,0.25)',
+        borderRightColor: 'rgba(255,255,255,0.25)',
+        borderBottomColor: 'rgba(255,255,255,0.25)',
+        borderLeftColor: 'rgba(255,255,255,0.25)',
+    },
+    attachmentChipCompact: {
+        gap: '0.25rem',
+        paddingTop: '0.125rem',
+        paddingBottom: '0.125rem',
+        paddingLeft: '0.375rem',
+        paddingRight: '0.375rem',
+    },
+    attachmentName: {
+        minWidth: 0,
+        maxWidth: '12rem',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    attachmentNameCompact: {
+        maxWidth: '9rem',
+        fontSize: '11px',
+        lineHeight: '14px',
     },
     // Markdown content styles
     markdown: {
@@ -307,6 +358,39 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                         </div>
                     )}
                 </div>
+                {message.attachments && message.attachments.length > 0 && (
+                    <div className={mergeClasses(styles.attachmentList, isCompact && styles.attachmentListCompact)}>
+                        {message.attachments.map((attachment) => (
+                            <div
+                                key={attachment.id}
+                                className={mergeClasses(
+                                    styles.attachmentChip,
+                                    message.role === 'user' && styles.attachmentChipUser,
+                                    isCompact && styles.attachmentChipCompact,
+                                )}
+                            >
+                                <DocumentRegular fontSize={isCompact ? 12 : 14} />
+                                <Tooltip
+                                    content={`${attachment.fileName} (${formatSize(attachment.contentLength)})`}
+                                    relationship="description"
+                                >
+                                    <Text
+                                        size={200}
+                                        className={mergeClasses(
+                                            styles.attachmentName,
+                                            isCompact && styles.attachmentNameCompact,
+                                        )}
+                                    >
+                                        {attachment.fileName}
+                                    </Text>
+                                </Tooltip>
+                                <Badge appearance="filled" size={isCompact ? 'tiny' : 'small'} color="informative">
+                                    {formatSize(attachment.contentLength)}
+                                </Badge>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <Text
                     className={mergeClasses(
                         styles.messageTime,
@@ -319,4 +403,9 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
             </div>
         </div>
     )
+}
+
+function formatSize(chars: number): string {
+    if (chars < 1024) return `${chars} chars`
+    return `${(chars / 1024).toFixed(1)} KB`
 }

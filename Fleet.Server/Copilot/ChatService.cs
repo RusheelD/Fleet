@@ -6,6 +6,8 @@ using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
+using System.Text;
 
 namespace Fleet.Server.Copilot;
 
@@ -21,6 +23,7 @@ public class ChatService(
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
+    private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
 
     private static readonly Lazy<string> SystemPromptLazy = new(() =>
     {
@@ -107,10 +110,16 @@ public class ChatService(
         });
 
         logger.CopilotSessionDeleting(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging());
+        CancelInFlightRequest(projectId, sessionId);
         return await chatSessionRepository.DeleteSessionAsync(projectId, sessionId);
     }
 
-    public async Task<SendMessageResponseDto> SendMessageAsync(string projectId, string sessionId, string content, bool generateWorkItems = false)
+    public async Task<SendMessageResponseDto> SendMessageAsync(
+        string projectId,
+        string sessionId,
+        string content,
+        bool generateWorkItems = false,
+        CancellationToken cancellationToken = default)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
@@ -124,176 +133,195 @@ public class ChatService(
 
         logger.CopilotMessageSending(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging(), generateWorkItems);
         var config = llmOptions.Value;
-
-        // 1. Persist the user message
-        var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
-
-        // 1a. Mark session as generating so the UI shows a spinner on refresh
-        if (generateWorkItems)
-            await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, true);
-
-        var userId = await authService.GetCurrentUserIdAsync();
-        var chargedWorkItemRun = false;
-        if (generateWorkItems)
-        {
-            await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
-            chargedWorkItemRun = true;
-        }
-
-        await PublishChatUpdatedAsync(userId, projectId, sessionId);
-
-        // 2. Load full session history for context
-        var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
-        var llmMessages = history.Select(ToLLMMessage).ToList();
-
-        // 2a. If generation was triggered, inject the system trigger message
-        if (generateWorkItems)
-        {
-            llmMessages.Add(new LLMMessage
-            {
-                Role = "user",
-                Content = "Generate work-items based on provided context",
-            });
-        }
-
-        // 2b. Build system prompt with any uploaded documents
-        var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
-
-        // 3. Get tool definitions — only include write tools when generation is requested.
-        //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
-        //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
-        var toolDefs = toolRegistry.ToLLMDefinitions(
-            includeWriteTools: generateWorkItems,
-            bulkOnly: generateWorkItems,
-            includeGlobalRepoTools: IsGlobalScope(projectId));
-
-        // 4. Auto-name the session before generation starts (fast Haiku call)
-        if (generateWorkItems)
-        {
-            await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config);
-        }
-
-        // 5. Run the tool-calling loop with safety limits
-        var toolEvents = new List<ToolEventDto>();
-        var toolContext = new ChatToolContext(projectId, userId.ToString());
-        var totalToolCalls = 0;
-
         var timeoutSeconds = generateWorkItems ? config.GenerateTimeoutSeconds : config.TimeoutSeconds;
         var maxLoops = generateWorkItems ? config.GenerateMaxToolLoops : config.MaxToolLoops;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        var requestKey = BuildSessionRequestKey(projectId, sessionId);
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using var sessionCts = RegisterInFlightRequest(requestKey);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            timeoutCts.Token,
+            sessionCts.Token,
+            cancellationToken);
+        var requestCancellation = linkedCts.Token;
 
-        for (var loop = 0; loop < maxLoops; loop++)
+        try
         {
-            // Use Sonnet for generation, Haiku for normal chat
-            var modelOverride = generateWorkItems ? config.GenerateModel : null;
-            var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, modelOverride);
-            LLMResponse response;
+            // 1. Persist the user message and claim any pending attachments for it.
+            var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
+            await chatSessionRepository.AssignPendingAttachmentsToMessageAsync(projectId, sessionId, userMessage.Id);
 
-            try
+            // 1a. Mark session as generating so the UI shows a spinner on refresh
+            if (generateWorkItems)
+                await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, true);
+
+            var userId = await authService.GetCurrentUserIdAsync();
+            var chargedWorkItemRun = false;
+            if (generateWorkItems)
             {
-                response = await llmClient.CompleteAsync(request, cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                logger.CopilotLlmTimeout(timeoutSeconds);
-                var timeoutMsg = await chatSessionRepository.AddMessageAsync(
-                    projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
-                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
-                await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
-                return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
-            }
-            catch (Exception ex)
-            {
-                logger.CopilotLlmFailed(ex);
-                var assistantError = BuildAssistantErrorMessage(ex);
-                var errorMsg = await chatSessionRepository.AddMessageAsync(
-                    projectId, sessionId, "assistant", assistantError);
-                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
-                await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
-                return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
+                await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
+                chargedWorkItemRun = true;
             }
 
-            // Log what the LLM returned
-            logger.CopilotLlmResponseReceived(
-                loop + 1,
-                response.ToolCalls is { Count: > 0 },
-                response.ToolCalls?.Count ?? 0,
-                response.Content?.Length ?? 0);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
 
-            // If the model returned tool calls, execute them
-            if (response.ToolCalls is { Count: > 0 })
+            // 2. Load full session history for context
+            var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
+            var llmMessages = history.Select(ToLLMMessage).ToList();
+
+            // 2a. If generation was triggered, inject the system trigger message
+            if (generateWorkItems)
             {
-                logger.CopilotToolBatchStarting(response.ToolCalls.Count, totalToolCalls);
-
-                // Add the assistant's tool-call message to context
                 llmMessages.Add(new LLMMessage
                 {
-                    Role = "assistant",
-                    Content = response.Content,
-                    ToolCalls = response.ToolCalls,
+                    Role = "user",
+                    Content = "Generate work-items based on provided context",
                 });
-
-                foreach (var toolCall in response.ToolCalls)
-                {
-                    // Don't count write tools (create/update/delete) toward the limit —
-                    // the LLM should be able to modify as many work items as needed
-                    var toolDef = toolRegistry.Get(toolCall.Name);
-                    if (toolDef is null || !toolDef.IsWriteTool)
-                    {
-                        totalToolCalls++;
-                        if (totalToolCalls > config.MaxToolCallsTotal)
-                        {
-                            logger.CopilotMaxToolCallsExceeded(config.MaxToolCallsTotal);
-                            break;
-                        }
-                    }
-
-                    var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, cts.Token);
-                    toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
-
-                    // Add tool result to context for the LLM
-                    llmMessages.Add(new LLMMessage
-                    {
-                        Role = "tool",
-                        Content = toolResult,
-                        ToolCallId = toolCall.Id,
-                        ToolName = toolCall.Name,
-                    });
-
-                    await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                    await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
-                }
-
-                if (totalToolCalls > config.MaxToolCallsTotal)
-                    break;
-
-                // Continue the loop so the LLM can process results
-                continue;
             }
 
-            // No tool calls — the model produced a final text response
-            var assistantContent = response.Content ?? "I wasn't able to generate a response.";
-            var assistantMessage = await chatSessionRepository.AddMessageAsync(
-                projectId, sessionId, "assistant", assistantContent);
+            // 2b. Build system prompt with any uploaded documents
+            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
 
-            logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
+            // 3. Get tool definitions — only include write tools when generation is requested.
+            //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
+            //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
+            var toolDefs = toolRegistry.ToLLMDefinitions(
+                includeWriteTools: generateWorkItems,
+                bulkOnly: generateWorkItems,
+                includeGlobalRepoTools: IsGlobalScope(projectId));
 
+            // 4. Auto-name the session before generation starts (fast Haiku call)
+            if (generateWorkItems)
+            {
+                await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation);
+            }
+
+            // 5. Run the tool-calling loop with safety limits
+            var toolEvents = new List<ToolEventDto>();
+            var toolContext = new ChatToolContext(projectId, userId.ToString());
+            var totalToolCalls = 0;
+
+            for (var loop = 0; loop < maxLoops; loop++)
+            {
+                // Use Sonnet for generation, Haiku for normal chat
+                var modelOverride = generateWorkItems ? config.GenerateModel : null;
+                var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, modelOverride);
+                LLMResponse response;
+
+                try
+                {
+                    response = await llmClient.CompleteAsync(request, requestCancellation);
+                }
+                catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+                {
+                    await HandleCanceledRequestAsync(projectId, sessionId, generateWorkItems, chargedWorkItemRun, userId);
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    logger.CopilotLlmTimeout(timeoutSeconds);
+                    var timeoutMsg = await chatSessionRepository.AddMessageAsync(
+                        projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
+                    await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                    await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                    await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
+                    return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
+                }
+                catch (Exception ex)
+                {
+                    logger.CopilotLlmFailed(ex);
+                    var assistantError = BuildAssistantErrorMessage(ex);
+                    var errorMsg = await chatSessionRepository.AddMessageAsync(
+                        projectId, sessionId, "assistant", assistantError);
+                    await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                    await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                    await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
+                    return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
+                }
+
+                // Log what the LLM returned
+                logger.CopilotLlmResponseReceived(
+                    loop + 1,
+                    response.ToolCalls is { Count: > 0 },
+                    response.ToolCalls?.Count ?? 0,
+                    response.Content?.Length ?? 0);
+
+                // If the model returned tool calls, execute them
+                if (response.ToolCalls is { Count: > 0 })
+                {
+                    logger.CopilotToolBatchStarting(response.ToolCalls.Count, totalToolCalls);
+
+                    // Add the assistant's tool-call message to context
+                    llmMessages.Add(new LLMMessage
+                    {
+                        Role = "assistant",
+                        Content = response.Content,
+                        ToolCalls = response.ToolCalls,
+                    });
+
+                    foreach (var toolCall in response.ToolCalls)
+                    {
+                        // Don't count write tools (create/update/delete) toward the limit —
+                        // the LLM should be able to modify as many work items as needed
+                        var toolDef = toolRegistry.Get(toolCall.Name);
+                        if (toolDef is null || !toolDef.IsWriteTool)
+                        {
+                            totalToolCalls++;
+                            if (totalToolCalls > config.MaxToolCallsTotal)
+                            {
+                                logger.CopilotMaxToolCallsExceeded(config.MaxToolCallsTotal);
+                                break;
+                            }
+                        }
+
+                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
+                        toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
+
+                        // Add tool result to context for the LLM
+                        llmMessages.Add(new LLMMessage
+                        {
+                            Role = "tool",
+                            Content = toolResult,
+                            ToolCallId = toolCall.Id,
+                            ToolName = toolCall.Name,
+                        });
+
+                        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
+                    }
+
+                    if (totalToolCalls > config.MaxToolCallsTotal)
+                        break;
+
+                    // Continue the loop so the LLM can process results
+                    continue;
+                }
+
+                // No tool calls — the model produced a final text response
+                var assistantContent = response.Content ?? "I wasn't able to generate a response.";
+                var assistantMessage = await chatSessionRepository.AddMessageAsync(
+                    projectId, sessionId, "assistant", assistantContent);
+
+                logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
+
+                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
+            }
+
+            // Exhausted tool loops — force a text response
+            logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
+            var fallbackMsg = await chatSessionRepository.AddMessageAsync(
+                projectId, sessionId, "assistant",
+                "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
             await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
-            return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
+            await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
+            return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
         }
-
-        // Exhausted tool loops — force a text response
-        logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
-        var fallbackMsg = await chatSessionRepository.AddMessageAsync(
-            projectId, sessionId, "assistant",
-            "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
-        await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
-        await PublishChatUpdatedAsync(userId, projectId, sessionId);
-        await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
-        return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
+        finally
+        {
+            ReleaseInFlightRequest(requestKey, sessionCts);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────
@@ -312,6 +340,68 @@ public class ChatService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to clear IsGenerating flag for session {SessionId}", sessionId.SanitizeForLogging());
+        }
+    }
+
+    private async Task HandleCanceledRequestAsync(
+        string projectId,
+        string sessionId,
+        bool wasGenerating,
+        bool chargedRun,
+        int userId)
+    {
+        await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating);
+        await RefundIfNeededAsync(wasGenerating, chargedRun, userId);
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+    }
+
+    private static string BuildSessionRequestKey(string projectId, string sessionId)
+        => $"{NormalizeScope(projectId)}::{sessionId}";
+
+    private static string NormalizeScope(string projectId)
+        => IsGlobalScope(projectId) ? "__global__" : projectId.Trim();
+
+    private static CancellationTokenSource RegisterInFlightRequest(string requestKey)
+    {
+        var cancellationSource = new CancellationTokenSource();
+
+        ActiveSessionRequests.AddOrUpdate(
+            requestKey,
+            _ => cancellationSource,
+            (_, existing) =>
+            {
+                existing.Cancel();
+                existing.Dispose();
+                return cancellationSource;
+            });
+
+        return cancellationSource;
+    }
+
+    private void CancelInFlightRequest(string projectId, string sessionId)
+    {
+        var requestKey = BuildSessionRequestKey(projectId, sessionId);
+        if (!ActiveSessionRequests.TryRemove(requestKey, out var cancellationSource))
+            return;
+
+        try
+        {
+            cancellationSource.Cancel();
+        }
+        finally
+        {
+            cancellationSource.Dispose();
+        }
+    }
+
+    private static void ReleaseInFlightRequest(string requestKey, CancellationTokenSource cancellationSource)
+    {
+        if (!ActiveSessionRequests.TryGetValue(requestKey, out var current) || !ReferenceEquals(current, cancellationSource))
+            return;
+
+        if (ActiveSessionRequests.TryRemove(requestKey, out var removed))
+        {
+            removed.Dispose();
         }
     }
 
@@ -393,7 +483,12 @@ public class ChatService(
     /// Calls Haiku to generate a concise name for the chat session based on conversation context,
     /// then persists it. Failures are logged but do not propagate — naming is best-effort.
     /// </summary>
-    private async Task GenerateSessionNameAsync(string projectId, string sessionId, List<LLMMessage> conversationMessages, LLMOptions config)
+    private async Task GenerateSessionNameAsync(
+        string projectId,
+        string sessionId,
+        List<LLMMessage> conversationMessages,
+        LLMOptions config,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -414,8 +509,9 @@ public class ChatService(
                 Tools: null,
                 ModelOverride: config.Model); // Use Haiku for speed
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            var response = await llmClient.CompleteAsync(request, cts.Token);
+            using var namingTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, namingTimeout.Token);
+            var response = await llmClient.CompleteAsync(request, linkedCts.Token);
 
             var name = response.Content?.Trim();
             if (!string.IsNullOrWhiteSpace(name))
@@ -426,6 +522,10 @@ public class ChatService(
 
                 await chatSessionRepository.RenameSessionAsync(projectId, sessionId, name);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Request cancellation or session deletion should stop naming silently.
         }
         catch (Exception ex)
         {
@@ -500,11 +600,11 @@ public class ChatService(
             Keep all analysis and actions constrained to this active project.
             """;
 
-        var attachments = await chatSessionRepository.GetAttachmentsBySessionIdAsync(projectId, sessionId) ?? [];
+        var attachments = await chatSessionRepository.GetAllAttachmentsBySessionIdAsync(projectId, sessionId) ?? [];
         if (attachments.Count == 0)
             return $"{SystemPrompt}\n\n{scopePrompt}";
 
-        var builder = new System.Text.StringBuilder(SystemPrompt);
+        var builder = new StringBuilder(SystemPrompt);
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine(scopePrompt);
