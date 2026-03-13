@@ -192,6 +192,7 @@ const useStyles = makeStyles({
         flexDirection: 'row',
         backgroundColor: tokens.colorNeutralBackground1,
         borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+        transition: 'width 0.18s ease',
     },
     chatOverlayMobile: {
         position: 'fixed',
@@ -266,6 +267,17 @@ export function Layout() {
         isResizing.current = true
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
+    }, [isMobile])
+
+    const handleAutoExpandChat = useCallback((requestedWidth: number) => {
+        if (isMobile || isResizing.current) {
+            return
+        }
+
+        setChatWidth((currentWidth) => {
+            const nextWidth = Math.min(MAX_CHAT_WIDTH, Math.max(currentWidth, requestedWidth))
+            return nextWidth
+        })
     }, [isMobile])
 
     useEffect(() => {
@@ -482,6 +494,9 @@ export function Layout() {
                         <ChatDrawer
                             projectId={projectId}
                             onClose={() => setChatOpen(false)}
+                            chatWidth={chatWidth}
+                            maxChatWidth={MAX_CHAT_WIDTH}
+                            onRequestChatWidth={handleAutoExpandChat}
                         />
                     </div>
                 )}

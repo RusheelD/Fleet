@@ -63,6 +63,9 @@ const useStyles = makeStyles({
 interface ChatDrawerProps {
     projectId?: string
     onClose: () => void
+    chatWidth?: number
+    maxChatWidth?: number
+    onRequestChatWidth?: (nextWidth: number) => void
 }
 
 const DEFAULT_GENERATE_MESSAGE =
@@ -72,7 +75,13 @@ function normalizeMessageContent(value: string): string {
     return value.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
-export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
+export function ChatDrawer({
+    projectId,
+    onClose,
+    chatWidth,
+    maxChatWidth,
+    onRequestChatWidth,
+}: ChatDrawerProps) {
     const styles = useStyles()
     const queryClient = useQueryClient()
     const [message, setMessage] = useState('')
@@ -85,6 +94,7 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     const isCompact = preferences?.compactMode ?? false
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const messagesContainerRef = useRef<HTMLDivElement>(null)
 
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
     const { data: messages } = useChatMessages(projectId, activeSession)
@@ -174,6 +184,46 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [displayMessages.length, isThinking])
+
+    useEffect(() => {
+        if (!onRequestChatWidth || !chatWidth || !messagesContainerRef.current) {
+            return
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            const container = messagesContainerRef.current
+            if (!container) {
+                return
+            }
+
+            const overflowCandidates = Array.from(
+                container.querySelectorAll<HTMLElement>('[data-chat-role="assistant"] pre, [data-chat-role="assistant"] table')
+            )
+
+            let requiredExtraWidth = 0
+            for (const element of overflowCandidates) {
+                const overflowWidth = element.scrollWidth - element.clientWidth
+                if (overflowWidth > requiredExtraWidth) {
+                    requiredExtraWidth = overflowWidth
+                }
+            }
+
+            if (requiredExtraWidth <= 16) {
+                return
+            }
+
+            const requestedWidth = Math.min(
+                maxChatWidth ?? chatWidth,
+                chatWidth + requiredExtraWidth + 48,
+            )
+
+            if (requestedWidth > chatWidth + 16) {
+                onRequestChatWidth(requestedWidth)
+            }
+        })
+
+        return () => window.cancelAnimationFrame(frame)
+    }, [displayMessages, chatWidth, maxChatWidth, onRequestChatWidth])
 
     const doSend = (sessionId: string, userContent: string, generateWorkItems: boolean) => {
         setMessage('')
@@ -290,11 +340,17 @@ export function ChatDrawer({ projectId, onClose }: ChatDrawerProps) {
             />
 
             {loadingChat ? (
-                <div className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}>
+                <div
+                    ref={messagesContainerRef}
+                    className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}
+                >
                     <Spinner label="Loading chat..." />
                 </div>
             ) : (
-                <div className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}>
+                <div
+                    ref={messagesContainerRef}
+                    className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}
+                >
                     {displayMessages.map((msg) => (
                         <ChatMessage key={msg.id} message={msg} currentUserIdentity={currentUserIdentity} />
                     ))}

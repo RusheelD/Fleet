@@ -18,23 +18,41 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: '0.5rem',
         maxWidth: '100%',
+        width: '100%',
+        minWidth: 0,
+        alignItems: 'flex-start',
     },
     messageRowCompact: {
         gap: '0.375rem',
     },
     messageRowUser: {
-        alignSelf: 'flex-end',
         flexDirection: 'row-reverse',
+        justifyContent: 'flex-start',
     },
     messageRowAssistant: {
-        alignSelf: 'flex-start',
+        justifyContent: 'flex-start',
+    },
+    messageContent: {
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        flex: '1 1 auto',
+    },
+    messageContentUser: {
+        maxWidth: 'min(78%, 42rem)',
+    },
+    messageContentAssistant: {
+        maxWidth: 'min(100%, 52rem)',
     },
     messageBubble: {
         padding: '0.75rem 1rem',
         borderRadius: tokens.borderRadiusLarge,
         lineHeight: '1.5',
         fontSize: '13px',
-        maxWidth: 'min(78ch, 75vw)',
+        maxWidth: '100%',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
         boxShadow: tokens.shadow4,
     },
     messageBubbleCompact: {
@@ -44,7 +62,6 @@ const useStyles = makeStyles({
         paddingRight: '0.625rem',
         fontSize: '12px',
         lineHeight: '1.35',
-        maxWidth: 'min(68ch, 72vw)',
     },
     messageBubbleUser: {
         backgroundColor: tokens.colorBrandBackground,
@@ -83,9 +100,13 @@ const useStyles = makeStyles({
     },
     // Markdown content styles
     markdown: {
+        minWidth: 0,
+        maxWidth: '100%',
+        overflowWrap: 'anywhere',
         '& p': {
             marginTop: 0,
             marginBottom: '0.5rem',
+            overflowWrap: 'anywhere',
         },
         '& p:last-child': {
             marginBottom: 0,
@@ -97,6 +118,7 @@ const useStyles = makeStyles({
         },
         '& li': {
             marginBottom: '0.15rem',
+            overflowWrap: 'anywhere',
         },
         '& code': {
             fontFamily: tokens.fontFamilyMonospace,
@@ -104,6 +126,7 @@ const useStyles = makeStyles({
             padding: '0.1rem 0.35rem',
             borderRadius: tokens.borderRadiusMedium,
             backgroundColor: tokens.colorNeutralBackground1,
+            overflowWrap: 'anywhere',
         },
         '& pre': {
             marginTop: '0.25rem',
@@ -111,12 +134,19 @@ const useStyles = makeStyles({
             padding: '0.75rem',
             borderRadius: tokens.borderRadiusMedium,
             backgroundColor: tokens.colorNeutralBackground1,
+            boxSizing: 'border-box',
+            maxWidth: '100%',
+            display: 'block',
             overflowX: 'auto',
+            overflowY: 'hidden',
+            whiteSpace: 'pre',
             fontSize: '12px',
         },
         '& pre code': {
             padding: 0,
             backgroundColor: 'transparent',
+            whiteSpace: 'pre',
+            overflowWrap: 'normal',
         },
         '& h1, & h2, & h3, & h4': {
             marginTop: '0.5rem',
@@ -138,6 +168,10 @@ const useStyles = makeStyles({
             marginTop: '0.25rem',
             marginBottom: '0.5rem',
             fontSize: '12px',
+            display: 'block',
+            width: 'max-content',
+            maxWidth: '100%',
+            overflowX: 'auto',
         },
         '& th, & td': {
             borderTopWidth: '1px',
@@ -153,10 +187,18 @@ const useStyles = makeStyles({
             borderBottomColor: tokens.colorNeutralStroke2,
             borderLeftColor: tokens.colorNeutralStroke2,
             padding: '0.25rem 0.5rem',
+            overflowWrap: 'anywhere',
         },
         '& th': {
             fontWeight: tokens.fontWeightSemibold,
             backgroundColor: tokens.colorNeutralBackground1,
+        },
+        '& a': {
+            overflowWrap: 'anywhere',
+        },
+        '& img': {
+            maxWidth: '100%',
+            height: 'auto',
         },
         '& hr': {
             borderRightStyle: 'none',
@@ -209,21 +251,30 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
 
     return (
         <div
+            data-chat-role={message.role}
             className={mergeClasses(
                 styles.messageRow,
                 isCompact && styles.messageRowCompact,
                 message.role === 'user' ? styles.messageRowUser : styles.messageRowAssistant,
             )}
         >
-            <Avatar
-                name={message.role === 'user' ? userIdentity : 'Fleet AI'}
-                initials={message.role === 'user' ? formatInitials(userIdentity, 'Me') : 'FA'}
-                icon={message.role === 'user' ? <PersonRegular /> : <BotRegular />}
-                color={message.role === 'user' ? 'neutral' : 'brand'}
-                size={isCompact ? 24 : 28}
-            />
-            <div>
+            <div data-chat-avatar>
+                <Avatar
+                    name={message.role === 'user' ? userIdentity : 'Fleet AI'}
+                    initials={message.role === 'user' ? formatInitials(userIdentity, 'Me') : 'FA'}
+                    icon={message.role === 'user' ? <PersonRegular /> : <BotRegular />}
+                    color={message.role === 'user' ? 'neutral' : 'brand'}
+                    size={isCompact ? 24 : 28}
+                />
+            </div>
+            <div
+                className={mergeClasses(
+                    styles.messageContent,
+                    message.role === 'user' ? styles.messageContentUser : styles.messageContentAssistant,
+                )}
+            >
                 <div
+                    data-chat-bubble={message.role}
                     className={mergeClasses(
                         styles.messageBubble,
                         isCompact && styles.messageBubbleCompact,
