@@ -433,7 +433,7 @@ export function AgentMonitorPage() {
 
                 <LogPanel
                     logs={allLogs}
-                    executions={allExecutions}
+                    executions={filteredExecutions}
                     onRefresh={() => void refetchLogs()}
                     onClear={handleClearLogs}
                     isClearing={clearLogs.isPending}

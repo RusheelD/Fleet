@@ -570,6 +570,14 @@ public class RepoSandbox : IRepoSandbox
     internal static string EnsureSandboxWorkspaceRoot(string? tempPathOverride = null, string? appBaseOverride = null)
     {
         var preferredRoot = GetSandboxTempRoot(tempPathOverride);
+        var preferredBase = Path.GetDirectoryName(preferredRoot);
+
+        if (string.IsNullOrWhiteSpace(preferredBase) || !Directory.Exists(preferredBase))
+        {
+            var fallbackRoot = GetAppOwnedSandboxRoot(appBaseOverride);
+            Directory.CreateDirectory(fallbackRoot);
+            return fallbackRoot;
+        }
 
         try
         {

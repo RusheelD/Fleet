@@ -48,11 +48,14 @@ public class RepoSandboxTests
     [TestMethod]
     public void EnsureGitWorkingDirectory_FallsBackToFleetAgentTempRootWhenBothPathsAreMissing()
     {
-        var tempOverride = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var tempOverride = Path.Combine(root, "temp-base");
         var expected = Path.Combine(tempOverride, "fleet-agent");
 
         try
         {
+            Directory.CreateDirectory(tempOverride);
+
             var result = RepoSandbox.EnsureGitWorkingDirectory(
                 workingDir: null,
                 repoRoot: string.Empty,
@@ -63,8 +66,8 @@ public class RepoSandboxTests
         }
         finally
         {
-            if (Directory.Exists(tempOverride))
-                Directory.Delete(tempOverride, recursive: true);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
         }
     }
 
@@ -94,6 +97,32 @@ public class RepoSandboxTests
                 Directory.Delete(root, recursive: true);
             else if (File.Exists(blockedTempPath))
                 File.Delete(blockedTempPath);
+        }
+    }
+
+    [TestMethod]
+    public void EnsureSandboxWorkspaceRoot_FallsBackToAppOwnedDirectoryWhenTempBasePathDoesNotExist()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var missingTempBase = Path.Combine(root, "missing-temp-base");
+        var appBase = Path.Combine(root, "app-base");
+        var expected = Path.Combine(appBase, ".fleet-agent");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+
+            var result = RepoSandbox.EnsureSandboxWorkspaceRoot(
+                tempPathOverride: missingTempBase,
+                appBaseOverride: appBase);
+
+            Assert.AreEqual(expected, result);
+            Assert.IsTrue(Directory.Exists(expected));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
         }
     }
 }
