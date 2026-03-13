@@ -326,6 +326,10 @@ export function ChatDrawer({
     const toolEvents = lastSendResponse?.toolEvents ?? []
 
     const handleFileSelect = (file: File) => {
+        const resolvedSessionId = activeSession && sessions.some((session) => session.id === activeSession)
+            ? activeSession
+            : undefined
+
         const uploadToSession = (sessionId: string) => {
             const optimisticId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
             setPendingAttachments((current) => [
@@ -352,8 +356,8 @@ export function ChatDrawer({
             )
         }
 
-        if (activeSession) {
-            uploadToSession(activeSession)
+        if (resolvedSessionId) {
+            uploadToSession(resolvedSessionId)
             return
         }
 
