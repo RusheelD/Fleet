@@ -85,7 +85,7 @@ export const googleLoginRequest: RedirectRequest = {
   extraQueryParameters: withProviderHints(
     googleDomainHint,
     googleIdpHint,
-    'google.com',
+    'Google',
   ),
 }
 
