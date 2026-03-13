@@ -13,6 +13,7 @@ const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const knownAuthoritiesEnv = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
+const redirectUriEnv = import.meta.env.VITE_ENTRA_REDIRECT_URI as string | undefined
 
 export type AuthProvider = 'microsoft' | 'google' | 'github'
 
@@ -82,11 +83,18 @@ function createProviderLoginRequest(
 
 // Normalize redirect URI for localhost: Azure AD requires 'http://localhost:5250', not custom subdomains
 const getRedirectUri = () => {
+  const configured = normalizeOptional(redirectUriEnv)
+  if (configured) {
+    return configured
+  }
+
   const origin = window.location.origin
   if (origin.includes('localhost')) {
-    return 'http://localhost:5250'
+    return 'http://localhost:5250/'
   }
-  return origin
+
+  // Use trailing slash for stricter redirect URI matching with Entra.
+  return `${origin}/`
 }
 
 const redirectUri = getRedirectUri()

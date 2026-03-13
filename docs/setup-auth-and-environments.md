@@ -236,6 +236,9 @@ VITE_ENTRA_AUTHORITY=https://your-tenant.ciamlogin.com/your-tenant-id
 # API scope - api://{apiClientId}/access_as_user
 VITE_ENTRA_API_SCOPE=api://your-api-client-id/access_as_user
 
+# Optional explicit redirect URI (must exactly match Entra app registration)
+VITE_ENTRA_REDIRECT_URI=https://fleet-ai-dev.azurewebsites.net/
+
 # Environment label
 VITE_ENVIRONMENT=development
 
@@ -356,6 +359,7 @@ dotnet publish Fleet.Server -c Release -o ./publish
 | `VITE_ENTRA_CLIENT_ID` | Frontend | SPA client ID | SPA client ID | SPA client ID |
 | `VITE_ENTRA_AUTHORITY` | Frontend | `https://{tenant}.ciamlogin.com/{tid}` | Same | Same |
 | `VITE_ENTRA_API_SCOPE` | Frontend | `api://{id}/access_as_user` | Same | Same |
+| `VITE_ENTRA_REDIRECT_URI` | Frontend | `http://localhost:5250/` | `https://fleet-ai-dev.azurewebsites.net/` | `https://fleet-ai-dev.azurewebsites.net/` |
 | `VITE_ENVIRONMENT` | Frontend + Website | `development` | `staging` | `production` |
 | `VITE_WEBSITE_URL` | Frontend | `https://fleet-ai.dev` | `https://fleet-ai.dev` | `https://fleet-ai.dev` |
 | `VITE_APP_URL` | Website | `https://app-dev.fleet-ai.dev` | `https://app-staging.fleet-ai.dev` | `https://app.fleet-ai.dev` |
