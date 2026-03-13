@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, googleLoginRequest, githubLoginRequest } from '../auth'
+import { apiLoginRequest, getLoginRequest, type AuthProvider } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
@@ -10,6 +10,8 @@ interface AuthProviderProps {
     children: ReactNode
 }
 
+const LastAuthProviderStorageKey = 'fleet.last-auth-provider'
+
 export function AuthProvider({ children }: AuthProviderProps) {
     const { instance, inProgress } = useMsal()
     const isAuthenticated = useIsAuthenticated()
@@ -17,16 +19,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [isLoading, setIsLoading] = useState(false)
     const fetchedRef = useRef(false)
     const redirectingRef = useRef(false)
-    // Deduplicate concurrent acquireTokenSilent calls — all callers share one in-flight promise
+    const lastProviderRef = useRef<AuthProvider>('microsoft')
+    // Deduplicate concurrent acquireTokenSilent calls - all callers share one in-flight promise.
     const tokenPromiseRef = useRef<Promise<string | undefined> | null>(null)
 
-    const login = useCallback(async (provider?: 'microsoft' | 'google' | 'github') => {
+    useEffect(() => {
+        const persistedProvider = window.sessionStorage.getItem(LastAuthProviderStorageKey)
+        if (persistedProvider === 'microsoft' || persistedProvider === 'google' || persistedProvider === 'github') {
+            lastProviderRef.current = persistedProvider
+        }
+    }, [])
+
+    const login = useCallback(async (provider?: AuthProvider) => {
         if (inProgress === InteractionStatus.None) {
-            const request =
-                provider === 'google' ? googleLoginRequest :
-                    provider === 'github' ? githubLoginRequest :
-                        apiLoginRequest
-            await instance.loginRedirect(request)
+            const resolvedProvider: AuthProvider = provider ?? 'microsoft'
+            lastProviderRef.current = resolvedProvider
+            window.sessionStorage.setItem(LastAuthProviderStorageKey, resolvedProvider)
+            try {
+                const request = getLoginRequest(resolvedProvider)
+                console.info('[auth] loginRedirect request', {
+                    provider: resolvedProvider,
+                    authority: request.authority ?? '(msal default)',
+                })
+                await instance.loginRedirect(request)
+            } catch (error) {
+                console.error('[auth] Unable to start login redirect', {
+                    provider: resolvedProvider,
+                    error: error instanceof Error ? error.message : String(error),
+                })
+            }
         }
     }, [instance, inProgress])
 
@@ -34,6 +55,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null)
         fetchedRef.current = false
         redirectingRef.current = false
+        lastProviderRef.current = 'microsoft'
+        window.sessionStorage.removeItem(LastAuthProviderStorageKey)
         void instance.logoutRedirect({ postLogoutRedirectUri: '/' })
     }, [instance])
 
@@ -57,13 +80,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 return result.accessToken
             } catch (error: unknown) {
                 // Only redirect for genuine interaction-required errors (consent, MFA, expired session).
-                // All other failures (timing, cache, network) should NOT trigger a redirect —
+                // All other failures (timing, cache, network) should NOT trigger a redirect -
                 // that creates an infinite login loop when multiple API calls fire concurrently.
                 if (error instanceof InteractionRequiredAuthError) {
-                    // Guard against multiple concurrent redirects
+                    // Guard against multiple concurrent redirects.
                     if (!redirectingRef.current && inProgress === InteractionStatus.None) {
                         redirectingRef.current = true
-                        await instance.loginRedirect(apiLoginRequest)
+                        try {
+                            const request = getLoginRequest(lastProviderRef.current)
+                            console.info('[auth] interaction-required loginRedirect request', {
+                                provider: lastProviderRef.current,
+                                authority: request.authority ?? '(msal default)',
+                            })
+                            await instance.loginRedirect(request)
+                        } catch (redirectError) {
+                            console.error('[auth] interaction-required redirect failed', {
+                                provider: lastProviderRef.current,
+                                error: redirectError instanceof Error ? redirectError.message : String(redirectError),
+                            })
+                            await instance.loginRedirect(apiLoginRequest)
+                        }
                     }
                 } else {
                     console.warn('Silent token acquisition failed (non-interactive):', error)
@@ -81,7 +117,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
     }, [instance, inProgress])
 
-    // Wire the token getter into the proxy layer so API calls include the Bearer token
+    // Wire the token getter into the proxy layer so API calls include the Bearer token.
     useEffect(() => {
         setTokenGetter(getAccessToken)
     }, [getAccessToken])
@@ -126,7 +162,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return () => { cancelled = true }
     }, [isAuthenticated, inProgress, getAccessToken])
 
-    // Clear user state when MSAL reports not authenticated (e.g. session expired)
+    // Clear user state when MSAL reports not authenticated (e.g. session expired).
     useEffect(() => {
         if (!isAuthenticated && user) {
             setUser(null)

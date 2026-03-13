@@ -5,51 +5,100 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
  *
  * Replace the placeholder values with your Entra ID app registration details:
  * - VITE_ENTRA_CLIENT_ID: The Application (client) ID of your SPA app registration
- * - VITE_ENTRA_AUTHORITY: https://login.microsoftonline.com/{tenantId}
+ * - VITE_ENTRA_AUTHORITY: https://{tenant}.ciamlogin.com/{tenantId}
  * - VITE_ENTRA_API_SCOPE: api://{apiClientId}/access_as_user
  */
 
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
-const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
-const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
-const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | undefined
-const githubAuthority = import.meta.env.VITE_ENTRA_GITHUB_AUTHORITY as string | undefined
-const githubDomainHint = import.meta.env.VITE_ENTRA_GITHUB_DOMAIN_HINT as string | undefined
-const githubIdpHint = import.meta.env.VITE_ENTRA_GITHUB_IDP_HINT as string | undefined
+const knownAuthoritiesEnv = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
+const redirectUriEnv = import.meta.env.VITE_ENTRA_REDIRECT_URI as string | undefined
 
-function normalizeHint(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim()
-  return normalized && normalized.length > 0 ? normalized : fallback
+export type AuthProvider = 'microsoft' | 'google' | 'github'
+
+const providerDomainHints: Record<Exclude<AuthProvider, 'microsoft'>, string> = {
+  google: 'google.com',
+  github: 'github.com',
 }
 
-function withProviderHints(
-  domainHint: string | undefined,
-  idpHint: string | undefined,
-  fallbackDomainHint: string,
-): RedirectRequest['extraQueryParameters'] {
-  const resolvedDomainHint = normalizeHint(domainHint, fallbackDomainHint)
-  const resolvedIdpHint = idpHint?.trim()
+function normalizeOptional(value: string | undefined): string | undefined {
+  const normalized = value?.trim()
+  return normalized && normalized.length > 0 ? normalized : undefined
+}
+
+function parseAuthorityHost(authorityValue: string | undefined): string | undefined {
+  const normalized = normalizeOptional(authorityValue)
+  if (!normalized) {
+    return undefined
+  }
+
+  try {
+    return new URL(normalized).host
+  } catch {
+    return undefined
+  }
+}
+
+function buildKnownAuthorities(): string[] {
+  const knownAuthorities = new Set<string>()
+
+  for (const token of (knownAuthoritiesEnv ?? '').split(',')) {
+    const normalized = token.trim()
+    if (normalized.length > 0) {
+      knownAuthorities.add(normalized)
+    }
+  }
+
+  for (const authorityValue of [authority]) {
+    const host = parseAuthorityHost(authorityValue)
+    if (!host) {
+      continue
+    }
+
+    // Entra External ID / B2C authorities should be explicitly trusted by MSAL.
+    if (host.endsWith('.ciamlogin.com') || host.endsWith('.b2clogin.com')) {
+      knownAuthorities.add(host)
+    }
+  }
+
+  return [...knownAuthorities]
+}
+
+function createProviderLoginRequest(
+  provider: 'google' | 'github',
+): RedirectRequest {
+  const resolvedAuthority = authority ?? 'https://login.microsoftonline.com/common'
+  const domainHint = providerDomainHints[provider]
 
   return {
-    // domain_hint helps issuer acceleration in Entra/B2C user flows.
-    domain_hint: resolvedDomainHint,
-    // idp is optional and tenant-specific; only send it when explicitly configured.
-    ...(resolvedIdpHint && resolvedIdpHint.length > 0 ? { idp: resolvedIdpHint } : {}),
+    ...apiLoginRequest,
+    authority: resolvedAuthority,
+    // With a single app authority, provider hints accelerate home-realm discovery.
+    domainHint,
+    extraQueryParameters: { domain_hint: domainHint },
+    prompt: 'login',
   }
 }
 
 // Normalize redirect URI for localhost: Azure AD requires 'http://localhost:5250', not custom subdomains
 const getRedirectUri = () => {
+  const configured = normalizeOptional(redirectUriEnv)
+  if (configured) {
+    return configured
+  }
+
   const origin = window.location.origin
   if (origin.includes('localhost')) {
-    return 'http://localhost:5250'
+    return 'http://localhost:5250/'
   }
-  return origin
+
+  // Use trailing slash for stricter redirect URI matching with Entra.
+  return `${origin}/`
 }
 
 const redirectUri = getRedirectUri()
+const knownAuthorities = buildKnownAuthorities()
 
 if (!clientId) {
   console.warn(
@@ -62,6 +111,7 @@ const msalConfig: Configuration = {
   auth: {
     clientId: clientId ?? 'PLACEHOLDER_CLIENT_ID',
     authority: authority ?? 'https://login.microsoftonline.com/common',
+    ...(knownAuthorities.length > 0 ? { knownAuthorities } : {}),
     redirectUri: redirectUri,
     postLogoutRedirectUri: redirectUri,
   },
@@ -76,28 +126,19 @@ const msalConfig: Configuration = {
  */
 export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : ['User.Read'],
+  authority: authority ?? 'https://login.microsoftonline.com/common',
 }
 
-/** Login request that hints the user should sign in via Google */
-export const googleLoginRequest: RedirectRequest = {
-  ...apiLoginRequest,
-  authority: googleAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  extraQueryParameters: withProviderHints(
-    googleDomainHint,
-    googleIdpHint,
-    'google.com',
-  ),
-}
+export function getLoginRequest(provider: AuthProvider = 'microsoft'): RedirectRequest {
+  if (provider === 'google') {
+    return createProviderLoginRequest('google')
+  }
 
-/** Login request that hints the user should sign in via GitHub */
-export const githubLoginRequest: RedirectRequest = {
-  ...apiLoginRequest,
-  authority: githubAuthority ?? authority ?? 'https://login.microsoftonline.com/common',
-  extraQueryParameters: withProviderHints(
-    githubDomainHint,
-    githubIdpHint,
-    'github.com',
-  ),
+  if (provider === 'github') {
+    return createProviderLoginRequest('github')
+  }
+
+  return apiLoginRequest
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)
