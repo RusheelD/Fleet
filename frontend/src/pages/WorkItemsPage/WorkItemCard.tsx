@@ -95,6 +95,18 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: '0.25rem',
         flexWrap: 'wrap',
+        minWidth: 0,
+    },
+    tagBadge: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        maxWidth: '11rem',
+        minWidth: 0,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        wordBreak: 'normal',
+        overflowWrap: 'normal',
     },
     assignee: {
         display: 'flex',
@@ -140,7 +152,7 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
                     <div className={styles.tagsRow}>
                         <LevelBadge level={level} />
                         {item.tags.slice(0, 1).map((tag) => (
-                            <Badge key={tag} appearance="outline" size="small" icon={<TagRegular />}>
+                            <Badge key={tag} appearance="outline" size="small" icon={<TagRegular />} className={styles.tagBadge}>
                                 {tag}
                             </Badge>
                         ))}
@@ -170,7 +182,7 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
             <div className={styles.cardFooter}>
                 <div className={styles.tagsRow}>
                     {item.tags.slice(0, 2).map((tag) => (
-                        <Badge key={tag} appearance="outline" size="small" icon={<TagRegular />}>
+                        <Badge key={tag} appearance="outline" size="small" icon={<TagRegular />} className={styles.tagBadge}>
                             {tag}
                         </Badge>
                     ))}

@@ -290,17 +290,29 @@ const useStyles = makeStyles({
 
     /* ── Tags column ───────────────────────────────────────── */
     tagsCell: {
-        display: 'flex',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        alignItems: 'center',
         gap: '6px',
-        flexWrap: 'nowrap',
         overflow: 'hidden',
+        minWidth: 0,
     },
     tagBadge: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         fontSize: '12px',
         lineHeight: '18px',
         fontWeight: tokens.fontWeightMedium,
         paddingLeft: '8px',
         paddingRight: '8px',
+        maxWidth: '100%',
+        minWidth: 0,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        wordBreak: 'normal',
+        overflowWrap: 'normal',
     },
     resizeHandle: {
         position: 'absolute',
