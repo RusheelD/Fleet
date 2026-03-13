@@ -57,15 +57,16 @@ public class RepoSandbox : IRepoSandbox
         _branchName = branchName;
         _accessToken = accessToken;
 
-        // Create a unique temp directory
-        _repoRoot = Path.Combine(Path.GetTempPath(), "fleet-agent", Guid.NewGuid().ToString("N"));
+        // Create a unique temp directory underneath a concrete git working directory.
+        var sandboxTempRoot = EnsureGitWorkingDirectory(GetSandboxTempRoot(), repoRoot: string.Empty);
+        _repoRoot = Path.Combine(sandboxTempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repoRoot);
 
         _logger.LogInformation("Cloning {Repo} into {Path}", repoFullName, _repoRoot);
 
         // Clone with token-based auth
         var cloneUrl = $"https://x-access-token:{accessToken}@github.com/{repoFullName}.git";
-        var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: Path.GetTempPath(), cancellationToken: cancellationToken);
+        var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: sandboxTempRoot, cancellationToken: cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
 
@@ -542,18 +543,44 @@ public class RepoSandbox : IRepoSandbox
 
     private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
 
+    internal static string GetSandboxTempRoot(string? tempPathOverride = null)
+    {
+        var tempRoot = string.IsNullOrWhiteSpace(tempPathOverride)
+            ? Path.GetTempPath()
+            : tempPathOverride;
+
+        if (string.IsNullOrWhiteSpace(tempRoot))
+            throw new InvalidOperationException("A temporary directory is required to create a repo sandbox.");
+
+        return Path.Combine(tempRoot, "fleet-agent");
+    }
+
+    internal static string EnsureGitWorkingDirectory(string? workingDir, string repoRoot, string? tempPathOverride = null)
+    {
+        var effectiveWorkingDir = string.IsNullOrWhiteSpace(workingDir)
+            ? repoRoot
+            : workingDir;
+
+        if (string.IsNullOrWhiteSpace(effectiveWorkingDir))
+            effectiveWorkingDir = GetSandboxTempRoot(tempPathOverride);
+
+        Directory.CreateDirectory(effectiveWorkingDir);
+        return effectiveWorkingDir;
+    }
+
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)
     {
         // Prepend flags that disable all credential helpers and interactive prompts.
         // Without this, Git Credential Manager (GCM) on Windows opens a browser/dialog
         // asking the user to pick an account — which blocks headless server execution.
         var fullArgs = $"-c credential.helper= {arguments}";
+        var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot);
 
         var psi = new ProcessStartInfo
         {
             FileName = "git",
             Arguments = fullArgs,
-            WorkingDirectory = workingDir ?? _repoRoot,
+            WorkingDirectory = effectiveWorkingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
