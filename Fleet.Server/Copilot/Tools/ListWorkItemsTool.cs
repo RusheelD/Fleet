@@ -8,7 +8,8 @@ namespace Fleet.Server.Copilot.Tools;
 /// <summary>Lists work items in the active project or across user projects (global scope).</summary>
 public class ListWorkItemsTool(
     IWorkItemService workItemService,
-    IProjectService projectService) : IChatTool
+    IProjectService projectService,
+    IWorkItemLevelService workItemLevelService) : IChatTool
 {
     public string Name => "list_work_items";
 
@@ -52,7 +53,11 @@ public class ListWorkItemsTool(
         foreach (var project in projects)
         {
             var items = await workItemService.GetByProjectIdAsync(project.Id);
-            records.AddRange(items.Select(item => new FlattenedWorkItem(project, item)));
+            var levels = await workItemLevelService.GetByProjectIdAsync(project.Id);
+            var levelsById = levels.ToDictionary(level => level.Id);
+            var itemsByNumber = items.ToDictionary(item => item.WorkItemNumber);
+
+            records.AddRange(items.Select(item => new FlattenedWorkItem(project, item, levelsById, itemsByNumber)));
         }
 
         if (!string.IsNullOrWhiteSpace(args.State))
@@ -74,9 +79,15 @@ public class ListWorkItemsTool(
                 record.Item.Title,
                 record.Item.State,
                 record.Item.Priority,
+                record.Item.Difficulty,
                 record.Item.AssignedTo,
                 record.Item.Tags,
                 record.Item.IsAI,
+                LevelId = record.Item.LevelId,
+                LevelName = record.LevelName,
+                Type = record.LevelName,
+                Parent = record.Parent,
+                Children = record.Children,
             })
             .ToList();
 
@@ -125,5 +136,31 @@ public class ListWorkItemsTool(
 
     private sealed record ListWorkItemsArgs(string? State, string? ProjectId, string? ProjectSlug, int Limit);
 
-    private sealed record FlattenedWorkItem(ProjectDto Project, WorkItemDto Item);
+    private sealed record FlattenedWorkItem(
+        ProjectDto Project,
+        WorkItemDto Item,
+        IReadOnlyDictionary<int, WorkItemLevelDto> LevelsById,
+        IReadOnlyDictionary<int, WorkItemDto> ItemsByNumber)
+    {
+        public string? LevelName => Item.LevelId is int levelId && LevelsById.TryGetValue(levelId, out var level)
+            ? level.Name
+            : null;
+
+        public object? Parent => Item.ParentWorkItemNumber is int parentNumber
+            ? BuildReference(parentNumber)
+            : null;
+
+        public IReadOnlyList<object> Children => Item.ChildWorkItemNumbers
+            .Select(BuildReference)
+            .ToList();
+
+        private object BuildReference(int workItemNumber)
+        {
+            return new
+            {
+                Id = workItemNumber,
+                Title = ItemsByNumber.TryGetValue(workItemNumber, out var item) ? item.Title : (string?)null,
+            };
+        }
+    }
 }
