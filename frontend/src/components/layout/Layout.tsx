@@ -194,6 +194,9 @@ const useStyles = makeStyles({
         borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
         transition: 'width 0.18s ease',
     },
+    chatPaneResizing: {
+        transition: 'none',
+    },
     chatOverlayMobile: {
         position: 'fixed',
         inset: 0,
@@ -258,6 +261,7 @@ export function Layout() {
     const DEFAULT_CHAT_WIDTH = 480
     const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH)
     const isResizing = useRef(false)
+    const [isResizingActive, setIsResizingActive] = useState(false)
 
     const handleResizeStart = useCallback(() => {
         if (isMobile) {
@@ -265,6 +269,7 @@ export function Layout() {
         }
 
         isResizing.current = true
+        setIsResizingActive(true)
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
     }, [isMobile])
@@ -289,6 +294,7 @@ export function Layout() {
         const handleMouseUp = () => {
             if (isResizing.current) {
                 isResizing.current = false
+                setIsResizingActive(false)
                 document.body.style.cursor = ''
                 document.body.style.userSelect = ''
             }
@@ -480,11 +486,17 @@ export function Layout() {
                 </div>
 
                 {!isMobile && chatOpen && (
-                    <div className={styles.chatPane} style={{ width: `${chatWidth}px` }}>
+                    <div
+                        className={mergeClasses(
+                            styles.chatPane,
+                            isResizingActive && styles.chatPaneResizing,
+                        )}
+                        style={{ width: `${chatWidth}px` }}
+                    >
                         <div
                             className={mergeClasses(
                                 styles.resizeHandle,
-                                isResizing.current ? styles.resizeHandleActive : undefined,
+                                isResizingActive ? styles.resizeHandleActive : undefined,
                             )}
                             onMouseDown={handleResizeStart}
                             role="separator"

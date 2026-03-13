@@ -17,7 +17,7 @@ import type {
   CreateWorkItemRequest, UpdateWorkItemRequest,
   CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest,
 } from './'
-import type { AgentExecution, AgentInfo, LogEntry, UserProfile, UserPreferences } from '../models'
+import type { AgentExecution, AgentInfo, ChatAttachment, LogEntry, UserProfile, UserPreferences } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
@@ -655,11 +655,22 @@ export function useAttachments(projectId: string | undefined, sessionId: string 
   return useDataQuery('chat-attachments', () => getAttachments(projectId, sessionId!), [sessionId], [projectId])
 }
 
-export function useUploadAttachment(projectId: string | undefined, sessionId: string | undefined) {
+function buildAttachmentsQueryKey(projectId: string | undefined, sessionId: string) {
+  return ['chat-attachments', JSON.stringify([sessionId, projectId])]
+}
+
+export function useUploadAttachment(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => uploadAttachment(projectId, sessionId!, file),
-    onSuccess: () => {
+    mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) => uploadAttachment(projectId, sessionId, file),
+    onSuccess: (attachment, variables) => {
+      queryClient.setQueryData<ChatAttachment[]>(
+        buildAttachmentsQueryKey(projectId, variables.sessionId),
+        (current) => {
+          const existing = current ?? []
+          return [attachment, ...existing.filter((item) => item.id !== attachment.id)]
+        },
+      )
       void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
     },
   })

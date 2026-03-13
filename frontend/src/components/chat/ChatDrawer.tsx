@@ -11,7 +11,7 @@ import {
     sendChatMessage,
 } from '../../proxies'
 import { useChatGenerating, useAuth, usePreferences } from '../../hooks'
-import type { ChatMessageData, SendMessageResponse } from '../../models'
+import type { ChatAttachment, ChatMessageData, SendMessageResponse } from '../../models'
 import { resolveChatUserIdentity } from './initials'
 
 const useStyles = makeStyles({
@@ -71,6 +71,10 @@ interface ChatDrawerProps {
 const DEFAULT_GENERATE_MESSAGE =
     'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
 
+type PendingAttachment = ChatAttachment & {
+    isUploading: true
+}
+
 function normalizeMessageContent(value: string): string {
     return value.replace(/\s+/g, ' ').trim().toLowerCase()
 }
@@ -102,11 +106,16 @@ export function ChatDrawer({
     const deleteSessionMutation = useDeleteSession(projectId)
     const renameSessionMutation = useRenameSession(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
-    const uploadMutation = useUploadAttachment(projectId, activeSession)
+    const uploadMutation = useUploadAttachment(projectId)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
+    const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
 
     const sessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     const serverMessages = useMemo(() => messages ?? chatData?.messages ?? [], [messages, chatData?.messages])
+    const displayAttachments = useMemo(
+        () => [...pendingAttachments, ...(attachments ?? [])],
+        [pendingAttachments, attachments]
+    )
 
     // Detect if the active session has a pending generate on the server (e.g. after page refresh)
     const activeSessionData = useMemo(
@@ -171,6 +180,7 @@ export function ChatDrawer({
     useEffect(() => {
         if (sessions.length === 0) {
             setActiveSession(undefined)
+            setPendingAttachments([])
             return
         }
 
@@ -316,8 +326,43 @@ export function ChatDrawer({
     const toolEvents = lastSendResponse?.toolEvents ?? []
 
     const handleFileSelect = (file: File) => {
-        if (!activeSession) return
-        uploadMutation.mutate(file)
+        const uploadToSession = (sessionId: string) => {
+            const optimisticId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
+            setPendingAttachments((current) => [
+                ...current,
+                {
+                    id: optimisticId,
+                    fileName: file.name,
+                    contentLength: file.size,
+                    uploadedAt: new Date().toISOString(),
+                    isUploading: true,
+                },
+            ])
+
+            uploadMutation.mutate(
+                { sessionId, file },
+                {
+                    onSuccess: () => {
+                        setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
+                    },
+                    onError: () => {
+                        setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
+                    },
+                },
+            )
+        }
+
+        if (activeSession) {
+            uploadToSession(activeSession)
+            return
+        }
+
+        createSessionMutation.mutate('New Chat', {
+            onSuccess: (session) => {
+                setActiveSession(session.id)
+                uploadToSession(session.id)
+            },
+        })
     }
 
     return (
@@ -371,9 +416,9 @@ export function ChatDrawer({
                 </div>
             )}
             <AttachedFiles
-                attachments={attachments ?? []}
+                attachments={displayAttachments}
                 onDelete={(id) => deleteMutation.mutate(id)}
-                deleting={deleteMutation.isPending}
+                deleting={deleteMutation.isPending || uploadMutation.isPending}
             />
 
             <ChatInput

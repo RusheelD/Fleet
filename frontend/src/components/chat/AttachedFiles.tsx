@@ -14,6 +14,10 @@ import {
 import type { ChatAttachment } from '../../models'
 import { usePreferences } from '../../hooks'
 
+type AttachmentListItem = ChatAttachment & {
+    isUploading?: boolean
+}
+
 const useStyles = makeStyles({
     container: {
         display: 'flex',
@@ -40,6 +44,21 @@ const useStyles = makeStyles({
         padding: '0.125rem 0.375rem 0.125rem 0.5rem',
         maxWidth: '200px',
     },
+    chipUploading: {
+        backgroundColor: tokens.colorNeutralBackground4,
+        borderTopWidth: '1px',
+        borderRightWidth: '1px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '1px',
+        borderTopStyle: 'dashed',
+        borderRightStyle: 'dashed',
+        borderBottomStyle: 'dashed',
+        borderLeftStyle: 'dashed',
+        borderTopColor: tokens.colorNeutralStroke2,
+        borderRightColor: tokens.colorNeutralStroke2,
+        borderBottomColor: tokens.colorNeutralStroke2,
+        borderLeftColor: tokens.colorNeutralStroke2,
+    },
     chipCompact: {
         maxWidth: '170px',
         paddingTop: '0.0625rem',
@@ -59,7 +78,7 @@ const useStyles = makeStyles({
 })
 
 interface AttachedFilesProps {
-    attachments: ChatAttachment[]
+    attachments: AttachmentListItem[]
     onDelete: (id: string) => void
     deleting?: boolean
 }
@@ -74,20 +93,31 @@ export function AttachedFiles({ attachments, onDelete, deleting }: AttachedFiles
     return (
         <div className={mergeClasses(styles.container, isCompact && styles.containerCompact)}>
             {attachments.map((a) => (
-                <div key={a.id} className={mergeClasses(styles.chip, isCompact && styles.chipCompact)}>
+                <div
+                    key={a.id}
+                    className={mergeClasses(
+                        styles.chip,
+                        a.isUploading && styles.chipUploading,
+                        isCompact && styles.chipCompact,
+                    )}
+                >
                     <DocumentRegular fontSize={isCompact ? 12 : 14} />
                     <Tooltip content={`${a.fileName} (${formatSize(a.contentLength)})`} relationship="description">
                         <Text size={200} className={mergeClasses(styles.fileName, isCompact && styles.fileNameCompact)}>{a.fileName}</Text>
                     </Tooltip>
-                    <Badge appearance="filled" size={isCompact ? 'tiny' : 'small'} color="informative">
-                        {formatSize(a.contentLength)}
+                    <Badge
+                        appearance="filled"
+                        size={isCompact ? 'tiny' : 'small'}
+                        color={a.isUploading ? 'warning' : 'informative'}
+                    >
+                        {a.isUploading ? 'Uploading...' : formatSize(a.contentLength)}
                     </Badge>
                     <Button
                         appearance="subtle"
                         size="small"
                         icon={<DismissRegular />}
                         onClick={() => onDelete(a.id)}
-                        disabled={deleting}
+                        disabled={deleting || a.isUploading}
                         aria-label={`Remove ${a.fileName}`}
                     />
                 </div>
