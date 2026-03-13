@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { makeStyles, mergeClasses, tokens, Spinner } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatSuggestions, ChatInput, AttachedFiles } from './'
+import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatInput, AttachedFiles } from './'
 import { ToolEventMessage } from './ToolEventMessage'
 
 import {
@@ -18,7 +18,7 @@ const useStyles = makeStyles({
     drawer: {
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: tokens.colorNeutralBackground1,
+        backgroundColor: tokens.colorNeutralBackground2,
         flexShrink: 0,
         height: '100%',
         overflow: 'hidden',
@@ -164,7 +164,6 @@ export function ChatDrawer({
         )
         return [...serverMessages, ...unique]
     }, [serverMessages, optimisticMessages])
-    const suggestions = chatData?.suggestions ?? []
     const currentUserIdentity = resolveChatUserIdentity(user?.displayName, user?.email)
     const allowGenerateWorkItems = Boolean(projectId)
 
@@ -371,9 +370,6 @@ export function ChatDrawer({
                     <div ref={messagesEndRef} />
                 </div>
             )}
-
-            <ChatSuggestions suggestions={suggestions} onSelect={setMessage} />
-
             <AttachedFiles
                 attachments={attachments ?? []}
                 onDelete={(id) => deleteMutation.mutate(id)}

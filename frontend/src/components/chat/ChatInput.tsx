@@ -23,6 +23,7 @@ const useStyles = makeStyles({
     inputArea: {
         padding: '0.75rem 1rem',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground2,
         display: 'flex',
         flexDirection: 'column',
         gap: '0.5rem',

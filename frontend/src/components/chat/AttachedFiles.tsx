@@ -21,6 +21,7 @@ const useStyles = makeStyles({
         gap: '0.375rem',
         padding: '0.5rem 1rem',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        backgroundColor: tokens.colorNeutralBackground2,
         flexShrink: 0,
     },
     containerCompact: {
