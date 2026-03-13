@@ -5,6 +5,7 @@ using Fleet.Server.Connections;
 using Fleet.Server.Copilot;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.Data;
+using Fleet.Server.Diagnostics;
 using Fleet.Server.Exceptions;
 using Fleet.Server.GitHub;
 using Fleet.Server.LLM;
@@ -25,6 +26,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Deployment.json", optional: true, reloadOnChange: false);
 ApplyEnvironmentAliases(builder.Configuration);
 
+var repoSandboxRoot = RepoSandboxOptions.ResolveRootPath(builder.Configuration);
+Directory.CreateDirectory(repoSandboxRoot);
+
 #if DEBUG
 builder.Logging.AddSimpleConsole(options =>
 {
@@ -41,6 +45,14 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 builder.AddServiceDefaults();
 builder.AddRedisClientBuilder("cache")
     .WithOutputCache();
+
+builder.Services.Configure<RepoSandboxOptions>(options =>
+{
+    options.RootPath = repoSandboxRoot;
+});
+builder.Services.AddHostedService<GitStartupProbeHostedService>();
+builder.Services.AddHealthChecks()
+    .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
 
 // Add PostgreSQL + EF Core via Aspire integration.
 var fleetDbConnectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(builder.Configuration);

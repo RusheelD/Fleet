@@ -46,23 +46,20 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
-    public void EnsureGitWorkingDirectory_FallsBackToFleetAgentTempRootWhenBothPathsAreMissing()
+    public void EnsureGitWorkingDirectory_FallsBackToConfiguredSandboxRootWhenBothPathsAreMissing()
     {
         var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
-        var tempOverride = Path.Combine(root, "temp-base");
-        var expected = Path.Combine(tempOverride, "fleet-agent");
+        var sandboxRoot = Path.Combine(root, "configured-sandbox");
 
         try
         {
-            Directory.CreateDirectory(tempOverride);
-
             var result = RepoSandbox.EnsureGitWorkingDirectory(
                 workingDir: null,
                 repoRoot: string.Empty,
-                tempPathOverride: tempOverride);
+                sandboxRoot: sandboxRoot);
 
-            Assert.AreEqual(expected, result);
-            Assert.IsTrue(Directory.Exists(expected));
+            Assert.AreEqual(sandboxRoot, result);
+            Assert.IsTrue(Directory.Exists(sandboxRoot));
         }
         finally
         {
@@ -72,20 +69,40 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
-    public void EnsureSandboxWorkspaceRoot_FallsBackToAppOwnedDirectoryWhenTempRootIsUnavailable()
+    public void EnsureSandboxWorkspaceRoot_UsesConfiguredRootWhenAvailable()
     {
         var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
-        var blockedTempPath = Path.Combine(root, "blocked-temp");
+        var sandboxRoot = Path.Combine(root, "configured-sandbox");
+
+        try
+        {
+            var result = RepoSandbox.EnsureSandboxWorkspaceRoot(sandboxRoot);
+
+            Assert.AreEqual(sandboxRoot, result);
+            Assert.IsTrue(Directory.Exists(sandboxRoot));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void EnsureSandboxWorkspaceRoot_FallsBackToAppOwnedDirectoryWhenConfiguredRootIsUnavailable()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var blockedRoot = Path.Combine(root, "blocked-root");
         var appBase = Path.Combine(root, "app-base");
-        var expected = Path.Combine(appBase, ".fleet-agent");
+        var expected = Path.Combine(appBase, ".fleet-sandboxes");
 
         try
         {
             Directory.CreateDirectory(root);
-            File.WriteAllText(blockedTempPath, "not a directory");
+            File.WriteAllText(blockedRoot, "not a directory");
 
             var result = RepoSandbox.EnsureSandboxWorkspaceRoot(
-                tempPathOverride: blockedTempPath,
+                configuredRoot: Path.Combine(blockedRoot, "nested"),
                 appBaseOverride: appBase);
 
             Assert.AreEqual(expected, result);
@@ -95,63 +112,8 @@ public class RepoSandboxTests
         {
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
-            else if (File.Exists(blockedTempPath))
-                File.Delete(blockedTempPath);
+            else if (File.Exists(blockedRoot))
+                File.Delete(blockedRoot);
         }
-    }
-
-    [TestMethod]
-    public void EnsureSandboxWorkspaceRoot_FallsBackToAppOwnedDirectoryWhenTempBasePathDoesNotExist()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
-        var missingTempBase = Path.Combine(root, "missing-temp-base");
-        var appBase = Path.Combine(root, "app-base");
-        var expected = Path.Combine(appBase, ".fleet-agent");
-
-        try
-        {
-            Directory.CreateDirectory(root);
-
-            var result = RepoSandbox.EnsureSandboxWorkspaceRoot(
-                tempPathOverride: missingTempBase,
-                appBaseOverride: appBase);
-
-            Assert.AreEqual(expected, result);
-            Assert.IsTrue(Directory.Exists(expected));
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [TestMethod]
-    public void BuildGitProcessPath_AppendsCommonGitDirectories()
-    {
-        var initial = OperatingSystem.IsWindows() ? @"C:\tools" : "/app/bin";
-
-        var result = RepoSandbox.BuildGitProcessPath(initial);
-
-        if (OperatingSystem.IsWindows())
-        {
-            StringAssert.Contains(result, @"C:\tools");
-            StringAssert.Contains(result, "Git");
-        }
-        else
-        {
-            StringAssert.Contains(result, "/app/bin");
-            StringAssert.Contains(result, "/usr/bin");
-        }
-    }
-
-    [TestMethod]
-    public void ResolveGitExecutable_ReturnsConfiguredPathWhenProvided()
-    {
-        const string configuredPath = "/custom/git";
-
-        var result = RepoSandbox.ResolveGitExecutable(configuredPath);
-
-        Assert.AreEqual(configuredPath, result);
     }
 }

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Agents;
 
@@ -14,6 +15,9 @@ namespace Fleet.Server.Agents;
 public class RepoSandbox : IRepoSandbox
 {
     private readonly ILogger<RepoSandbox> _logger;
+    private readonly string _sandboxRoot;
+    private readonly string _gitExecutable;
+    private readonly string _gitProcessPath;
     private string _repoRoot = string.Empty;
     private string _repoFullName = string.Empty;
     private string _branchName = string.Empty;
@@ -37,24 +41,15 @@ public class RepoSandbox : IRepoSandbox
         ".lock", ".min.js", ".min.css",
     };
 
-    private static readonly string[] CommonUnixGitLocations =
-    [
-        "/usr/bin/git",
-        "/usr/local/bin/git",
-        "/bin/git",
-    ];
-
-    private static readonly string[] CommonWindowsGitLocations =
-    [
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "cmd", "git.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "git.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "cmd", "git.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "bin", "git.exe"),
-    ];
-
-    public RepoSandbox(ILogger<RepoSandbox> logger)
+    public RepoSandbox(
+        ILogger<RepoSandbox> logger,
+        IOptions<RepoSandboxOptions> options,
+        IConfiguration configuration)
     {
         _logger = logger;
+        _sandboxRoot = EnsureSandboxWorkspaceRoot(options.Value.RootPath);
+        _gitProcessPath = GitExecutableResolver.BuildProcessPath(Environment.GetEnvironmentVariable("PATH"));
+        _gitExecutable = GitExecutableResolver.Resolve(configuration, _gitProcessPath);
     }
 
     public string RepoRoot => _repoRoot;
@@ -73,16 +68,15 @@ public class RepoSandbox : IRepoSandbox
         _branchName = branchName;
         _accessToken = accessToken;
 
-        // Create a unique temp directory underneath a concrete git working directory.
-        var sandboxTempRoot = EnsureSandboxWorkspaceRoot();
-        _repoRoot = Path.Combine(sandboxTempRoot, Guid.NewGuid().ToString("N"));
+        // Create a unique repo directory underneath the configured sandbox root.
+        _repoRoot = Path.Combine(_sandboxRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repoRoot);
 
         _logger.LogInformation("Cloning {Repo} into {Path}", repoFullName, _repoRoot);
 
         // Clone with token-based auth
         var cloneUrl = $"https://x-access-token:{accessToken}@github.com/{repoFullName}.git";
-        var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: sandboxTempRoot, cancellationToken: cancellationToken);
+        var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: _sandboxRoot, cancellationToken: cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
 
@@ -559,18 +553,6 @@ public class RepoSandbox : IRepoSandbox
 
     private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
 
-    internal static string GetSandboxTempRoot(string? tempPathOverride = null)
-    {
-        var tempRoot = string.IsNullOrWhiteSpace(tempPathOverride)
-            ? Path.GetTempPath()
-            : tempPathOverride;
-
-        if (string.IsNullOrWhiteSpace(tempRoot))
-            throw new InvalidOperationException("A temporary directory is required to create a repo sandbox.");
-
-        return Path.Combine(tempRoot, "fleet-agent");
-    }
-
     internal static string GetAppOwnedSandboxRoot(string? appBaseOverride = null)
     {
         var appBase = string.IsNullOrWhiteSpace(appBaseOverride)
@@ -580,20 +562,14 @@ public class RepoSandbox : IRepoSandbox
         if (string.IsNullOrWhiteSpace(appBase))
             throw new InvalidOperationException("An app-owned base directory is required to create a repo sandbox fallback.");
 
-        return Path.Combine(appBase, ".fleet-agent");
+        return Path.Combine(appBase, ".fleet-sandboxes");
     }
 
-    internal static string EnsureSandboxWorkspaceRoot(string? tempPathOverride = null, string? appBaseOverride = null)
+    internal static string EnsureSandboxWorkspaceRoot(string? configuredRoot, string? appBaseOverride = null)
     {
-        var preferredRoot = GetSandboxTempRoot(tempPathOverride);
-        var preferredBase = Path.GetDirectoryName(preferredRoot);
-
-        if (string.IsNullOrWhiteSpace(preferredBase) || !Directory.Exists(preferredBase))
-        {
-            var fallbackRoot = GetAppOwnedSandboxRoot(appBaseOverride);
-            Directory.CreateDirectory(fallbackRoot);
-            return fallbackRoot;
-        }
+        var preferredRoot = string.IsNullOrWhiteSpace(configuredRoot)
+            ? RepoSandboxOptions.GetDefaultRootPath()
+            : configuredRoot;
 
         try
         {
@@ -608,79 +584,17 @@ public class RepoSandbox : IRepoSandbox
         }
     }
 
-    internal static string EnsureGitWorkingDirectory(string? workingDir, string repoRoot, string? tempPathOverride = null)
+    internal static string EnsureGitWorkingDirectory(string? workingDir, string repoRoot, string? sandboxRoot = null)
     {
         var effectiveWorkingDir = string.IsNullOrWhiteSpace(workingDir)
             ? repoRoot
             : workingDir;
 
         if (string.IsNullOrWhiteSpace(effectiveWorkingDir))
-            effectiveWorkingDir = EnsureSandboxWorkspaceRoot(tempPathOverride);
+            effectiveWorkingDir = EnsureSandboxWorkspaceRoot(sandboxRoot);
 
         Directory.CreateDirectory(effectiveWorkingDir);
         return effectiveWorkingDir;
-    }
-
-    internal static string BuildGitProcessPath(string? existingPath = null)
-    {
-        var separator = OperatingSystem.IsWindows() ? ';' : ':';
-        var segments = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(existingPath))
-        {
-            segments.AddRange(existingPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        }
-
-        foreach (var extra in (OperatingSystem.IsWindows() ? CommonWindowsGitLocations : CommonUnixGitLocations).Select(Path.GetDirectoryName))
-        {
-            if (string.IsNullOrWhiteSpace(extra))
-                continue;
-
-            if (segments.Any(path => string.Equals(path, extra, StringComparison.OrdinalIgnoreCase)))
-                continue;
-
-            segments.Add(extra);
-        }
-
-        return string.Join(separator, segments);
-    }
-
-    internal static string ResolveGitExecutable(string? configuredPath = null, string? pathEnvironment = null)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath))
-            return configuredPath;
-
-        var envPath = Environment.GetEnvironmentVariable("GIT_EXECUTABLE_PATH");
-        if (!string.IsNullOrWhiteSpace(envPath))
-            return envPath;
-
-        foreach (var candidate in GetGitExecutableCandidates(pathEnvironment))
-        {
-            if (File.Exists(candidate))
-                return candidate;
-        }
-
-        return "git";
-    }
-
-    private static IEnumerable<string> GetGitExecutableCandidates(string? pathEnvironment)
-    {
-        var fileName = OperatingSystem.IsWindows() ? "git.exe" : "git";
-
-        foreach (var candidate in OperatingSystem.IsWindows() ? CommonWindowsGitLocations : CommonUnixGitLocations)
-        {
-            if (!string.IsNullOrWhiteSpace(candidate))
-                yield return candidate;
-        }
-
-        if (string.IsNullOrWhiteSpace(pathEnvironment))
-            yield break;
-
-        var separator = OperatingSystem.IsWindows() ? ';' : ':';
-        foreach (var segment in pathEnvironment.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            yield return Path.Combine(segment, fileName);
-        }
     }
 
     private static InvalidOperationException CreateGitStartException(
@@ -696,8 +610,8 @@ public class RepoSandbox : IRepoSandbox
                 exception);
         }
 
-        var gitOnPath = GetGitExecutableCandidates(pathEnvironment).Any(File.Exists);
-        if (!gitOnPath && gitExecutable.Equals("git", StringComparison.OrdinalIgnoreCase))
+        var gitOnPath = GitExecutableResolver.IsGitAvailableOnPath(pathEnvironment);
+        if (!gitOnPath && (gitExecutable.Equals("git", StringComparison.OrdinalIgnoreCase) || gitExecutable.Equals("git.exe", StringComparison.OrdinalIgnoreCase)))
         {
             return new InvalidOperationException(
                 "Git executable could not be found. Install git on the host, add it to PATH, or set GIT_EXECUTABLE_PATH to the full git binary path.",
@@ -715,13 +629,11 @@ public class RepoSandbox : IRepoSandbox
         // Without this, Git Credential Manager (GCM) on Windows opens a browser/dialog
         // asking the user to pick an account — which blocks headless server execution.
         var fullArgs = $"-c credential.helper= {arguments}";
-        var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot);
-        var processPath = BuildGitProcessPath(Environment.GetEnvironmentVariable("PATH"));
-        var gitExecutable = ResolveGitExecutable(pathEnvironment: processPath);
+        var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot, _sandboxRoot);
 
         var psi = new ProcessStartInfo
         {
-            FileName = gitExecutable,
+            FileName = _gitExecutable,
             Arguments = fullArgs,
             WorkingDirectory = effectiveWorkingDir,
             RedirectStandardOutput = true,
@@ -731,7 +643,7 @@ public class RepoSandbox : IRepoSandbox
         };
 
         // Prevent any interactive credential prompt from GCM or git itself
-        psi.Environment["PATH"] = processPath;
+        psi.Environment["PATH"] = _gitProcessPath;
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["GCM_INTERACTIVE"] = "never";
         psi.Environment["GIT_ASKPASS"] = "";
@@ -755,7 +667,7 @@ public class RepoSandbox : IRepoSandbox
         }
         catch (Win32Exception ex)
         {
-            throw CreateGitStartException(ex, effectiveWorkingDir, gitExecutable, processPath);
+            throw CreateGitStartException(ex, effectiveWorkingDir, _gitExecutable, _gitProcessPath);
         }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
