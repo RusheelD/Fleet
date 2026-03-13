@@ -205,8 +205,7 @@ const useStyles = makeStyles({
 
     /* ── Tags column ───────────────────────────────────────── */
     tagsCell: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        display: 'flex',
         alignItems: 'center',
         gap: '6px',
         overflow: 'hidden',
@@ -221,6 +220,7 @@ const useStyles = makeStyles({
         fontWeight: tokens.fontWeightMedium,
         paddingLeft: '8px',
         paddingRight: '8px',
+        flex: '1 1 0',
         maxWidth: '100%',
         minWidth: 0,
         whiteSpace: 'nowrap',
