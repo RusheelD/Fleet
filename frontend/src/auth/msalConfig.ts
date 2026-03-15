@@ -5,13 +5,18 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
  *
  * Replace the placeholder values with your Entra ID app registration details:
  * - VITE_ENTRA_CLIENT_ID: The Application (client) ID of your SPA app registration
- * - VITE_ENTRA_AUTHORITY: https://login.microsoftonline.com/{tenantId}
+ * - VITE_ENTRA_AUTHORITY: https://{tenant-name}.ciamlogin.com/{tenant-id}
  * - VITE_ENTRA_API_SCOPE: api://{apiClientId}/access_as_user
+ * - VITE_ENTRA_KNOWN_AUTHORITIES: {tenant-name}.ciamlogin.com
  */
 
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
+const knownAuthorities = (import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined)
+  ?.split(',')
+  .map(value => value.trim())
+  .filter(value => value.length > 0)
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
 const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
 const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | undefined
@@ -62,6 +67,7 @@ const msalConfig: Configuration = {
   auth: {
     clientId: clientId ?? 'PLACEHOLDER_CLIENT_ID',
     authority: authority ?? 'https://login.microsoftonline.com/common',
+    knownAuthorities: knownAuthorities && knownAuthorities.length > 0 ? knownAuthorities : undefined,
     redirectUri: redirectUri,
     postLogoutRedirectUri: redirectUri,
   },

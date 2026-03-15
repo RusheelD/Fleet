@@ -14,7 +14,6 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: fleet-ai-dev
-  AZURE_RESOURCE_GROUP: fleet-dev_group
   IMAGE_NAME: fleet-ai-dev
   REPO_SANDBOX_ROOT: /tmp/fleet-sandboxes
   GIT_EXECUTABLE_PATH: /usr/bin/git
@@ -25,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -33,54 +33,100 @@ jobs:
       - name: Azure login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_AAF77799CFC646B596227A77F28AADFA }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BEB8E833354143C98782FEC2A188D874 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_42E2C02FC04A4D8380E7AE899CA3E6A4 }}
+
+      - name: Validate ACR configuration
+        shell: bash
+        run: |
+          actual_login_server="$(az acr show --name "${{ secrets.ACR_REGISTRY }}" --query loginServer -o tsv)"
+          if [ "$actual_login_server" != "${{ secrets.ACR_LOGIN_SERVER }}" ]; then
+            echo "ACR login server mismatch. Registry '${{ secrets.ACR_REGISTRY }}' resolves to '$actual_login_server', expected '${{ secrets.ACR_LOGIN_SERVER }}'." >&2
+            exit 1
+          fi
+
+      - name: Resolve ACR password
+        id: acr-password
+        shell: bash
+        env:
+          ACR_PASSWORD1: ${{ secrets.ACR_PASSWORD1 }}
+          ACR_PASSWORD2: ${{ secrets.ACR_PASSWORD2 }}
+        run: |
+          if [ -n "$ACR_PASSWORD1" ]; then
+            echo "::add-mask::$ACR_PASSWORD1"
+            {
+              echo "value<<EOF"
+              echo "$ACR_PASSWORD1"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          elif [ -n "$ACR_PASSWORD2" ]; then
+            echo "::add-mask::$ACR_PASSWORD2"
+            {
+              echo "value<<EOF"
+              echo "$ACR_PASSWORD2"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "Neither ACR_PASSWORD1 nor ACR_PASSWORD2 is configured." >&2
+            exit 1
+          fi
 
       - name: Log in to container registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.AZURE_ACR_LOGIN_SERVER }}
-          username: ${{ secrets.AZURE_ACR_USERNAME }}
-          password: ${{ secrets.AZURE_ACR_PASSWORD }}
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ steps.acr-password.outputs.value }}
 
       - name: Build Fleet image
         shell: bash
         run: |
           docker build \
-            --tag "${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
-            --tag "${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest" \
+            --build-arg VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID }}" \
+            --build-arg VITE_ENTRA_AUTHORITY="${{ secrets.VITE_ENTRA_AUTHORITY }}" \
+            --build-arg VITE_ENTRA_API_SCOPE="${{ secrets.VITE_ENTRA_API_SCOPE }}" \
+            --build-arg VITE_ENTRA_KNOWN_AUTHORITIES="${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}" \
+            --build-arg VITE_ENVIRONMENT="${{ secrets.VITE_ENVIRONMENT }}" \
+            --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest" \
             .
 
       - name: Push Fleet image
         shell: bash
         run: |
-          docker push "${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          docker push "${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
 
       - name: Configure Azure Web App container
         shell: bash
         run: |
           az webapp config container set \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --container-image-name "${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
-            --container-registry-url "https://${{ secrets.AZURE_ACR_LOGIN_SERVER }}" \
-            --container-registry-user "${{ secrets.AZURE_ACR_USERNAME }}" \
-            --container-registry-password "${{ secrets.AZURE_ACR_PASSWORD }}"
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --container-image-name "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --container-registry-url "https://${{ secrets.ACR_LOGIN_SERVER }}" \
+            --container-registry-user "${{ secrets.ACR_USERNAME }}" \
+            --container-registry-password "${{ steps.acr-password.outputs.value }}"
 
       - name: Configure Azure Web App settings
         shell: bash
         run: |
           az webapp config appsettings set \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --settings \
-              WEBSITES_PORT=${{ env.WEBSITES_PORT }} \
-              GIT_EXECUTABLE_PATH=${{ env.GIT_EXECUTABLE_PATH }} \
-              REPO_SANDBOX_ROOT=${{ env.REPO_SANDBOX_ROOT }}
+              "WEBSITES_PORT=${{ env.WEBSITES_PORT }}" \
+              "GIT_EXECUTABLE_PATH=${{ env.GIT_EXECUTABLE_PATH }}" \
+              "REPO_SANDBOX_ROOT=${{ env.REPO_SANDBOX_ROOT }}" \
+              "AZUREAD__INSTANCE=${{ secrets.AZUREAD__INSTANCE }}" \
+              "AZUREAD__TENANTID=${{ secrets.AZUREAD__TENANTID }}" \
+              "AZUREAD__CLIENTID=${{ secrets.AZUREAD__CLIENTID }}" \
+              "AZUREAD__AUDIENCE=${{ secrets.AZUREAD__AUDIENCE }}"
 
       - name: Restart Azure Web App
         shell: bash
         run: |
           az webapp restart \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}"
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"
