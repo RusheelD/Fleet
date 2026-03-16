@@ -36,7 +36,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_AAF77799CFC646B596227A77F28AADFA }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BEB8E833354143C98782FEC2A188D874 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_42E2C02FC04A4D8380E7AE899CA3E6A4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
 
       - name: Validate target App Service
         shell: bash
