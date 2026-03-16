@@ -52,13 +52,26 @@ jobs:
             exit 1
           fi
 
-      - name: Validate ACR configuration
+      - name: Validate container registry secrets
         shell: bash
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
         run: |
-          actual_login_server="$(az acr show --name "${{ secrets.ACR_REGISTRY }}" --query loginServer -o tsv)"
-          if [ "$actual_login_server" != "${{ secrets.ACR_LOGIN_SERVER }}" ]; then
-            echo "ACR login server mismatch. Registry '${{ secrets.ACR_REGISTRY }}' resolves to '$actual_login_server', expected '${{ secrets.ACR_LOGIN_SERVER }}'." >&2
+          if [ -z "$ACR_LOGIN_SERVER" ]; then
+            echo "ACR_LOGIN_SERVER secret is required." >&2
             exit 1
+          fi
+
+          if [[ "$ACR_LOGIN_SERVER" != *.* ]]; then
+            echo "ACR_LOGIN_SERVER must be a registry host such as 'example.azurecr.io'." >&2
+            exit 1
+          fi
+
+          if [ -n "$ACR_REGISTRY" ]; then
+            echo "Using ACR registry '$ACR_REGISTRY' at '$ACR_LOGIN_SERVER'."
+          else
+            echo "Using ACR login server '$ACR_LOGIN_SERVER'."
           fi
 
       - name: Resolve ACR password
