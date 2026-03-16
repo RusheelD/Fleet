@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - website
+      - main
     paths:
       - "website/**"
       - ".github/workflows/azure-static-web-apps-black-island-0c460421e.yml"
