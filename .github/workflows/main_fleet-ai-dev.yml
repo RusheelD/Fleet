@@ -52,12 +52,12 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare container registry settings
-        id: acr
+      - name: Validate container registry secrets
         shell: bash
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
           ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
         run: |
           if [ -z "$ACR_LOGIN_SERVER" ]; then
             echo "ACR_LOGIN_SERVER secret is required." >&2
@@ -69,18 +69,16 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$ACR_REGISTRY" ]; then
-            echo "ACR_REGISTRY secret is required for 'az acr login'." >&2
+          if [ -z "$ACR_USERNAME" ]; then
+            echo "ACR_USERNAME secret is required for docker registry login." >&2
             exit 1
           fi
 
-          registry_name="$ACR_REGISTRY"
-          if [[ "$registry_name" == *.* ]]; then
-            registry_name="${registry_name%%.*}"
+          if [ -n "$ACR_REGISTRY" ]; then
+            echo "Using ACR registry '$ACR_REGISTRY' at '$ACR_LOGIN_SERVER'."
+          else
+            echo "Using ACR login server '$ACR_LOGIN_SERVER'."
           fi
-
-          echo "registry_name=$registry_name" >> "$GITHUB_OUTPUT"
-          echo "Using ACR registry '$registry_name' at '$ACR_LOGIN_SERVER'."
 
       - name: Resolve ACR password
         id: acr-password
@@ -108,10 +106,12 @@ jobs:
             exit 1
           fi
 
-      - name: Log in to Azure Container Registry
-        shell: bash
-        run: |
-          az acr login --name "${{ steps.acr.outputs.registry_name }}"
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ steps.acr-password.outputs.value }}
 
       - name: Build Fleet image
         shell: bash
@@ -133,21 +133,16 @@ jobs:
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
 
-      - name: Verify image was pushed to ACR
+      - name: Verify image was pushed to registry
         shell: bash
         run: |
-          pushed_tag="$(az acr repository show-tags \
-            --name "${{ steps.acr.outputs.registry_name }}" \
-            --repository "${{ env.IMAGE_NAME }}" \
-            --query "[?@=='${{ env.IMAGE_TAG }}'] | [0]" \
-            -o tsv)"
-
-          if [ "$pushed_tag" != "${{ env.IMAGE_TAG }}" ]; then
-            echo "Image '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}' was not found in ACR after push." >&2
+          image_ref="${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          if ! docker manifest inspect "$image_ref" > /dev/null; then
+            echo "Image '$image_ref' was not found in the registry after push." >&2
             exit 1
           fi
 
-          echo "Confirmed pushed image '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}' in ACR."
+          echo "Confirmed pushed image '$image_ref' in the registry."
 
       - name: Configure Azure Web App container
         shell: bash
