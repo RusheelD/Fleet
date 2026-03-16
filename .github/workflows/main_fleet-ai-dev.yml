@@ -1,4 +1,4 @@
-name: Build and deploy Fleet container to Azure Web App - fleet-ai-dev
+name: Build and publish Fleet container image - fleet-ai-dev
 
 on:
   push:
@@ -13,44 +13,18 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: fleet-ai-dev
   IMAGE_NAME: fleet-ai-dev
   IMAGE_TAG: ${{ github.sha }}
-  REPO_SANDBOX_ROOT: /tmp/fleet-sandboxes
-  GIT_EXECUTABLE_PATH: /usr/bin/git
-  WEBSITES_PORT: "8080"
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_AAF77799CFC646B596227A77F28AADFA }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BEB8E833354143C98782FEC2A188D874 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
-
-      - name: Validate target App Service
-        shell: bash
-        run: |
-          is_linux="$(az webapp show \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --query "reserved" \
-            -o tsv)"
-
-          if [ "$is_linux" != "true" ]; then
-            echo "App Service '${{ env.AZURE_WEBAPP_NAME }}' must be a Linux web app for custom container deployment." >&2
-            exit 1
-          fi
 
       - name: Validate container registry secrets
         shell: bash
@@ -143,60 +117,3 @@ jobs:
           fi
 
           echo "Confirmed pushed image '$image_ref' in the registry."
-
-      - name: Configure Azure Web App container
-        shell: bash
-        run: |
-          az webapp config container set \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --container-image-name "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
-            --container-registry-url "https://${{ secrets.ACR_LOGIN_SERVER }}" \
-            --container-registry-user "${{ secrets.ACR_USERNAME }}" \
-            --container-registry-password "${{ steps.acr-password.outputs.value }}"
-
-      - name: Show configured Azure Web App container
-        shell: bash
-        run: |
-          az webapp config container show \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"
-
-      - name: Configure Azure Web App settings
-        shell: bash
-        run: |
-          az webapp config appsettings set \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --settings \
-              "WEBSITES_PORT=${{ env.WEBSITES_PORT }}" \
-              "GIT_EXECUTABLE_PATH=${{ env.GIT_EXECUTABLE_PATH }}" \
-              "REPO_SANDBOX_ROOT=${{ env.REPO_SANDBOX_ROOT }}" \
-              "AZUREAD__INSTANCE=${{ secrets.AZUREAD__INSTANCE }}" \
-              "AZUREAD__TENANTID=${{ secrets.AZUREAD__TENANTID }}" \
-              "AZUREAD__CLIENTID=${{ secrets.AZUREAD__CLIENTID }}" \
-              "AZUREAD__AUDIENCE=${{ secrets.AZUREAD__AUDIENCE }}"
-
-      - name: Restart Azure Web App
-        shell: bash
-        run: |
-          az webapp restart \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"
-
-      - name: Wait for deployed app health
-        shell: bash
-        run: |
-          health_url="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent --show-error "$health_url" > /dev/null; then
-              echo "Fleet is healthy at $health_url"
-              exit 0
-            fi
-
-            echo "Waiting for Fleet to become healthy (attempt $attempt/20)..."
-            sleep 15
-          done
-
-          echo "Fleet did not become healthy after deployment. Check App Service log stream for container startup details." >&2
-          exit 1
