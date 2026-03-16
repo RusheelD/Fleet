@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, googleLoginRequest, githubLoginRequest } from '../auth'
+import { apiLoginRequest, googleLoginRequest, githubLoginRequest, redirectUri } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
@@ -34,7 +34,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null)
         fetchedRef.current = false
         redirectingRef.current = false
-        void instance.logoutRedirect({ postLogoutRedirectUri: '/' })
+        void instance.logoutRedirect({ postLogoutRedirectUri: redirectUri })
     }, [instance])
 
     const getAccessToken = useCallback(async (): Promise<string | undefined> => {

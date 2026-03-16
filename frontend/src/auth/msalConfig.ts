@@ -8,11 +8,13 @@ import { PublicClientApplication, type Configuration, type RedirectRequest } fro
  * - VITE_ENTRA_AUTHORITY: https://{tenant-name}.ciamlogin.com/{tenant-id}
  * - VITE_ENTRA_API_SCOPE: api://{apiClientId}/access_as_user
  * - VITE_ENTRA_KNOWN_AUTHORITIES: {tenant-name}.ciamlogin.com
+ * - VITE_ENTRA_REDIRECT_URI: The exact redirect URI registered for the SPA app
  */
 
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
 const authority = import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined
 const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
+const configuredRedirectUri = import.meta.env.VITE_ENTRA_REDIRECT_URI as string | undefined
 const knownAuthorities = (import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined)
   ?.split(',')
   .map(value => value.trim())
@@ -45,16 +47,31 @@ function withProviderHints(
   }
 }
 
-// Normalize redirect URI for localhost: Azure AD requires 'http://localhost:5250', not custom subdomains
-const getRedirectUri = () => {
-  const origin = window.location.origin
-  if (origin.includes('localhost')) {
-    return 'http://localhost:5250'
+function ensureRootRedirectUriHasTrailingSlash(value: string): string {
+  try {
+    const parsed = new URL(value)
+    const isOriginOnly = parsed.pathname === '/' && !parsed.search && !parsed.hash
+    return isOriginOnly && !value.endsWith('/') ? `${value}/` : value
+  } catch {
+    return value
   }
-  return origin
 }
 
-const redirectUri = getRedirectUri()
+function resolveRedirectUri(): string {
+  const explicit = configuredRedirectUri?.trim()
+  if (explicit) {
+    return ensureRootRedirectUriHasTrailingSlash(explicit)
+  }
+
+  const origin = window.location.origin
+  if (origin.includes('localhost')) {
+    return 'http://localhost:5250/'
+  }
+
+  return ensureRootRedirectUriHasTrailingSlash(origin)
+}
+
+export const redirectUri = resolveRedirectUri()
 
 if (!clientId) {
   console.warn(
