@@ -15,6 +15,7 @@ on:
 env:
   AZURE_WEBAPP_NAME: fleet-ai-dev
   IMAGE_NAME: fleet-ai-dev
+  IMAGE_TAG: ${{ github.sha }}
   REPO_SANDBOX_ROOT: /tmp/fleet-sandboxes
   GIT_EXECUTABLE_PATH: /usr/bin/git
   WEBSITES_PORT: "8080"
@@ -36,6 +37,20 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_AAF77799CFC646B596227A77F28AADFA }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BEB8E833354143C98782FEC2A188D874 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_42E2C02FC04A4D8380E7AE899CA3E6A4 }}
+
+      - name: Validate target App Service
+        shell: bash
+        run: |
+          is_linux="$(az webapp show \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query "reserved" \
+            -o tsv)"
+
+          if [ "$is_linux" != "true" ]; then
+            echo "App Service '${{ env.AZURE_WEBAPP_NAME }}' must be a Linux web app for custom container deployment." >&2
+            exit 1
+          fi
 
       - name: Validate ACR configuration
         shell: bash
@@ -83,19 +98,20 @@ jobs:
         shell: bash
         run: |
           docker build \
+            --pull \
             --build-arg VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID }}" \
             --build-arg VITE_ENTRA_AUTHORITY="${{ secrets.VITE_ENTRA_AUTHORITY }}" \
             --build-arg VITE_ENTRA_API_SCOPE="${{ secrets.VITE_ENTRA_API_SCOPE }}" \
             --build-arg VITE_ENTRA_KNOWN_AUTHORITIES="${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}" \
             --build-arg VITE_ENVIRONMENT="${{ secrets.VITE_ENVIRONMENT }}" \
-            --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
             --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest" \
             .
 
       - name: Push Fleet image
         shell: bash
         run: |
-          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
 
       - name: Configure Azure Web App container
@@ -104,10 +120,17 @@ jobs:
           az webapp config container set \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --container-image-name "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --container-image-name "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
             --container-registry-url "https://${{ secrets.ACR_LOGIN_SERVER }}" \
             --container-registry-user "${{ secrets.ACR_USERNAME }}" \
             --container-registry-password "${{ steps.acr-password.outputs.value }}"
+
+      - name: Show configured Azure Web App container
+        shell: bash
+        run: |
+          az webapp config container show \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"
 
       - name: Configure Azure Web App settings
         shell: bash
@@ -130,3 +153,20 @@ jobs:
           az webapp restart \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"
+
+      - name: Wait for deployed app health
+        shell: bash
+        run: |
+          health_url="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "$health_url" > /dev/null; then
+              echo "Fleet is healthy at $health_url"
+              exit 0
+            fi
+
+            echo "Waiting for Fleet to become healthy (attempt $attempt/20)..."
+            sleep 15
+          done
+
+          echo "Fleet did not become healthy after deployment. Check App Service log stream for container startup details." >&2
+          exit 1
