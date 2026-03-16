@@ -4,7 +4,7 @@
  */
 
 const PLACEHOLDER_APP_URL = 'https://app.your-domain.com'
-const DEFAULT_APP_URL = 'https://fleet-ai-dev.azurewebsites.net'
+const DEFAULT_APP_URL = 'https://app.fleet-ai.dev'
 
 function normalizeAppUrl(rawValue?: string): string {
     const value = rawValue?.trim()
