@@ -121,6 +121,7 @@ jobs:
             --build-arg VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID }}" \
             --build-arg VITE_ENTRA_AUTHORITY="${{ secrets.VITE_ENTRA_AUTHORITY }}" \
             --build-arg VITE_ENTRA_API_SCOPE="${{ secrets.VITE_ENTRA_API_SCOPE }}" \
+            --build-arg VITE_ENTRA_REDIRECT_URI="https://app.fleet-ai.dev/" \
             --build-arg VITE_ENTRA_KNOWN_AUTHORITIES="${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}" \
             --build-arg VITE_ENVIRONMENT="${{ secrets.VITE_ENVIRONMENT }}" \
             --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
