@@ -80,12 +80,38 @@ jobs:
             exit 1
           fi
 
+      - name: Debug container registry connectivity
+        shell: bash
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+        run: |
+          echo "Docker version:"
+          docker version
+          echo
+          echo "Container registry debug:"
+          echo "  Registry name: ${ACR_REGISTRY:-<unset>}"
+          echo "  Login server: $ACR_LOGIN_SERVER"
+          echo
+          echo "DNS lookup:"
+          getent hosts "$ACR_LOGIN_SERVER" || nslookup "$ACR_LOGIN_SERVER" || true
+          echo
+          echo "HTTPS probe to registry /v2/:"
+          probe_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "https://$ACR_LOGIN_SERVER/v2/" || true)"
+          echo "  HTTP status: ${probe_status:-curl_failed}"
+
       - name: Log in to container registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ACR_LOGIN_SERVER }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ steps.acr-password.outputs.value }}
+
+      - name: Show image tags
+        shell: bash
+        run: |
+          echo "Commit tag: ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "Latest tag: ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
 
       - name: Build Fleet image
         shell: bash
