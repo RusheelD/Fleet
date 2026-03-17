@@ -45,9 +45,10 @@ COPY --from=build /app/publish ./
 
 ENV GIT_EXECUTABLE_PATH=/usr/bin/git
 ENV REPO_SANDBOX_ROOT=/tmp/fleet-sandboxes
-ENV ASPNETCORE_URLS=http://+:8080
+ENV DATA_PROTECTION_KEYS_PATH=/home/aspnet/DataProtection-Keys
+ENV ASPNETCORE_HTTP_PORTS=8080
 
-RUN mkdir -p /tmp/fleet-sandboxes
+RUN mkdir -p /tmp/fleet-sandboxes /home/aspnet/DataProtection-Keys
 
 EXPOSE 8080
 

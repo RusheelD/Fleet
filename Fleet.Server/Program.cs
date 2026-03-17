@@ -17,6 +17,7 @@ using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using System.Security.Claims;
@@ -28,6 +29,16 @@ ApplyEnvironmentAliases(builder.Configuration);
 
 var repoSandboxRoot = RepoSandboxOptions.ResolveRootPath(builder.Configuration);
 Directory.CreateDirectory(repoSandboxRoot);
+var cacheConnectionString = ResolveCacheConnectionString(builder.Configuration);
+var dataProtectionKeysPath = ResolveDataProtectionKeysPath(builder.Configuration, builder.Environment);
+
+if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+{
+    Directory.CreateDirectory(dataProtectionKeysPath);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+        .SetApplicationName("Fleet");
+}
 
 #if DEBUG
 builder.Logging.AddSimpleConsole(options =>
@@ -43,8 +54,16 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
-builder.AddRedisClientBuilder("cache")
-    .WithOutputCache();
+if (!string.IsNullOrWhiteSpace(cacheConnectionString))
+{
+    builder.Configuration["ConnectionStrings:cache"] = cacheConnectionString;
+    builder.AddRedisClientBuilder("cache")
+        .WithOutputCache();
+}
+else
+{
+    builder.Services.AddOutputCache();
+}
 
 builder.Services.Configure<RepoSandboxOptions>(options =>
 {
@@ -335,6 +354,14 @@ if (hasFleetDbConnection)
 }
 
 var app = builder.Build();
+app.Logger.LogInformation(
+    "Output cache configured with {CacheMode}.",
+    string.IsNullOrWhiteSpace(cacheConnectionString) ? "in-memory fallback" : "Redis");
+
+if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+{
+    app.Logger.LogInformation("Data protection keys path: {DataProtectionKeysPath}", dataProtectionKeysPath);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -388,4 +415,39 @@ static void SetIfMissing(ConfigurationManager configuration, string targetKey, p
             return;
         }
     }
+}
+
+static string? ResolveCacheConnectionString(ConfigurationManager configuration)
+{
+    return FirstNonEmpty(
+        configuration.GetConnectionString("cache"),
+        configuration["ConnectionStrings:cache"],
+        configuration["Aspire:StackExchange:Redis:ConnectionString"]);
+}
+
+static string? ResolveDataProtectionKeysPath(ConfigurationManager configuration, IHostEnvironment environment)
+{
+    var configuredPath = FirstNonEmpty(
+        configuration["DataProtection:KeysPath"],
+        configuration["DATA_PROTECTION_KEYS_PATH"]);
+
+    if (!string.IsNullOrWhiteSpace(configuredPath))
+    {
+        return configuredPath;
+    }
+
+    return environment.IsDevelopment() ? null : "/home/aspnet/DataProtection-Keys";
+}
+
+static string? FirstNonEmpty(params string?[] values)
+{
+    foreach (var value in values)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+    }
+
+    return null;
 }
