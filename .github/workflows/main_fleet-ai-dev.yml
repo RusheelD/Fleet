@@ -7,17 +7,22 @@ on:
     paths:
       - "frontend/**"
       - "Fleet.Server/**"
+      - "Fleet.Server.Tests/**"
       - "Dockerfile"
       - ".dockerignore"
+      - "Fleet.slnx"
       - ".github/workflows/main_fleet-ai-dev.yml"
   workflow_dispatch:
 
 env:
   IMAGE_NAME: fleet-ai-dev
   IMAGE_TAG: ${{ github.sha }}
+  DOTNET_VERSION: 10.0.x
+  NODE_VERSION: 20.x
+  PUBLISH_DIR: publish
 
 jobs:
-  build-and-push:
+  build-test-publish-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,6 +30,61 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_AUTHORITY: ${{ secrets.VITE_ENTRA_AUTHORITY }}
+          VITE_ENTRA_API_SCOPE: ${{ secrets.VITE_ENTRA_API_SCOPE }}
+          VITE_ENTRA_REDIRECT_URI: https://app.fleet-ai.dev/
+          VITE_ENTRA_KNOWN_AUTHORITIES: ${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}
+          VITE_ENVIRONMENT: ${{ secrets.VITE_ENVIRONMENT }}
+        run: npm run build
+
+      - name: Restore .NET dependencies
+        run: dotnet restore Fleet.Server.Tests/Fleet.Server.Tests.csproj
+
+      - name: Build Fleet.Server
+        run: dotnet build Fleet.Server/Fleet.Server.csproj -c Release --no-restore
+
+      - name: Build Fleet.Server.Tests
+        run: dotnet build Fleet.Server.Tests/Fleet.Server.Tests.csproj -c Release --no-restore
+
+      - name: Run .NET tests
+        run: dotnet test Fleet.Server.Tests/Fleet.Server.Tests.csproj -c Release --no-build
+
+      - name: Publish Fleet application
+        shell: bash
+        run: |
+          rm -rf "${{ env.PUBLISH_DIR }}"
+          dotnet publish Fleet.Server/Fleet.Server.csproj \
+            -c Release \
+            -o "${{ env.PUBLISH_DIR }}" \
+            --no-build \
+            /p:UseAppHost=false
+          mkdir -p "${{ env.PUBLISH_DIR }}/wwwroot"
+          cp -R frontend/dist/. "${{ env.PUBLISH_DIR }}/wwwroot/"
 
       - name: Validate container registry secrets
         shell: bash
@@ -118,12 +178,6 @@ jobs:
         run: |
           docker build \
             --pull \
-            --build-arg VITE_ENTRA_CLIENT_ID="${{ secrets.VITE_ENTRA_CLIENT_ID }}" \
-            --build-arg VITE_ENTRA_AUTHORITY="${{ secrets.VITE_ENTRA_AUTHORITY }}" \
-            --build-arg VITE_ENTRA_API_SCOPE="${{ secrets.VITE_ENTRA_API_SCOPE }}" \
-            --build-arg VITE_ENTRA_REDIRECT_URI="https://app.fleet-ai.dev/" \
-            --build-arg VITE_ENTRA_KNOWN_AUTHORITIES="${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}" \
-            --build-arg VITE_ENVIRONMENT="${{ secrets.VITE_ENVIRONMENT }}" \
             --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
             --tag "${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest" \
             .

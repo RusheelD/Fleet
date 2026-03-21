@@ -9,3 +9,5 @@
 **/*.user
 **/*.suo
 publish
+!publish/
+!publish/**
