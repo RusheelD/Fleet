@@ -72,6 +72,7 @@ builder.Services.Configure<RepoSandboxOptions>(options =>
 builder.Services.AddHostedService<GitStartupProbeHostedService>();
 builder.Services.AddHealthChecks()
     .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
+builder.Services.AddSingleton<ServiceStats>();
 
 // Add PostgreSQL + EF Core via Aspire integration.
 var fleetDbConnectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(builder.Configuration);
@@ -373,6 +374,7 @@ if (app.Environment.IsDevelopment())
 // Always route unhandled exceptions through GlobalExceptionHandler
 app.UseExceptionHandler();
 
+app.UseMiddleware<StatsMiddleware>();
 app.UseMiddleware<ResponseHeadersMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 
