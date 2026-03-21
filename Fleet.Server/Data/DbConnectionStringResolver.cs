@@ -7,19 +7,13 @@ namespace Fleet.Server.Data;
 public static class DbConnectionStringResolver
 {
     public static string? ResolveFleetDbLocalMigrationConnectionString(IConfiguration configuration)
-    {
-        var isLocalEnvironment = IsLocalEnvironment(configuration);
-        var localMigrationConnection = ResolveFromCandidates(
-            GetLocalMigrationCandidates(configuration),
-            forceSupabaseSessionPooling: isLocalEnvironment);
-        if (!string.IsNullOrWhiteSpace(localMigrationConnection))
-        {
-            return localMigrationConnection;
-        }
+        => ResolveFleetDbMigrationConnectionString(configuration);
 
+    public static string? ResolveFleetDbMigrationConnectionString(IConfiguration configuration)
+    {
         return ResolveFromCandidates(
-            GetDefaultCandidates(configuration),
-            forceSupabaseSessionPooling: isLocalEnvironment);
+            GetLocalMigrationCandidates(configuration).Concat(GetDefaultCandidates(configuration)),
+            forceSupabaseSessionPooling: true);
     }
 
     public static string? ResolveFleetDbConnectionString(IConfiguration configuration)

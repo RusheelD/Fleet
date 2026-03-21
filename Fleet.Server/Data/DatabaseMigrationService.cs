@@ -9,16 +9,16 @@ namespace Fleet.Server.Data;
 /// Aspire health checks to time out and mark the server as unhealthy.
 /// </summary>
 public class DatabaseMigrationService(
-    IServiceScopeFactory scopeFactory,
+    FleetDatabaseMigrator databaseMigrator,
     ILogger<DatabaseMigrationService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            using var scope = scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
-            await db.Database.MigrateAsync(stoppingToken);
+            // Startup migration is critical infrastructure work; run it on the
+            // dedicated migration context rather than the request/runtime one.
+            await databaseMigrator.MigrateAsync();
             logger.DataMigrationCompleted();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

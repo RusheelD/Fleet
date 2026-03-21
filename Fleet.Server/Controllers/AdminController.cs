@@ -9,7 +9,7 @@ namespace Fleet.Server.Controllers;
 [Authorize(Policy = "AdminOnly")]
 [ApiController]
 [Route("api/[controller]")]
-public class AdminController(FleetDbContext dbContext) : ControllerBase
+public class AdminController(FleetDbContext dbContext, FleetDatabaseMigrator databaseMigrator) : ControllerBase
 {
     /// <summary>
     /// Applies any pending EF Core migrations without dropping the database.
@@ -17,10 +17,9 @@ public class AdminController(FleetDbContext dbContext) : ControllerBase
     [HttpGet("migrate")]
     public async Task<IActionResult> Migrate()
     {
-        var pending = await dbContext.Database.GetPendingMigrationsAsync();
-        var pendingList = pending.ToList();
+        var pendingList = await databaseMigrator.GetPendingMigrationsAsync();
 
-        await dbContext.Database.MigrateAsync();
+        await databaseMigrator.MigrateAsync();
 
         return Ok(new { message = "Migrations applied.", applied = pendingList });
     }

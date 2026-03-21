@@ -331,6 +331,7 @@ builder.Services.AddScoped<IUsageLedgerService, UsageLedgerService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddSingleton<IServerEventPublisher, ServerEventPublisher>();
+builder.Services.AddSingleton<FleetDatabaseMigrator>();
 
 // Repositories
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
