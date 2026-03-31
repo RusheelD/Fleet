@@ -74,8 +74,10 @@ public class RepoSandbox : IRepoSandbox
 
         _logger.LogInformation("Cloning {Repo} into {Path}", repoFullName, _repoRoot);
 
-        // Clone with token-based auth
-        var cloneUrl = $"https://x-access-token:{accessToken}@github.com/{repoFullName}.git";
+        // Clone with standard HTTPS username/token auth. The linked account flow stores
+        // GitHub OAuth access tokens, not GitHub App installation tokens, so the
+        // `x-access-token` username pattern is not appropriate here.
+        var cloneUrl = BuildAuthenticatedCloneUrl(repoFullName, accessToken);
         var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: _sandboxRoot, cancellationToken: cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
@@ -552,6 +554,25 @@ public class RepoSandbox : IRepoSandbox
     }
 
     private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
+
+    internal static string BuildAuthenticatedCloneUrl(
+        string repoFullName,
+        string accessToken,
+        string username = "git")
+    {
+        if (string.IsNullOrWhiteSpace(repoFullName))
+            throw new ArgumentException("Repository name is required.", nameof(repoFullName));
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new ArgumentException("Access token is required.", nameof(accessToken));
+
+        if (string.IsNullOrWhiteSpace(username))
+            throw new ArgumentException("Username is required.", nameof(username));
+
+        var escapedUsername = Uri.EscapeDataString(username);
+        var escapedToken = Uri.EscapeDataString(accessToken);
+        return $"https://{escapedUsername}:{escapedToken}@github.com/{repoFullName}.git";
+    }
 
     internal static string GetAppOwnedSandboxRoot(string? appBaseOverride = null)
     {

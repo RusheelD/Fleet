@@ -116,4 +116,16 @@ public class RepoSandboxTests
                 File.Delete(blockedRoot);
         }
     }
+
+    [TestMethod]
+    public void BuildAuthenticatedCloneUrl_UsesStandardHttpsUsernameTokenAuth()
+    {
+        var result = RepoSandbox.BuildAuthenticatedCloneUrl(
+            "RusheelD/Chess-Fleet",
+            "gho_test-token+needs/encoding");
+
+        Assert.AreEqual(
+            "https://git:gho_test-token%2Bneeds%2Fencoding@github.com/RusheelD/Chess-Fleet.git",
+            result);
+    }
 }
