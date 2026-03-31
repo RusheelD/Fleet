@@ -128,4 +128,17 @@ public class RepoSandboxTests
             "https://git:gho_test-token%2Bneeds%2Fencoding@github.com/RusheelD/Chess-Fleet.git",
             result);
     }
+
+    [TestMethod]
+    public void BuildCommitArguments_SetsCommitterIdentityInline()
+    {
+        var result = RepoSandbox.BuildCommitArguments(
+            "Ship \"quoted\" fix",
+            "Fleet Agent",
+            "agent@fleet.dev");
+
+        Assert.AreEqual(
+            "-c user.name=\"Fleet Agent\" -c user.email=\"agent@fleet.dev\" commit -m \"Ship \\\"quoted\\\" fix\" --author=\"Fleet Agent <agent@fleet.dev>\"",
+            result);
+    }
 }

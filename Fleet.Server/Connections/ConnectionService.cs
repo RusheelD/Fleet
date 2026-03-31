@@ -642,7 +642,6 @@ public class ConnectionService(
 
         return expiresAtUtc <= nowUtc.Add(GitHubAccessTokenRefreshSkew);
     }
-
     private async Task EnsureSinglePrimaryGitHubAsync(int userId)
     {
         var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub") ?? [];

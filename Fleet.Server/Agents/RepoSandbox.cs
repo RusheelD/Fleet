@@ -383,7 +383,7 @@ public class RepoSandbox : IRepoSandbox
 
             // Commit
             result = await RunGitAsync(
-                $"commit -m \"{commitMessage.Replace("\"", "\\\"")}\" --author=\"{authorName} <{authorEmail}>\"",
+                BuildCommitArguments(commitMessage, authorName, authorEmail),
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
@@ -566,6 +566,28 @@ public class RepoSandbox : IRepoSandbox
     }
 
     private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
+
+    internal static string BuildCommitArguments(string commitMessage, string authorName, string authorEmail)
+    {
+        if (string.IsNullOrWhiteSpace(commitMessage))
+            throw new ArgumentException("Commit message is required.", nameof(commitMessage));
+
+        if (string.IsNullOrWhiteSpace(authorName))
+            throw new ArgumentException("Author name is required.", nameof(authorName));
+
+        if (string.IsNullOrWhiteSpace(authorEmail))
+            throw new ArgumentException("Author email is required.", nameof(authorEmail));
+
+        var escapedCommitMessage = EscapeGitArgument(commitMessage);
+        var escapedAuthorName = EscapeGitArgument(authorName);
+        var escapedAuthorEmail = EscapeGitArgument(authorEmail);
+
+        return
+            $"-c user.name=\"{escapedAuthorName}\" " +
+            $"-c user.email=\"{escapedAuthorEmail}\" " +
+            $"commit -m \"{escapedCommitMessage}\" " +
+            $"--author=\"{escapedAuthorName} <{escapedAuthorEmail}>\"";
+    }
 
     internal static string BuildAuthenticatedCloneUrl(
         string repoFullName,
