@@ -75,11 +75,9 @@ const useStyles = makeStyles({
 
 function MicrosoftIcon({ className }: { className?: string }) {
     return (
-        <svg className={className} viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-            <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-            <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-            <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+        <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <rect x="2.5" y="5" width="19" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
     )
 }
@@ -118,7 +116,7 @@ export function LoginPage() {
                     header={
                         <div className={styles.header}>
                             <Title3>Welcome to Fleet</Title3>
-                            <Body1>Sign in to continue</Body1>
+                            <Body1>Sign in with email or Google to continue</Body1>
                         </div>
                     }
                 />
@@ -132,9 +130,9 @@ export function LoginPage() {
                                 size="large"
                                 icon={<MicrosoftIcon className={styles.providerIcon} />}
                                 disabled={authDisabled}
-                                onClick={() => void login('microsoft')}
+                                onClick={() => void login('email')}
                             >
-                                Sign in with Microsoft
+                                Continue with email
                             </Button>
                             <Button
                                 appearance="secondary"

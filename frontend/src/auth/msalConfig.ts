@@ -97,9 +97,16 @@ export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : [],
 }
 
-/** Explicit Microsoft sign-in request without any provider hint overrides. */
-export const microsoftLoginRequest: RedirectRequest = {
+/** Interactive email/local-account sign-in should always show the CIAM prompt. */
+export const emailLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
+  prompt: 'login',
+}
+
+/** External ID supports an explicit sign-up prompt for local/email accounts. */
+export const emailSignUpRequest: RedirectRequest = {
+  ...apiLoginRequest,
+  prompt: 'create',
 }
 
 /** Optional Google sign-in request that can use a dedicated authority when configured. */

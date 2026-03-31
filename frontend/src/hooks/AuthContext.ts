@@ -9,7 +9,8 @@ export interface AuthContextValue {
   user: UserProfile | null
   /** Update the cached user profile (e.g. after saving profile edits) */
   updateUser: (profile: UserProfile) => void
-  login: (provider?: 'microsoft' | 'google') => Promise<void>
+  login: (provider?: 'email' | 'google') => Promise<void>
+  signUp: (provider?: 'email' | 'google') => Promise<void>
   logout: () => void
   getAccessToken: () => Promise<string | undefined>
 }

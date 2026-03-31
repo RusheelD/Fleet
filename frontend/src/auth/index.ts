@@ -1,7 +1,8 @@
 export {
   msalInstance,
   apiLoginRequest,
-  microsoftLoginRequest,
+  emailLoginRequest,
+  emailSignUpRequest,
   googleLoginRequest,
   redirectUri,
   authConfigError,

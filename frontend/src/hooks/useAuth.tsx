@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, authConfigError, googleLoginRequest, isAuthConfigured, microsoftLoginRequest, redirectUri } from '../auth'
+import { apiLoginRequest, authConfigError, emailLoginRequest, emailSignUpRequest, googleLoginRequest, isAuthConfigured, redirectUri } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
@@ -20,14 +20,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Deduplicate concurrent acquireTokenSilent calls — all callers share one in-flight promise
     const tokenPromiseRef = useRef<Promise<string | undefined> | null>(null)
 
-    const login = useCallback(async (provider?: 'microsoft' | 'google') => {
+    const login = useCallback(async (provider?: 'email' | 'google') => {
         if (!isAuthConfigured) {
             throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
         }
 
         if (inProgress === InteractionStatus.None) {
             const request =
-                provider === 'google' ? googleLoginRequest : microsoftLoginRequest
+                provider === 'google' ? googleLoginRequest : emailLoginRequest
+            await instance.loginRedirect(request)
+        }
+    }, [instance, inProgress])
+
+    const signUp = useCallback(async (provider?: 'email' | 'google') => {
+        if (!isAuthConfigured) {
+            throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
+        }
+
+        if (inProgress === InteractionStatus.None) {
+            const request =
+                provider === 'google' ? googleLoginRequest : emailSignUpRequest
             await instance.loginRedirect(request)
         }
     }, [instance, inProgress])
@@ -69,7 +81,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     // Guard against multiple concurrent redirects
                     if (!redirectingRef.current && inProgress === InteractionStatus.None) {
                         redirectingRef.current = true
-                        await instance.loginRedirect(microsoftLoginRequest)
+                        await instance.loginRedirect(apiLoginRequest)
                     }
                 } else {
                     console.warn('Silent token acquisition failed (non-interactive):', error)
@@ -152,9 +164,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user,
         updateUser,
         login,
+        signUp,
         logout,
         getAccessToken,
-    }), [isAuthenticated, isLoading, user, updateUser, login, logout, getAccessToken])
+    }), [isAuthenticated, isLoading, user, updateUser, login, signUp, logout, getAccessToken])
 
     return (
         <AuthContext value={value}>

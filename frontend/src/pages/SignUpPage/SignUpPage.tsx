@@ -75,11 +75,9 @@ const useStyles = makeStyles({
 
 function MicrosoftIcon({ className }: { className?: string }) {
     return (
-        <svg className={className} viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-            <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-            <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-            <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+        <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <rect x="2.5" y="5" width="19" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
     )
 }
@@ -98,7 +96,7 @@ function GoogleIcon({ className }: { className?: string }) {
 export function SignUpPage() {
     const styles = useStyles()
     const navigate = useNavigate()
-    const { authConfigError, isAuthConfigured, login } = useAuth()
+    const { authConfigError, isAuthConfigured, signUp } = useAuth()
     const isAuthenticated = useIsAuthenticated()
     const { inProgress } = useMsal()
 
@@ -118,7 +116,7 @@ export function SignUpPage() {
                     header={
                         <div className={styles.header}>
                             <Title3>Create your Fleet account</Title3>
-                            <Body1>Choose a provider to get started. It&apos;s free.</Body1>
+                            <Body1>Choose email or Google to get started. It&apos;s free.</Body1>
                         </div>
                     }
                 />
@@ -132,16 +130,16 @@ export function SignUpPage() {
                                 size="large"
                                 icon={<MicrosoftIcon className={styles.providerIcon} />}
                                 disabled={authDisabled}
-                                onClick={() => void login('microsoft')}
+                                onClick={() => void signUp('email')}
                             >
-                                Sign up with Microsoft
+                                Sign up with email
                             </Button>
                             <Button
                                 appearance="secondary"
                                 size="large"
                                 icon={<GoogleIcon className={styles.providerIcon} />}
                                 disabled={authDisabled}
-                                onClick={() => void login('google')}
+                                onClick={() => void signUp('google')}
                             >
                                 Sign up with Google
                             </Button>

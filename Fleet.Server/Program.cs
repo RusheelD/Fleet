@@ -17,6 +17,7 @@ using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -104,6 +105,18 @@ builder.Services.AddControllers(options =>
 
 // Entra ID (Azure AD) Authentication
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration);
+builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+{
+    var validAudiences = ApiAudienceValidation.ResolveValidAudiences(
+        builder.Configuration["AzureAd:ClientId"],
+        builder.Configuration["AzureAd:Audience"]);
+
+    if (validAudiences.Length > 0)
+    {
+        options.TokenValidationParameters.ValidAudience = null;
+        options.TokenValidationParameters.ValidAudiences = validAudiences;
+    }
+});
 
 var adminObjectIds = builder.Configuration.GetSection("Admin:AllowedEntraObjectIds").Get<string[]>() ?? [];
 var adminEmails = builder.Configuration.GetSection("Admin:AllowedEmails").Get<string[]>() ?? [];
