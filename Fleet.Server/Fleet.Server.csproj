@@ -31,6 +31,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\docs\agents\**\*">
+      <Link>docs\agents\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="appsettings.Deployment.json" Condition="Exists('appsettings.Deployment.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
