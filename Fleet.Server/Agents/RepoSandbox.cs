@@ -76,15 +76,19 @@ public class RepoSandbox : IRepoSandbox
         // GitHub OAuth access tokens, not GitHub App installation tokens, so the
         // `x-access-token` username pattern is not appropriate here.
         var cloneUrl = BuildAuthenticatedCloneUrl(repoFullName, accessToken);
-        var result = await RunGitAsync($"clone --depth 50 \"{cloneUrl}\" \"{_repoRoot}\"", workingDir: _sandboxRoot, cancellationToken: cancellationToken);
+        var result = await RunGitAsync(
+            ["clone", "--depth", "50", cloneUrl, _repoRoot],
+            workingDir: _sandboxRoot,
+            cancellationToken: cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git clone failed: {result.Stderr}");
 
         // Resume an existing feature branch from origin if requested.
         if (resumeFromBranch)
         {
-            var escapedBranch = EscapeGitArgument(branchName);
-            result = await RunGitAsync($"ls-remote --heads origin \"{escapedBranch}\"", cancellationToken: cancellationToken);
+            result = await RunGitAsync(
+                ["ls-remote", "--heads", "origin", branchName],
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
             {
                 throw new InvalidOperationException(
@@ -93,14 +97,14 @@ public class RepoSandbox : IRepoSandbox
             }
 
             result = await RunGitAsync(
-                $"fetch --depth 1 origin \"+refs/heads/{escapedBranch}:refs/remotes/origin/{escapedBranch}\"",
+                ["fetch", "--depth", "1", "origin", $"+refs/heads/{branchName}:refs/remotes/origin/{branchName}"],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git fetch of existing branch '{branchName}' failed: {result.Stderr}");
 
             result = await RunGitAsync(
-                $"checkout -B \"{escapedBranch}\" \"refs/remotes/origin/{escapedBranch}\"",
+                ["checkout", "-B", branchName, $"refs/remotes/origin/{branchName}"],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
@@ -109,25 +113,22 @@ public class RepoSandbox : IRepoSandbox
         // Create and checkout a new feature branch from a caller-provided base branch.
         else if (!string.IsNullOrWhiteSpace(baseBranch))
         {
-            var escapedBaseBranch = EscapeGitArgument(baseBranch);
-            var escapedBranch = EscapeGitArgument(branchName);
-
             result = await RunGitAsync(
-                $"ls-remote --heads origin \"{escapedBaseBranch}\"",
+                ["ls-remote", "--heads", "origin", baseBranch],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
                 throw new InvalidOperationException(
                     $"Target/base branch '{baseBranch}' was not found on origin.");
 
             result = await RunGitAsync(
-                $"fetch --depth 1 origin \"+refs/heads/{escapedBaseBranch}:refs/remotes/origin/{escapedBaseBranch}\"",
+                ["fetch", "--depth", "1", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}"],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git fetch of base branch '{baseBranch}' failed: {result.Stderr}");
 
             result = await RunGitAsync(
-                $"checkout -B \"{escapedBranch}\" \"refs/remotes/origin/{escapedBaseBranch}\"",
+                ["checkout", "-B", branchName, $"refs/remotes/origin/{baseBranch}"],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
@@ -135,7 +136,9 @@ public class RepoSandbox : IRepoSandbox
         }
         else
         {
-            result = await RunGitAsync($"checkout -b \"{EscapeGitArgument(branchName)}\"", cancellationToken: cancellationToken);
+            result = await RunGitAsync(
+                ["checkout", "-b", branchName],
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git checkout failed: {result.Stderr}");
         }
@@ -369,12 +372,16 @@ public class RepoSandbox : IRepoSandbox
         try
         {
             // Stage all changes
-            var result = await RunGitAsync("add -A", cancellationToken: cancellationToken);
+            var result = await RunGitAsync(
+                ["add", "-A"],
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git add failed: {result.Stderr}");
 
             // Check if there are changes to commit
-            var status = await RunGitAsync("status --porcelain", cancellationToken: cancellationToken);
+            var status = await RunGitAsync(
+                ["status", "--porcelain"],
+                cancellationToken: cancellationToken);
             if (string.IsNullOrWhiteSpace(status.Stdout))
             {
                 _logger.LogInformation("No changes to commit");
@@ -383,7 +390,8 @@ public class RepoSandbox : IRepoSandbox
 
             // Commit
             result = await RunGitAsync(
-                BuildCommitArguments(commitMessage, authorName, authorEmail),
+                BuildCommitArgumentList(commitMessage),
+                BuildCommitEnvironment(authorName, authorEmail),
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
@@ -391,7 +399,7 @@ public class RepoSandbox : IRepoSandbox
             // Push to remote
             await UpdateOriginRemoteAsync(accessToken, cancellationToken);
             result = await RunGitAsync(
-                $"push -u origin \"{EscapeGitArgument(_branchName)}\"",
+                ["push", "-u", "origin", _branchName],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git push failed: {result.Stderr}");
@@ -408,7 +416,7 @@ public class RepoSandbox : IRepoSandbox
     {
         var remoteUrl = BuildAuthenticatedCloneUrl(_repoFullName, accessToken);
         var result = await RunGitAsync(
-            $"remote set-url origin \"{EscapeGitArgument(remoteUrl)}\"",
+            ["remote", "set-url", "origin", remoteUrl],
             cancellationToken: cancellationToken);
 
         if (result.ExitCode != 0)
@@ -565,28 +573,37 @@ public class RepoSandbox : IRepoSandbox
             combinedCommand.Contains(marker, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string EscapeGitArgument(string value) => value.Replace("\"", "\\\"");
-
-    internal static string BuildCommitArguments(string commitMessage, string authorName, string authorEmail)
+    internal static IReadOnlyList<string> BuildCommitArgumentList(string commitMessage)
     {
         if (string.IsNullOrWhiteSpace(commitMessage))
             throw new ArgumentException("Commit message is required.", nameof(commitMessage));
 
+        return
+        [
+            "commit",
+            "-m",
+            commitMessage,
+        ];
+    }
+
+    internal static IReadOnlyDictionary<string, string> BuildCommitEnvironment(string authorName, string authorEmail)
+    {
         if (string.IsNullOrWhiteSpace(authorName))
             throw new ArgumentException("Author name is required.", nameof(authorName));
 
         if (string.IsNullOrWhiteSpace(authorEmail))
             throw new ArgumentException("Author email is required.", nameof(authorEmail));
 
-        var escapedCommitMessage = EscapeGitArgument(commitMessage);
-        var escapedAuthorName = EscapeGitArgument(authorName);
-        var escapedAuthorEmail = EscapeGitArgument(authorEmail);
+        var normalizedAuthorName = authorName.Trim();
+        var normalizedAuthorEmail = authorEmail.Trim();
 
-        return
-            $"-c user.name=\"{escapedAuthorName}\" " +
-            $"-c user.email=\"{escapedAuthorEmail}\" " +
-            $"commit -m \"{escapedCommitMessage}\" " +
-            $"--author=\"{escapedAuthorName} <{escapedAuthorEmail}>\"";
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["GIT_AUTHOR_NAME"] = normalizedAuthorName,
+            ["GIT_AUTHOR_EMAIL"] = normalizedAuthorEmail,
+            ["GIT_COMMITTER_NAME"] = normalizedAuthorName,
+            ["GIT_COMMITTER_EMAIL"] = normalizedAuthorEmail,
+        };
     }
 
     internal static string BuildAuthenticatedCloneUrl(
@@ -683,13 +700,12 @@ public class RepoSandbox : IRepoSandbox
         // Prepend flags that disable all credential helpers and interactive prompts.
         // Without this, Git Credential Manager (GCM) on Windows opens a browser/dialog
         // asking the user to pick an account — which blocks headless server execution.
-        var fullArgs = $"-c credential.helper= {arguments}";
         var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot, _sandboxRoot);
 
         var psi = new ProcessStartInfo
         {
             FileName = _gitExecutable,
-            Arguments = fullArgs,
+            Arguments = $"-c credential.helper= {arguments}",
             WorkingDirectory = effectiveWorkingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -703,6 +719,51 @@ public class RepoSandbox : IRepoSandbox
         psi.Environment["GCM_INTERACTIVE"] = "never";
         psi.Environment["GIT_ASKPASS"] = "";
 
+        return await RunGitAsync(psi, effectiveWorkingDir, cancellationToken);
+    }
+
+    private async Task<CommandResult> RunGitAsync(
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDir = null,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveWorkingDir = EnsureGitWorkingDirectory(workingDir, _repoRoot, _sandboxRoot);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = _gitExecutable,
+            WorkingDirectory = effectiveWorkingDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add("credential.helper=");
+        foreach (var argument in arguments)
+            psi.ArgumentList.Add(argument);
+
+        psi.Environment["PATH"] = _gitProcessPath;
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        psi.Environment["GCM_INTERACTIVE"] = "never";
+        psi.Environment["GIT_ASKPASS"] = "";
+
+        if (environment is not null)
+        {
+            foreach (var entry in environment)
+                psi.Environment[entry.Key] = entry.Value;
+        }
+
+        return await RunGitAsync(psi, effectiveWorkingDir, cancellationToken);
+    }
+
+    private async Task<CommandResult> RunGitAsync(
+        ProcessStartInfo psi,
+        string effectiveWorkingDir,
+        CancellationToken cancellationToken)
+    {
         using var process = new Process { StartInfo = psi };
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();

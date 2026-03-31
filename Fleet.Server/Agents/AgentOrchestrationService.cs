@@ -352,12 +352,10 @@ public class AgentOrchestrationService(
             codingRunCharged = true;
 
             // 5. Resolve a GitHub access token that can access this repository.
-            var accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
-                    userId,
-                    project.Repo,
-                    cancellationToken)
-                ?? throw new InvalidOperationException(
-                    $"No linked GitHub account can access '{project.Repo}'. Link/re-link a GitHub account with repository access.");
+            var accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                userId,
+                project.Repo,
+                cancellationToken);
 
             var repoFullName = project.Repo;
             var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
@@ -514,7 +512,7 @@ public class AgentOrchestrationService(
             SteeringNotes.TryAdd(executionId, new ConcurrentQueue<string>());
             _ = Task.Run(() => RunPipelineAsync(
                 executionId, projectId, workItem, childWorkItems, repoFullName,
-                accessToken, branchName, commitAuthorName, commitAuthorEmail,
+                branchName, commitAuthorName, commitAuthorEmail,
                 userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask,
                 pullRequestTargetBranch, retryPlan, reusePullRequestNumber, cts.Token), CancellationToken.None);
 
@@ -743,7 +741,7 @@ public class AgentOrchestrationService(
     private async Task RunPipelineAsync(
         string executionId, string projectId, Models.WorkItemDto workItem,
         List<Models.WorkItemDto> childWorkItems,
-        string repoFullName, string accessToken, string branchName,
+        string repoFullName, string branchName,
         string commitAuthorName, string commitAuthorEmail,
         int userId, string selectedModelKey, AgentRole[][] pipeline,
         int maxConcurrentAgentsPerTask,
@@ -802,6 +800,11 @@ public class AgentOrchestrationService(
             sandbox = scope.ServiceProvider.GetRequiredService<IRepoSandbox>();
             logger.LogInformation("Execution {ExecutionId}: cloning {Repo} → branch {Branch}",
                 executionId, repoFullName, branchName);
+
+            var accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                userId,
+                repoFullName,
+                externalCancellation);
 
             await sandbox.CloneAsync(
                 repoFullName,
@@ -1240,12 +1243,10 @@ public class AgentOrchestrationService(
             }
 
             // Pipeline complete — final commit + push so the draft PR has all changes
-            accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
-                    userId,
-                    repoFullName,
-                    externalCancellation)
-                ?? throw new InvalidOperationException(
-                    $"No linked GitHub account can access '{repoFullName}'. Link/re-link a GitHub account with repository access.");
+            accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                userId,
+                repoFullName,
+                externalCancellation);
 
             await sandbox.CommitAndPushAsync(
                 accessToken,
@@ -2659,6 +2660,19 @@ public class AgentOrchestrationService(
 
         var body = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<JsonElement>(body);
+    }
+
+    private async Task<string> ResolveRequiredRepoAccessTokenAsync(
+        int userId,
+        string repoFullName,
+        CancellationToken cancellationToken)
+    {
+        return await connectionService.ResolveGitHubAccessTokenForRepoAsync(
+                userId,
+                repoFullName,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"No linked GitHub account can access '{repoFullName}'. Link/re-link a GitHub account with repository access.");
     }
 
     private static string BuildBranchName(string? pattern, int workItemNumber, string title)

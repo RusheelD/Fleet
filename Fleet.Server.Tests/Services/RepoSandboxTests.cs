@@ -130,15 +130,25 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
-    public void BuildCommitArguments_SetsCommitterIdentityInline()
+    public void BuildCommitArgumentList_UsesSeparateMessageArgument()
     {
-        var result = RepoSandbox.BuildCommitArguments(
-            "Ship \"quoted\" fix",
+        var result = RepoSandbox.BuildCommitArgumentList("Ship \"quoted\" fix");
+
+        CollectionAssert.AreEqual(
+            new[] { "commit", "-m", "Ship \"quoted\" fix" },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildCommitEnvironment_SetsAuthorAndCommitterIdentity()
+    {
+        var result = RepoSandbox.BuildCommitEnvironment(
             "Fleet Agent",
             "agent@fleet.dev");
 
-        Assert.AreEqual(
-            "-c user.name=\"Fleet Agent\" -c user.email=\"agent@fleet.dev\" commit -m \"Ship \\\"quoted\\\" fix\" --author=\"Fleet Agent <agent@fleet.dev>\"",
-            result);
+        Assert.AreEqual("Fleet Agent", result["GIT_AUTHOR_NAME"]);
+        Assert.AreEqual("agent@fleet.dev", result["GIT_AUTHOR_EMAIL"]);
+        Assert.AreEqual("Fleet Agent", result["GIT_COMMITTER_NAME"]);
+        Assert.AreEqual("agent@fleet.dev", result["GIT_COMMITTER_EMAIL"]);
     }
 }
