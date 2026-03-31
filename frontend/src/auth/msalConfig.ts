@@ -18,33 +18,10 @@ const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const configuredRedirectUri = import.meta.env.VITE_ENTRA_REDIRECT_URI as string | undefined
 const configuredKnownAuthorities = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
-const googleDomainHint = import.meta.env.VITE_ENTRA_GOOGLE_DOMAIN_HINT as string | undefined
-const googleIdpHint = import.meta.env.VITE_ENTRA_GOOGLE_IDP_HINT as string | undefined
 const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : undefined
 const runtimeHostname = typeof window !== 'undefined' ? window.location.hostname : undefined
 const FALLBACK_CLIENT_ID = '00000000-0000-0000-0000-000000000000'
 const FALLBACK_AUTHORITY = 'https://login.microsoftonline.com/common'
-
-function normalizeHint(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim()
-  return normalized && normalized.length > 0 ? normalized : fallback
-}
-
-function withProviderHints(
-  domainHint: string | undefined,
-  idpHint: string | undefined,
-  fallbackDomainHint: string,
-): RedirectRequest['extraQueryParameters'] {
-  const resolvedDomainHint = normalizeHint(domainHint, fallbackDomainHint)
-  const resolvedIdpHint = idpHint?.trim()
-
-  return {
-    // domain_hint helps issuer acceleration in Entra/B2C user flows.
-    domain_hint: resolvedDomainHint,
-    // idp is optional and tenant-specific; only send it when explicitly configured.
-    ...(resolvedIdpHint && resolvedIdpHint.length > 0 ? { idp: resolvedIdpHint } : {}),
-  }
-}
 
 function resolveOptionalAuthority(value: string | undefined, fallback: string): string {
   const normalized = value?.trim()
@@ -120,15 +97,15 @@ export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : [],
 }
 
-/** Login request that hints the user should sign in via Google */
+/** Explicit Microsoft sign-in request without any provider hint overrides. */
+export const microsoftLoginRequest: RedirectRequest = {
+  ...apiLoginRequest,
+}
+
+/** Optional Google sign-in request that can use a dedicated authority when configured. */
 export const googleLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: resolveOptionalAuthority(googleAuthority, resolvedAuthority),
-  extraQueryParameters: withProviderHints(
-    googleDomainHint,
-    googleIdpHint,
-    'Google',
-  ),
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)

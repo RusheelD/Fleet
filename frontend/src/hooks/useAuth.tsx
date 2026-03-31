@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, authConfigError, googleLoginRequest, isAuthConfigured, redirectUri } from '../auth'
+import { apiLoginRequest, authConfigError, googleLoginRequest, isAuthConfigured, microsoftLoginRequest, redirectUri } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
@@ -27,7 +27,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (inProgress === InteractionStatus.None) {
             const request =
-                provider === 'google' ? googleLoginRequest : apiLoginRequest
+                provider === 'google' ? googleLoginRequest : microsoftLoginRequest
             await instance.loginRedirect(request)
         }
     }, [instance, inProgress])
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     // Guard against multiple concurrent redirects
                     if (!redirectingRef.current && inProgress === InteractionStatus.None) {
                         redirectingRef.current = true
-                        await instance.loginRedirect(apiLoginRequest)
+                        await instance.loginRedirect(microsoftLoginRequest)
                     }
                 } else {
                     console.warn('Silent token acquisition failed (non-interactive):', error)
