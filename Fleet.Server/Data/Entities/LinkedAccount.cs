@@ -6,6 +6,9 @@ public class LinkedAccount
     public string Provider { get; set; } = string.Empty;
     public string? ConnectedAs { get; set; }
     public string? AccessToken { get; set; }
+    public DateTime? AccessTokenExpiresAtUtc { get; set; }
+    public string? RefreshToken { get; set; }
+    public DateTime? RefreshTokenExpiresAtUtc { get; set; }
     public string? ExternalUserId { get; set; }
     public DateTime? ConnectedAt { get; set; }
     public bool IsPrimary { get; set; }

@@ -13,8 +13,7 @@ namespace Fleet.Server.Copilot.Tools;
 /// </summary>
 public class GetRepoTreeTool(
     IProjectService projectService,
-    IConnectionRepository connectionRepository,
-    IGitHubTokenProtector tokenProtector,
+    IConnectionService connectionService,
     IHttpClientFactory httpClientFactory) : IChatTool
 {
     public string Name => "get_repo_tree";
@@ -73,7 +72,10 @@ public class GetRepoTreeTool(
         if (!int.TryParse(context.UserId, out var userId))
             return "Error: invalid user ID.";
 
-        var accessToken = await ResolveAccessTokenForRepoAsync(userId, repoFullName, cancellationToken);
+        var accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
+            userId,
+            repoFullName,
+            cancellationToken);
         if (string.IsNullOrEmpty(accessToken))
             return "No GitHub account is linked. Please connect GitHub in Settings first.";
 
@@ -190,47 +192,6 @@ public class GetRepoTreeTool(
         return await response.Content.ReadFromJsonAsync<T>(ct);
     }
 
-    private async Task<string?> ResolveAccessTokenForRepoAsync(int userId, string repoFullName, CancellationToken cancellationToken)
-    {
-        var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
-        if (accounts.Count == 0)
-            return null;
-
-        var candidates = accounts
-            .Select(account => tokenProtector.Unprotect(account.AccessToken))
-            .Where(token => !string.IsNullOrWhiteSpace(token))
-            .Select(token => token!)
-            .ToList();
-
-        if (candidates.Count == 0)
-            return null;
-
-        if (candidates.Count == 1)
-            return candidates[0];
-
-        var client = httpClientFactory.CreateClient("GitHub");
-        foreach (var candidate in candidates)
-        {
-            if (await RepoExistsForTokenAsync(client, candidate, repoFullName, cancellationToken))
-                return candidate;
-        }
-
-        return candidates[0];
-    }
-
-    private static async Task<bool> RepoExistsForTokenAsync(
-        HttpClient client,
-        string accessToken,
-        string repoFullName,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{repoFullName}");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-
-        using var response = await client.SendAsync(request, cancellationToken);
-        return response.IsSuccessStatusCode;
-    }
     // ── GitHub API models ─────────────────────────────────────
 
     private sealed class RepoResponse

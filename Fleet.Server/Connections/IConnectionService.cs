@@ -11,4 +11,10 @@ public interface IConnectionService
     Task<IReadOnlyList<LinkedAccountDto>> GetConnectionsAsync(int userId);
     Task<IReadOnlyList<GitHubRepoDto>> GetGitHubRepositoriesAsync(int userId, int? accountId = null);
     Task<GitHubRepoDto> CreateGitHubRepositoryAsync(int userId, CreateGitHubRepositoryRequest request);
+    Task<string?> GetGitHubAccessTokenAsync(int userId, int accountId, CancellationToken cancellationToken = default);
+    Task<string?> GetPrimaryGitHubAccessTokenAsync(int userId, CancellationToken cancellationToken = default);
+    Task<string?> ResolveGitHubAccessTokenForRepoAsync(
+        int userId,
+        string repoFullName,
+        CancellationToken cancellationToken = default);
 }
