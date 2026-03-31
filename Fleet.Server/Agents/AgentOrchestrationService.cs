@@ -66,6 +66,7 @@ public class AgentOrchestrationService(
         int? ReusePullRequestNumber,
         string? ReusePullRequestTitle,
         double PriorProgressEstimate,
+        IReadOnlyDictionary<AgentRole, string> CarryForwardOutputs,
         string RetryContextMarkdown)
     {
         public bool ReuseExistingBranch =>
@@ -398,6 +399,16 @@ public class AgentOrchestrationService(
 
             // 8. Create the execution record
             var executionId = Guid.NewGuid().ToString("N")[..12];
+            var totalRoles = pipeline.SelectMany(g => g).Count();
+            var carriedRoleCount = CountCarryForwardRoles(pipeline, retryPlan?.CarryForwardOutputs);
+            var seededProgress = retryPlan is null
+                ? 0
+                : Math.Clamp(
+                    Math.Max(
+                        retryPlan.PriorProgressEstimate,
+                        totalRoles == 0 ? 0 : (double)carriedRoleCount / totalRoles),
+                    0,
+                    0.99);
             var execution = new AgentExecution
             {
                 Id = executionId,
@@ -406,14 +417,14 @@ public class AgentOrchestrationService(
                 Status = "running",
                 StartedAt = DateTime.UtcNow.ToString("o"),
                 StartedAtUtc = DateTime.UtcNow,
-                Progress = 0,
+                Progress = seededProgress,
                 BranchName = branchName,
                 PullRequestTitle = plannedPrTitle,
                 PullRequestUrl = reusePullRequestUrl,
-                CurrentPhase = "Initializing",
+                CurrentPhase = carriedRoleCount > 0 ? "Resuming prior progress" : "Initializing",
                 UserId = userId.ToString(),
                 ProjectId = projectId,
-                Agents = BuildAgentInfoList(pipeline),
+                Agents = BuildAgentInfoList(pipeline, retryPlan?.CarryForwardOutputs),
             };
 
             db.AgentExecutions.Add(execution);
@@ -649,6 +660,7 @@ public class AgentOrchestrationService(
             .Where(r => r.ExecutionId == priorExecution.Id)
             .OrderBy(r => r.PhaseOrder)
             .ToListAsync(cancellationToken);
+        var carryForwardOutputs = BuildRetryCarryForwardOutputs(priorPhaseResults);
 
         var priorProgress = Math.Clamp(priorExecution.Progress, 0, 1);
         var reuseBranchName = string.IsNullOrWhiteSpace(priorExecution.BranchName)
@@ -667,6 +679,7 @@ public class AgentOrchestrationService(
                 : null,
             ReusePullRequestTitle: shouldReuseExistingPullRequest ? priorExecution.PullRequestTitle : null,
             PriorProgressEstimate: priorProgress,
+            CarryForwardOutputs: carryForwardOutputs,
             RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults));
 
         return await StartExecutionInternalAsync(
@@ -829,7 +842,8 @@ public class AgentOrchestrationService(
             {
                 workItemContext = $"{workItemContext}\n\n{retryPlan.RetryContextMarkdown}";
             }
-            var phaseOutputs = new List<(AgentRole Role, string Output)>();
+            var phaseOutputs = BuildCarryForwardPhaseOutputs(pipeline, retryPlan?.CarryForwardOutputs);
+            var carriedRoles = retryPlan?.CarryForwardOutputs.Keys.ToHashSet() ?? [];
 
             var totalRoles = pipeline.SelectMany(g => g).Count();
             var completedRoles = 0;
@@ -873,6 +887,18 @@ public class AgentOrchestrationService(
                     ParentWorkItemNumber: null, LevelId: null));
             await PublishWorkItemsUpdatedAsync();
             await PublishProjectsUpdatedAsync();
+
+            if (carriedRoles.Count > 0)
+            {
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "info",
+                    $"Carrying forward completed phases from retry context: {string.Join(", ", pipeline.SelectMany(g => g).Where(carriedRoles.Contains))}",
+                    executionId: executionId);
+                await PublishLogsUpdatedAsync();
+            }
 
             foreach (var group in pipeline)
             {
@@ -920,17 +946,27 @@ public class AgentOrchestrationService(
 
                 var priorOutputs = phaseOutputs.ToList();
                 var groupCompletedBase = completedRoles;
+                var pendingRoleEntries = rolesInGroup
+                    .Select((role, index) => (Role: role, Index: index))
+                    .Where(entry => !carriedRoles.Contains(entry.Role))
+                    .ToArray();
+
+                if (pendingRoleEntries.Length == 0)
+                {
+                    completedRoles += rolesInGroup.Length;
+                    continue;
+                }
 
                 var executionOrderResults = new List<RolePhaseExecutionResult>(rolesInGroup.Length);
                 var maxParallel = Math.Max(1, maxConcurrentAgentsPerTask);
 
-                for (var batchStart = 0; batchStart < rolesInGroup.Length; batchStart += maxParallel)
+                for (var batchStart = 0; batchStart < pendingRoleEntries.Length; batchStart += maxParallel)
                 {
-                    var batchRoles = rolesInGroup.Skip(batchStart).Take(maxParallel).ToArray();
+                    var batchRoles = pendingRoleEntries.Skip(batchStart).Take(maxParallel).ToArray();
                     var batchTasks = batchRoles
-                        .Select((role, roleOffset) => RunRoleAsync(
-                            role,
-                            batchStart + roleOffset,
+                        .Select(entry => RunRoleAsync(
+                            entry.Role,
+                            entry.Index,
                             priorOutputs,
                             steeringBlock,
                             groupCompletedBase))
@@ -947,7 +983,7 @@ public class AgentOrchestrationService(
                     }
                 }
 
-                foreach (var role in rolesInGroup)
+                foreach (var role in rolesInGroup.Where(role => !carriedRoles.Contains(role)))
                 {
                     var roleResult = executionOrderResults.First(r => r.Role == role);
                     phaseOutputs.Add((role, roleResult.SummarizedOutput));
@@ -973,10 +1009,13 @@ public class AgentOrchestrationService(
                 for (var attempt = 1; attempt <= maxAttempts; attempt++)
                 {
                     var isRetry = attempt > 1;
-                    var lastLoggedPercent = -1;
+                    var retryProgressFloorPercent = priorAttempts.LastOrDefault()?.EstimatedCompletionPercent ?? 0;
+                    var lastLoggedPercent = retryProgressFloorPercent > 0 ? retryProgressFloorPercent : -1;
                     var lastLoggedSummary = string.Empty;
                     var initialProgressSummary = isRetry
-                        ? $"Retrying phase (attempt {attempt}/{maxAttempts})"
+                        ? retryProgressFloorPercent > 0
+                            ? $"Retrying phase (attempt {attempt}/{maxAttempts}, resuming from {retryProgressFloorPercent}%)"
+                            : $"Retrying phase (attempt {attempt}/{maxAttempts})"
                         : $"Starting phase: {GetPhaseTaskDescription(role)}";
 
                     await WithDbLockAsync(async () =>
@@ -984,7 +1023,8 @@ public class AgentOrchestrationService(
                         await SetAgentRunningAsync(scopedDb, executionId, role.ToString(),
                             isRetry
                                 ? $"{GetPhaseTaskDescription(role)} (retry {attempt - 1}/{MaxAgentRetries})"
-                                : GetPhaseTaskDescription(role));
+                                : GetPhaseTaskDescription(role),
+                            retryProgressFloorPercent / 100.0);
 
                         await WriteLogEntryAsync(
                             scopedDb,
@@ -1127,8 +1167,16 @@ public class AgentOrchestrationService(
                         scopedDb.AgentPhaseResults.Add(phaseResultEntity);
                         await scopedDb.SaveChangesAsync();
 
-                        await UpdateAgentInfoAsync(scopedDb, executionId, role.ToString(),
-                            result.Success ? "completed" : "failed", result.ToolCallCount);
+                        await UpdateAgentInfoAsync(
+                            scopedDb,
+                            executionId,
+                            role.ToString(),
+                            result.Success ? "completed" : "failed",
+                            result.ToolCallCount,
+                            Math.Clamp(result.EstimatedCompletionPercent / 100.0, 0, 0.99),
+                            result.Success
+                                ? null
+                                : BuildRetryFailureTask(result.EstimatedCompletionPercent, result.LastProgressSummary));
 
                         if (result.Success)
                         {
@@ -1544,14 +1592,61 @@ public class AgentOrchestrationService(
         return sb.ToString();
     }
 
-    private static List<AgentInfo> BuildAgentInfoList(AgentRole[][] pipeline)
+    internal static IReadOnlyDictionary<AgentRole, string> BuildRetryCarryForwardOutputs(
+        IReadOnlyList<AgentPhaseResult> priorPhaseResults)
     {
+        var carriedOutputs = new Dictionary<AgentRole, (int PhaseOrder, string Output)>();
+
+        foreach (var phase in priorPhaseResults
+                     .Where(phase => phase.Success)
+                     .OrderBy(phase => phase.PhaseOrder))
+        {
+            if (!Enum.TryParse<AgentRole>(phase.Role, ignoreCase: true, out var role))
+                continue;
+
+            carriedOutputs[role] = (phase.PhaseOrder, PrepareCarryForwardOutput(phase.Output));
+        }
+
+        return carriedOutputs
+            .OrderBy(entry => entry.Value.PhaseOrder)
+            .ToDictionary(entry => entry.Key, entry => entry.Value.Output);
+    }
+
+    internal static List<(AgentRole Role, string Output)> BuildCarryForwardPhaseOutputs(
+        AgentRole[][] pipeline,
+        IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs)
+    {
+        var results = new List<(AgentRole Role, string Output)>();
+        if (carryForwardOutputs is null || carryForwardOutputs.Count == 0)
+            return results;
+
+        foreach (var role in pipeline.SelectMany(group => group))
+        {
+            if (carryForwardOutputs.TryGetValue(role, out var output))
+                results.Add((role, output));
+        }
+
+        return results;
+    }
+
+    internal static int CountCarryForwardRoles(
+        AgentRole[][] pipeline,
+        IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs) =>
+        BuildCarryForwardPhaseOutputs(pipeline, carryForwardOutputs).Count;
+
+    internal static List<AgentInfo> BuildAgentInfoList(
+        AgentRole[][] pipeline,
+        IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs = null)
+    {
+        var carriedRoles = carryForwardOutputs?.Keys.ToHashSet() ?? [];
         return pipeline.SelectMany(g => g).Select(role => new AgentInfo
         {
             Role = role.ToString(),
-            Status = "idle",
-            CurrentTask = "Waiting",
-            Progress = 0,
+            Status = carriedRoles.Contains(role) ? "completed" : "idle",
+            CurrentTask = carriedRoles.Contains(role)
+                ? "Carried forward from previous execution"
+                : "Waiting",
+            Progress = carriedRoles.Contains(role) ? 1.0 : 0,
         }).ToList();
     }
 
@@ -1594,7 +1689,7 @@ public class AgentOrchestrationService(
         return sb.ToString();
     }
 
-    private static string BuildExecutionRetryContext(
+    internal static string BuildExecutionRetryContext(
         AgentExecution priorExecution,
         IReadOnlyList<AgentPhaseResult> priorPhaseResults)
     {
@@ -1622,6 +1717,11 @@ public class AgentOrchestrationService(
                 }
 
                 sb.AppendLine();
+                if (phase.Success && !string.IsNullOrWhiteSpace(phase.Output))
+                {
+                    sb.AppendLine("  Carried output excerpt:");
+                    sb.AppendLine(IndentBlock(PrepareCarryForwardOutput(phase.Output), "  "));
+                }
             }
         }
         else
@@ -1646,6 +1746,31 @@ public class AgentOrchestrationService(
             return normalized;
 
         return $"{normalized[..maxChars]}\n\n[truncated]";
+    }
+
+    private static string PrepareCarryForwardOutput(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return "(phase completed; no output captured)";
+
+        return TrimRetryOutput(output, maxChars: 3_000);
+    }
+
+    private static string IndentBlock(string text, string prefix) =>
+        string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(line => $"{prefix}{line}"));
+
+    private static string BuildRetryFailureTask(int estimatedCompletionPercent, string? lastProgressSummary)
+    {
+        if (estimatedCompletionPercent <= 0)
+            return "Failed";
+
+        var summary = string.IsNullOrWhiteSpace(lastProgressSummary)
+            ? null
+            : lastProgressSummary.Trim();
+
+        return string.IsNullOrWhiteSpace(summary)
+            ? $"Failed at {estimatedCompletionPercent}%"
+            : $"Failed at {estimatedCompletionPercent}%: {summary}";
     }
 
     private static string NormalizeAgentFailureMessage(string? rawError)
@@ -1739,7 +1864,13 @@ public class AgentOrchestrationService(
     }
 
     private static async Task UpdateAgentInfoAsync(
-        FleetDbContext scopedDb, string executionId, string role, string status, int toolCallCount)
+        FleetDbContext scopedDb,
+        string executionId,
+        string role,
+        string status,
+        int toolCallCount,
+        double preservedProgress = 0,
+        string? taskOverride = null)
     {
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
@@ -1748,10 +1879,16 @@ public class AgentOrchestrationService(
         if (agent is not null)
         {
             agent.Status = status;
-            agent.CurrentTask = status == "completed"
-                ? $"Done ({toolCallCount} tool calls)"
-                : $"Failed";
-            agent.Progress = status == "completed" ? 1.0 : 0;
+            if (status == "completed")
+            {
+                agent.CurrentTask = taskOverride ?? $"Done ({toolCallCount} tool calls)";
+                agent.Progress = 1.0;
+            }
+            else
+            {
+                agent.CurrentTask = taskOverride ?? "Failed";
+                agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, 0.99);
+            }
         }
 
         await scopedDb.SaveChangesAsync();
@@ -1761,7 +1898,11 @@ public class AgentOrchestrationService(
     /// Marks an agent as "running" with a descriptive task before its phase executes.
     /// </summary>
     private static async Task SetAgentRunningAsync(
-        FleetDbContext scopedDb, string executionId, string role, string taskDescription)
+        FleetDbContext scopedDb,
+        string executionId,
+        string role,
+        string taskDescription,
+        double preservedProgress = 0)
     {
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
@@ -1771,7 +1912,7 @@ public class AgentOrchestrationService(
         {
             agent.Status = "running";
             agent.CurrentTask = taskDescription;
-            agent.Progress = 0;
+            agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, 0.99);
         }
 
         await scopedDb.SaveChangesAsync();

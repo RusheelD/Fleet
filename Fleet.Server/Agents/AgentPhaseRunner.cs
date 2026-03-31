@@ -17,28 +17,28 @@ public class AgentPhaseRunner(
     ILogger<AgentPhaseRunner> logger) : IAgentPhaseRunner
 {
     /// <summary>Default max tool-calling loops per phase.</summary>
-    private const int DefaultMaxToolLoops = 50;
+    private const int DefaultMaxToolLoops = 200;
 
     /// <summary>Returns the max tool calls allowed for a given agent role.</summary>
     public static int GetMaxToolCalls(AgentRole role) => role switch
     {
-        AgentRole.Manager => 10,
-        AgentRole.Planner => 15,
-        AgentRole.Contracts => int.MaxValue,
-        AgentRole.Review => 30,
-        AgentRole.Documentation => 20,
-        AgentRole.Consolidation => int.MaxValue,
-        _ => int.MaxValue,  // Backend, Frontend, Testing, Styling
+        AgentRole.Manager => 200,
+        AgentRole.Planner => 250,
+        AgentRole.Contracts => 400,
+        AgentRole.Review => 250,
+        AgentRole.Documentation => 200,
+        AgentRole.Consolidation => 400,
+        _ => 500,  // Backend, Frontend, Testing, Styling
     };
 
-    private static int GetMaxToolLoops(AgentRole role) => role switch
+    internal static int GetMaxToolLoops(AgentRole role) => role switch
     {
         AgentRole.Backend => 500,
         AgentRole.Frontend => 500,
         AgentRole.Testing => 500,
         AgentRole.Styling => 500,
-        AgentRole.Contracts => 300,
-        AgentRole.Consolidation => 300,
+        AgentRole.Contracts => 400,
+        AgentRole.Consolidation => 400,
         _ => DefaultMaxToolLoops,
     };
 
