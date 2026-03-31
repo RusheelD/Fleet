@@ -57,7 +57,7 @@ jobs:
           VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_AUTHORITY: ${{ secrets.VITE_ENTRA_AUTHORITY }}
           VITE_ENTRA_API_SCOPE: ${{ secrets.VITE_ENTRA_API_SCOPE }}
-          VITE_ENTRA_REDIRECT_URI: https://app.fleet-ai.dev/
+          VITE_ENTRA_REDIRECT_URI: https://app-dev.fleet-ai.dev
           VITE_ENTRA_KNOWN_AUTHORITIES: ${{ secrets.VITE_ENTRA_KNOWN_AUTHORITIES }}
           VITE_ENVIRONMENT: ${{ secrets.VITE_ENVIRONMENT }}
         run: npm run build

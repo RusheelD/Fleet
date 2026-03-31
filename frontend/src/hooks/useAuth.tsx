@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, googleLoginRequest, githubLoginRequest, redirectUri } from '../auth'
+import { apiLoginRequest, authConfigError, googleLoginRequest, isAuthConfigured, redirectUri } from '../auth'
 import { setTokenGetter, get } from '../proxies/proxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
@@ -20,12 +20,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Deduplicate concurrent acquireTokenSilent calls — all callers share one in-flight promise
     const tokenPromiseRef = useRef<Promise<string | undefined> | null>(null)
 
-    const login = useCallback(async (provider?: 'microsoft' | 'google' | 'github') => {
+    const login = useCallback(async (provider?: 'microsoft' | 'google') => {
+        if (!isAuthConfigured) {
+            throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
+        }
+
         if (inProgress === InteractionStatus.None) {
             const request =
-                provider === 'google' ? googleLoginRequest :
-                    provider === 'github' ? githubLoginRequest :
-                        apiLoginRequest
+                provider === 'google' ? googleLoginRequest : apiLoginRequest
             await instance.loginRedirect(request)
         }
     }, [instance, inProgress])
@@ -38,6 +40,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }, [instance])
 
     const getAccessToken = useCallback(async (): Promise<string | undefined> => {
+        if (!isAuthConfigured) {
+            return undefined
+        }
+
         const accounts = instance.getAllAccounts()
         if (accounts.length === 0) return undefined
 
@@ -141,6 +147,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const value = useMemo<AuthContextValue>(() => ({
         isAuthenticated,
         isLoading,
+        isAuthConfigured,
+        authConfigError,
         user,
         updateUser,
         login,

@@ -1,1 +1,8 @@
-export { msalInstance, apiLoginRequest, googleLoginRequest, githubLoginRequest, redirectUri } from './msalConfig'
+export {
+  msalInstance,
+  apiLoginRequest,
+  googleLoginRequest,
+  redirectUri,
+  authConfigError,
+  isAuthConfigured,
+} from './msalConfig'

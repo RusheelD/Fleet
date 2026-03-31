@@ -43,7 +43,7 @@ Before configuring social providers, you need two Entra ID app registrations: on
 2. **Name:** `Fleet SPA`
 3. **Supported account types:** Same as the API registration
 4. **Redirect URI:** Select **Single-page application (SPA)** and add all redirect URIs:
-   - `http://localhost:5173` (local dev via Vite)
+   - `http://localhost:5250` (local dev via Vite)
    - `https://app-dev.fleet-ai.dev` (development)
    - `https://app-staging.fleet-ai.dev` (staging)
    - `https://app.fleet-ai.dev` (production)
@@ -230,8 +230,14 @@ The frontend uses `.env` files (loaded by Vite) for Entra ID and environment con
 # Application (client) ID of the Fleet SPA app registration
 VITE_ENTRA_CLIENT_ID=your-spa-client-id
 
-# Authority — https://login.microsoftonline.com/{tenantId}
-VITE_ENTRA_AUTHORITY=https://login.microsoftonline.com/your-tenant-id
+# Authority — https://{tenant-name}.ciamlogin.com/{tenantId}
+VITE_ENTRA_AUTHORITY=https://your-tenant-name.ciamlogin.com/your-tenant-id
+
+# Known authority host for CIAM
+VITE_ENTRA_KNOWN_AUTHORITIES=your-tenant-name.ciamlogin.com
+
+# Exact SPA redirect URI registered in Entra
+VITE_ENTRA_REDIRECT_URI=http://localhost:5250
 
 # API scope — api://{apiClientId}/access_as_user
 VITE_ENTRA_API_SCOPE=api://your-api-client-id/access_as_user
@@ -262,7 +268,7 @@ Make sure **all** app origins are registered as SPA redirect URIs in the **Fleet
 
 | Environment | Redirect URI |
 | ------------- | ------------- |
-| Local dev | `http://localhost:5173` |
+| Local dev | `http://localhost:5250` |
 | Development | `https://app-dev.fleet-ai.dev` |
 | Staging | `https://app-staging.fleet-ai.dev` |
 | Production | `https://app.fleet-ai.dev` |
@@ -354,8 +360,10 @@ dotnet publish Fleet.Server -c Release -o ./publish
 | ---------- | ------- | ----- | --------- | ------------ |
 | `ASPNETCORE_ENVIRONMENT` | Server | `Development` | `Staging` | `Production` |
 | `VITE_ENTRA_CLIENT_ID` | Frontend | SPA client ID | SPA client ID | SPA client ID |
-| `VITE_ENTRA_AUTHORITY` | Frontend | `https://login.microsoftonline.com/{tid}` | Same | Same |
+| `VITE_ENTRA_AUTHORITY` | Frontend | `https://{tenant-name}.ciamlogin.com/{tid}` | Same | Same |
+| `VITE_ENTRA_KNOWN_AUTHORITIES` | Frontend | `{tenant-name}.ciamlogin.com` | Same | Same |
 | `VITE_ENTRA_API_SCOPE` | Frontend | `api://{id}/access_as_user` | Same | Same |
+| `VITE_ENTRA_REDIRECT_URI` | Frontend | `http://localhost:5250` | `https://app-staging.fleet-ai.dev` | `https://app.fleet-ai.dev` |
 | `VITE_ENVIRONMENT` | Frontend + Website | `development` | `staging` | `production` |
 | `VITE_WEBSITE_URL` | Frontend | `https://fleet-ai.dev` | `https://fleet-ai.dev` | `https://fleet-ai.dev` |
 | `VITE_APP_URL` | Website | `https://app-dev.fleet-ai.dev` | `https://app-staging.fleet-ai.dev` | `https://app.fleet-ai.dev` |

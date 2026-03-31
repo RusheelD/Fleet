@@ -17,6 +17,7 @@ using Fleet.Server.Search;
 using Fleet.Server.Subscriptions;
 using Fleet.Server.Users;
 using Fleet.Server.WorkItems;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
@@ -106,6 +107,7 @@ builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration)
 
 var adminObjectIds = builder.Configuration.GetSection("Admin:AllowedEntraObjectIds").Get<string[]>() ?? [];
 var adminEmails = builder.Configuration.GetSection("Admin:AllowedEmails").Get<string[]>() ?? [];
+var requiredApiScope = builder.Configuration["AzureAd:RequiredScope"] ?? ApiScopeAuthorization.DefaultScope;
 
 static bool IsAdminIdentity(ClaimsPrincipal principal, string[] allowedObjectIds, string[] allowedEmails)
 {
@@ -141,10 +143,17 @@ static bool IsAdminIdentity(ClaimsPrincipal principal, string[] allowedObjectIds
 
 builder.Services.AddAuthorization(options =>
 {
+    options.DefaultPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => ApiScopeAuthorization.HasRequiredScope(context.User, requiredApiScope))
+        .Build();
+
     options.AddPolicy("AdminOnly", policy =>
     {
         policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(context => IsAdminIdentity(context.User, adminObjectIds, adminEmails));
+        policy.RequireAssertion(context =>
+            ApiScopeAuthorization.HasRequiredScope(context.User, requiredApiScope) &&
+            IsAdminIdentity(context.User, adminObjectIds, adminEmails));
     });
 });
 builder.Services.AddHttpContextAccessor();

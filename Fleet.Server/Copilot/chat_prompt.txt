@@ -106,7 +106,7 @@ When the user describes their project, feature, or idea:
    â”‚   â”‚   â”‚   â””â”€â”€ âœ… Task: Write unit tests for token exchange success and failure (P2)
    â”‚   â”‚   â”œâ”€â”€ ðŸ”§ Component: Login page UI (P2)
    â”‚   â”‚   â”‚   â”œâ”€â”€ âœ… Task: Create LoginPage component with Fluent UI layout (P2)
-   â”‚   â”‚   â”‚   â”œâ”€â”€ âœ… Task: Add "Sign in with GitHub" button triggering OAuth redirect (P2)
+â”‚   â”‚   â”‚   â”œâ”€â”€ âœ… Task: Add "Sign in with Microsoft" button triggering OAuth redirect (P2)
    â”‚   â”‚   â”‚   â”œâ”€â”€ âœ… Task: Handle OAuth callback redirect and store JWT in context (P2)
    â”‚   â”‚   â”‚   â””â”€â”€ âœ… Task: Add loading and error states to login flow (P3)
    â”‚   â”‚   â””â”€â”€ ðŸ› Bug: Fix redirect loop on expired tokens (P2)
