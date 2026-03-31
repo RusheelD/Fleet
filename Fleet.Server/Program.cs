@@ -461,7 +461,18 @@ static string? ResolveDataProtectionKeysPath(ConfigurationManager configuration,
         return configuredPath;
     }
 
-    return environment.IsDevelopment() ? null : "/home/aspnet/DataProtection-Keys";
+    if (environment.IsDevelopment())
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return Path.Combine(localAppData, "Fleet", "DataProtection-Keys");
+        }
+
+        return Path.Combine(Path.GetTempPath(), "Fleet", "DataProtection-Keys");
+    }
+
+    return "/home/aspnet/DataProtection-Keys";
 }
 
 static string? FirstNonEmpty(params string?[] values)

@@ -21,7 +21,6 @@ public class RepoSandbox : IRepoSandbox
     private string _repoRoot = string.Empty;
     private string _repoFullName = string.Empty;
     private string _branchName = string.Empty;
-    private string _accessToken = string.Empty;
     private bool _disposed;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
@@ -66,7 +65,6 @@ public class RepoSandbox : IRepoSandbox
     {
         _repoFullName = repoFullName;
         _branchName = branchName;
-        _accessToken = accessToken;
 
         // Create a unique repo directory underneath the configured sandbox root.
         _repoRoot = Path.Combine(_sandboxRoot, Guid.NewGuid().ToString("N"));
@@ -364,7 +362,7 @@ public class RepoSandbox : IRepoSandbox
         }
     }
 
-    public async Task CommitAndPushAsync(string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken)
+    public async Task CommitAndPushAsync(string accessToken, string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken)
     {
         EnsureInitialized();
         await _writeLock.WaitAsync(cancellationToken);
@@ -391,7 +389,10 @@ public class RepoSandbox : IRepoSandbox
                 throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
 
             // Push to remote
-            result = await RunGitAsync($"push -u origin {_branchName}", cancellationToken: cancellationToken);
+            await UpdateOriginRemoteAsync(accessToken, cancellationToken);
+            result = await RunGitAsync(
+                $"push -u origin \"{EscapeGitArgument(_branchName)}\"",
+                cancellationToken: cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git push failed: {result.Stderr}");
 
@@ -401,6 +402,17 @@ public class RepoSandbox : IRepoSandbox
         {
             _writeLock.Release();
         }
+    }
+
+    private async Task UpdateOriginRemoteAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        var remoteUrl = BuildAuthenticatedCloneUrl(_repoFullName, accessToken);
+        var result = await RunGitAsync(
+            $"remote set-url origin \"{EscapeGitArgument(remoteUrl)}\"",
+            cancellationToken: cancellationToken);
+
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"Git remote update failed: {result.Stderr}");
     }
 
     public async Task<IReadOnlyList<FileChange>> GetChangeSummaryAsync(CancellationToken cancellationToken)

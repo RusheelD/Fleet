@@ -1,3 +1,4 @@
+using Fleet.Server.Connections;
 using System.Text.Json;
 
 namespace Fleet.Server.Agents.Tools;
@@ -6,7 +7,7 @@ namespace Fleet.Server.Agents.Tools;
 /// Commits and pushes all pending changes to the remote branch.
 /// The orchestrator creates the draft PR up front — this tool just pushes commits to it.
 /// </summary>
-public class CommitAndPushTool : IAgentTool
+public class CommitAndPushTool(IConnectionService connectionService) : IAgentTool
 {
     public string Name => "commit_and_push";
 
@@ -40,7 +41,18 @@ public class CommitAndPushTool : IAgentTool
 
         try
         {
+            if (!int.TryParse(context.UserId, out var userId))
+                return "Error: invalid user ID.";
+
+            var accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
+                userId,
+                context.RepoFullName,
+                cancellationToken);
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return $"Error: no linked GitHub account can access '{context.RepoFullName}'.";
+
             await context.Sandbox.CommitAndPushAsync(
+                accessToken,
                 commitMessage,
                 authorName: "Fleet Agent",
                 authorEmail: "agent@fleet.dev",

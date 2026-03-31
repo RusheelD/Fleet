@@ -86,11 +86,12 @@ public interface IRepoSandbox : IAsyncDisposable
     /// <summary>
     /// Stages all changes, commits, and pushes to the remote branch.
     /// </summary>
+    /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before pushing.</param>
     /// <param name="commitMessage">Commit message.</param>
     /// <param name="authorName">Commit author name.</param>
     /// <param name="authorEmail">Commit author email.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task CommitAndPushAsync(string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken = default);
+    Task CommitAndPushAsync(string accessToken, string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets a summary of all file changes since the branch was created.

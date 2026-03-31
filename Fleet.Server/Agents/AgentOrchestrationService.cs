@@ -24,8 +24,7 @@ namespace Fleet.Server.Agents;
 /// </summary>
 public class AgentOrchestrationService(
     FleetDbContext db,
-    IConnectionRepository connectionRepository,
-    IGitHubTokenProtector tokenProtector,
+    IConnectionService connectionService,
     IWorkItemRepository workItemRepository,
     IServiceScopeFactory serviceScopeFactory,
     ILLMClient llmClient,
@@ -353,7 +352,10 @@ public class AgentOrchestrationService(
             codingRunCharged = true;
 
             // 5. Resolve a GitHub access token that can access this repository.
-            var accessToken = await ResolveGitHubAccessTokenForRepoAsync(userId, project.Repo, cancellationToken)
+            var accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
+                    userId,
+                    project.Repo,
+                    cancellationToken)
                 ?? throw new InvalidOperationException(
                     $"No linked GitHub account can access '{project.Repo}'. Link/re-link a GitHub account with repository access.");
 
@@ -1238,18 +1240,19 @@ public class AgentOrchestrationService(
             }
 
             // Pipeline complete — final commit + push so the draft PR has all changes
-            try
-            {
-                await sandbox.CommitAndPushAsync(
-                    $"fleet: finalize changes for #{workItem.WorkItemNumber}",
-                    authorName: commitAuthorName,
-                    authorEmail: commitAuthorEmail,
-                    externalCancellation);
-            }
-            catch (Exception pushEx)
-            {
-                logger.LogWarning(pushEx, "Final push failed (changes may already be pushed)");
-            }
+            accessToken = await connectionService.ResolveGitHubAccessTokenForRepoAsync(
+                    userId,
+                    repoFullName,
+                    externalCancellation)
+                ?? throw new InvalidOperationException(
+                    $"No linked GitHub account can access '{repoFullName}'. Link/re-link a GitHub account with repository access.");
+
+            await sandbox.CommitAndPushAsync(
+                accessToken,
+                $"fleet: finalize changes for #{workItem.WorkItemNumber}",
+                authorName: commitAuthorName,
+                authorEmail: commitAuthorEmail,
+                externalCancellation);
 
             // Mark the draft PR as ready for review
             var resolvedPrNumber = prNumber > 0
@@ -1268,6 +1271,12 @@ public class AgentOrchestrationService(
                     if (string.IsNullOrWhiteSpace(prUrl))
                         prUrl = discoveredPr.Url;
                 }
+            }
+
+            if (string.IsNullOrWhiteSpace(prUrl))
+            {
+                throw new InvalidOperationException(
+                    $"Execution completed its work, but Fleet could not create or locate a GitHub pull request for branch '{sandbox.BranchName}'.");
             }
 
             if (resolvedPrNumber > 0)
@@ -2130,6 +2139,7 @@ public class AgentOrchestrationService(
                 $"Target branch: {pullRequestTargetBranch}\n");
 
             await sandbox.CommitAndPushAsync(
+                accessToken,
                 $"fleet: start work on #{workItem.WorkItemNumber} - {workItem.Title}",
                 authorName: commitAuthorName,
                 authorEmail: commitAuthorEmail,
@@ -2174,9 +2184,34 @@ public class AgentOrchestrationService(
 
             if (!openResult.Success)
             {
-                logger.LogWarning("Failed to open draft PR: {Status} - {Body}",
-                    openResult.StatusCode, openResult.ResponseBody);
-                return (null, 0);
+                var existingPullRequest = await FindOpenPullRequestByHeadBranchAsync(
+                    accessToken,
+                    repoFullName,
+                    sandbox.BranchName,
+                    cancellationToken);
+
+                if (existingPullRequest.Number > 0 && !string.IsNullOrWhiteSpace(existingPullRequest.Url))
+                {
+                    logger.LogWarning(
+                        "Draft PR creation returned {Status}; reusing existing PR #{PrNumber}: {PrUrl}",
+                        openResult.StatusCode,
+                        existingPullRequest.Number,
+                        existingPullRequest.Url);
+
+                    if (execution is not null)
+                    {
+                        execution.PullRequestUrl = existingPullRequest.Url;
+                        await scopedDb.SaveChangesAsync(cancellationToken);
+                    }
+
+                    return (existingPullRequest.Url, existingPullRequest.Number);
+                }
+
+                var errorMessage = TryExtractGitHubApiErrorMessage(openResult.ResponseBody)
+                    ?? $"GitHub returned {(int)openResult.StatusCode} ({openResult.StatusCode}).";
+
+                throw new InvalidOperationException(
+                    $"Fleet could not open a GitHub pull request for branch '{sandbox.BranchName}': {errorMessage}");
             }
 
             var prResult = JsonSerializer.Deserialize<JsonElement>(openResult.ResponseBody);
@@ -2197,7 +2232,7 @@ public class AgentOrchestrationService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to open draft PR for branch {Branch}", sandbox.BranchName);
-            return (null, 0);
+            throw;
         }
     }
 
@@ -2235,51 +2270,6 @@ public class AgentOrchestrationService(
             prResponse.IsSuccessStatusCode,
             prResponse.StatusCode,
             prResponseBody);
-    }
-
-    private async Task<string?> ResolveGitHubAccessTokenForRepoAsync(
-        int userId,
-        string repoFullName,
-        CancellationToken cancellationToken)
-    {
-        var accounts = await connectionRepository.GetByProviderAllAsync(userId, "GitHub");
-        if (accounts.Count == 0)
-            return null;
-
-        var candidates = accounts
-            .Select(account => tokenProtector.Unprotect(account.AccessToken))
-            .Where(token => !string.IsNullOrWhiteSpace(token))
-            .Select(token => token!)
-            .ToList();
-
-        if (candidates.Count == 0)
-            return null;
-
-        if (candidates.Count == 1)
-            return candidates[0];
-
-        var client = httpClientFactory.CreateClient("GitHub");
-        foreach (var candidate in candidates)
-        {
-            if (await RepoExistsForTokenAsync(client, candidate, repoFullName, cancellationToken))
-                return candidate;
-        }
-
-        return candidates[0];
-    }
-
-    private static async Task<bool> RepoExistsForTokenAsync(
-        HttpClient client,
-        string accessToken,
-        string repoFullName,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{repoFullName}");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-
-        using var response = await client.SendAsync(request, cancellationToken);
-        return response.IsSuccessStatusCode;
     }
 
     private async Task<string> ResolvePullRequestTargetBranchAsync(
@@ -2426,6 +2416,30 @@ public class AgentOrchestrationService(
 
         return responseBody.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
                responseBody.Contains("\"title\"", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryExtractGitHubApiErrorMessage(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+            return null;
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<JsonElement>(responseBody);
+            if (payload.TryGetProperty("message", out var messageProp))
+            {
+                var message = messageProp.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                    return message.Trim();
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall back to the raw body below.
+        }
+
+        var trimmed = responseBody.Trim();
+        return trimmed.Length <= 400 ? trimmed : trimmed[..400];
     }
 
     private static string BuildPullRequestTitle(WorkItemDto workItem)
