@@ -64,4 +64,22 @@ src/
     expect(normalizeExecutionDocumentationMarkdown(markdown)).toContain('```text')
     expect(normalizeExecutionDocumentationMarkdown(markdown)).toContain('src/')
   })
+
+  it('unwraps plaintext wrappers around embedded markdown blocks', () => {
+    const markdown = `
+## Phase Outputs
+
+\`\`\`output
+\`\`\`markdown
+# Summary
+
+- Updated docs formatting
+\`\`\`
+\`\`\`
+`.trim()
+
+    expect(normalizeExecutionDocumentationMarkdown(markdown)).toContain('# Summary')
+    expect(normalizeExecutionDocumentationMarkdown(markdown)).not.toContain('```output')
+    expect(normalizeExecutionDocumentationMarkdown(markdown)).not.toContain('```markdown')
+  })
 })

@@ -10,6 +10,10 @@ function slugify(value: string): string {
 }
 
 function looksLikeMarkdownDocument(body: string): boolean {
+  if (/^\s*```(?:md|markdown|mdx)\b/im.test(body)) {
+    return true
+  }
+
   const lines = body.trim().split('\n')
   const nonEmptyLines = lines.map((line) => line.trim()).filter((line) => line.length > 0)
   if (nonEmptyLines.length === 0) {
@@ -57,7 +61,7 @@ function shouldUnwrapFence(info: string, body: string): boolean {
     return true
   }
 
-  if (language && language !== 'text' && language !== 'txt') {
+  if (language && language !== 'text' && language !== 'txt' && language !== 'plain' && language !== 'plaintext' && language !== 'output') {
     return false
   }
 
@@ -71,7 +75,7 @@ function unwrapMarkdownFences(markdown: string): string {
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
-    const openFence = line.match(/^(`{3,})([^`]*)$/)
+    const openFence = line.match(/^\s*(`{3,})([^`]*)\s*$/)
     if (!openFence) {
       output.push(line)
       continue
@@ -81,8 +85,28 @@ function unwrapMarkdownFences(markdown: string): string {
     const info = openFence[2] ?? ''
     const blockLines: string[] = []
     let closingIndex = index + 1
-    while (closingIndex < lines.length && !new RegExp(`^${fence}\\s*$`).test(lines[closingIndex])) {
-      blockLines.push(lines[closingIndex])
+    let depth = 1
+    while (closingIndex < lines.length) {
+      const candidateLine = lines[closingIndex]
+      if (new RegExp(`^\\s*${fence}\\S.*$`).test(candidateLine)) {
+        depth++
+        blockLines.push(candidateLine)
+        closingIndex++
+        continue
+      }
+
+      if (new RegExp(`^\\s*${fence}\\s*$`).test(candidateLine)) {
+        depth--
+        if (depth === 0) {
+          break
+        }
+
+        blockLines.push(candidateLine)
+        closingIndex++
+        continue
+      }
+
+      blockLines.push(candidateLine)
       closingIndex++
     }
 

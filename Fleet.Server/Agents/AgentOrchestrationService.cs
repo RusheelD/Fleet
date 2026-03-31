@@ -2008,12 +2008,16 @@ public class AgentOrchestrationService(
             .Select(p => p.Output)
             .FirstOrDefault(output => !string.IsNullOrWhiteSpace(output));
 
-        if (!string.IsNullOrWhiteSpace(documentationOutput))
+        var normalizedDocumentationOutput = string.IsNullOrWhiteSpace(documentationOutput)
+            ? null
+            : ExecutionDocumentationFormatter.NormalizeMarkdown(TrimOutputForDocs(documentationOutput));
+
+        if (!string.IsNullOrWhiteSpace(normalizedDocumentationOutput))
         {
             sb.AppendLine();
             sb.AppendLine("## Generated Documentation");
             sb.AppendLine();
-            sb.AppendLine(documentationOutput.Trim());
+            sb.AppendLine(normalizedDocumentationOutput);
         }
 
         if (phaseResults.Count > 0)
@@ -2041,9 +2045,18 @@ public class AgentOrchestrationService(
                 if (!phase.Success && !string.IsNullOrWhiteSpace(phase.Error))
                     sb.AppendLine($"- Error: {phase.Error}");
                 sb.AppendLine();
-                sb.AppendLine("```text");
-                sb.AppendLine(TrimOutputForDocs(phase.Output));
-                sb.AppendLine("```");
+                var trimmedOutput = TrimOutputForDocs(phase.Output);
+                var formattedOutput = ExecutionDocumentationFormatter.FormatPhaseOutput(trimmedOutput);
+                var normalizedPhaseOutput = ExecutionDocumentationFormatter.NormalizeMarkdown(trimmedOutput);
+                if (!string.IsNullOrWhiteSpace(normalizedDocumentationOutput) &&
+                    string.Equals(phase.Role, AgentRole.Documentation.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(normalizedPhaseOutput, normalizedDocumentationOutput, StringComparison.Ordinal))
+                {
+                    sb.AppendLine("_Rendered above in Generated Documentation._");
+                    continue;
+                }
+
+                sb.AppendLine(formattedOutput);
             }
         }
         else
