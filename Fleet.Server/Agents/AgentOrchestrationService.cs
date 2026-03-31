@@ -755,6 +755,7 @@ public class AgentOrchestrationService(
         // so a scoped IServiceProvider would throw ObjectDisposedException here.
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var scopedDb = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
+        var scopedConnectionService = scope.ServiceProvider.GetRequiredService<IConnectionService>();
         var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
         var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
         var scopedNotificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
@@ -802,6 +803,7 @@ public class AgentOrchestrationService(
                 executionId, repoFullName, branchName);
 
             var accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                scopedConnectionService,
                 userId,
                 repoFullName,
                 externalCancellation);
@@ -1244,6 +1246,7 @@ public class AgentOrchestrationService(
 
             // Pipeline complete — final commit + push so the draft PR has all changes
             accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                scopedConnectionService,
                 userId,
                 repoFullName,
                 externalCancellation);
@@ -2663,6 +2666,17 @@ public class AgentOrchestrationService(
     }
 
     private async Task<string> ResolveRequiredRepoAccessTokenAsync(
+        int userId,
+        string repoFullName,
+        CancellationToken cancellationToken)
+        => await ResolveRequiredRepoAccessTokenAsync(
+            connectionService,
+            userId,
+            repoFullName,
+            cancellationToken);
+
+    private static async Task<string> ResolveRequiredRepoAccessTokenAsync(
+        IConnectionService connectionService,
         int userId,
         string repoFullName,
         CancellationToken cancellationToken)

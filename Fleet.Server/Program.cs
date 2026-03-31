@@ -422,6 +422,7 @@ static void ApplyEnvironmentAliases(ConfigurationManager configuration)
 {
     SetIfMissing(configuration, "GitHub:ClientId", "GITHUB_CLIENT_ID", "GITHUB_OAUTH_CLIENT_ID");
     SetIfMissing(configuration, "GitHub:ClientSecret", "GITHUB_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_SECRET");
+    SetIfMissing(configuration, "GitHub:TokenEncryptionKey", "GITHUB_TOKEN_ENCRYPTION_KEY");
 }
 
 static void SetIfMissing(ConfigurationManager configuration, string targetKey, params string[] environmentAliases)
