@@ -15,7 +15,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ExecutionDocumentation } from '../../proxies'
 import { useIsMobile } from '../../hooks'
-import { downloadExecutionDocumentation } from './executionDocs'
+import { downloadExecutionDocumentation, normalizeExecutionDocumentationMarkdown } from './executionDocs'
 
 const useStyles = makeStyles({
     dialogSurface: {
@@ -177,6 +177,7 @@ interface ExecutionDocsDialogProps {
 export function ExecutionDocsDialog({ docs, open, onOpenChange }: ExecutionDocsDialogProps) {
     const styles = useStyles()
     const isMobile = useIsMobile()
+    const renderedMarkdown = docs ? normalizeExecutionDocumentationMarkdown(docs.markdown) : ''
 
     return (
         <Dialog open={open} onOpenChange={(_event, data) => onOpenChange(data.open)}>
@@ -213,7 +214,7 @@ export function ExecutionDocsDialog({ docs, open, onOpenChange }: ExecutionDocsD
                                                 ),
                                             }}
                                         >
-                                            {docs.markdown}
+                                            {renderedMarkdown}
                                         </Markdown>
                                     </div>
                                 </div>
