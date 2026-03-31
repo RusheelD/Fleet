@@ -44,11 +44,14 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var root = JsonDocument.Parse(argumentsJson).RootElement;
         if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
             return "Error: 'items' array is required.";
 
-        var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+        var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
         var results = new List<object>();
 
         foreach (var item in itemsEl.EnumerateArray())
@@ -76,7 +79,7 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     LevelId: levelId
                 );
 
-                var updated = await workItemService.UpdateAsync(context.ProjectId, id, request);
+                var updated = await workItemService.UpdateAsync(projectId, id, request);
                 if (updated is null)
                 {
                     results.Add(new { Id = id, Error = "Not found." });

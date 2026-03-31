@@ -24,7 +24,7 @@ import {
     Checkbox,
 } from '@fluentui/react-components'
 import { CheckmarkCircle16Filled, DismissCircle16Filled, LockClosedRegular } from '@fluentui/react-icons'
-import { useCreateGitHubRepo, useCreateProject, useCheckSlug, useGitHubRepos, useUserSettings } from '../../proxies'
+import { getApiErrorMessage, useCreateGitHubRepo, useCreateProject, useCheckSlug, useGitHubRepos, useUserSettings } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import { canCreateProject } from './projectCreationGate'
 
@@ -155,6 +155,9 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground3,
         fontSize: tokens.fontSizeBase100,
     },
+    formError: {
+        color: tokens.colorPaletteRedForeground1,
+    },
     privacyToggle: {
         marginTop: tokens.spacingVerticalXXS,
     },
@@ -190,6 +193,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
     const [newRepoDescription, setNewRepoDescription] = useState('')
     const [newRepoPrivate, setNewRepoPrivate] = useState(false)
     const [selectedAccountId, setSelectedAccountId] = useState<number | undefined>(undefined)
+    const [submissionError, setSubmissionError] = useState<string | null>(null)
 
     const { data: settings } = useUserSettings()
     const gitHubConnections = useMemo(
@@ -225,7 +229,19 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         [gitHubConnections, selectedAccountId],
     )
 
-    const { data: repos, isLoading: isLoadingRepos } = useGitHubRepos(hasGitHub && open)
+    const {
+        data: repos,
+        isLoading: isLoadingRepos,
+        error: reposError,
+    } = useGitHubRepos(hasGitHub && open && repoMode === 'existing')
+    const {
+        data: selectedAccountRepos,
+        isLoading: isLoadingSelectedAccountRepos,
+        error: selectedAccountReposError,
+    } = useGitHubRepos(
+        hasGitHub && open && repoMode === 'new' && typeof selectedAccountId === 'number',
+        selectedAccountId,
+    )
 
     const filteredRepos = useMemo(() => {
         if (!repos) return []
@@ -260,6 +276,12 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
     const hasSelectedAccount = typeof selectedAccountId === 'number'
         && gitHubConnections.some((account) => account.id === selectedAccountId)
     const selectedAccountLogin = selectedAccount?.connectedAs?.trim() ?? ''
+    const existingRepoErrorMessage = reposError
+        ? getApiErrorMessage(reposError, 'Unable to load GitHub repositories.')
+        : null
+    const selectedAccountRepoErrorMessage = selectedAccountReposError
+        ? getApiErrorMessage(selectedAccountReposError, 'Unable to verify repository access for this GitHub account.')
+        : null
     const newRepoNameValid = normalizedNewRepoName.length > 0 && isValidGitHubRepoName(normalizedNewRepoName)
     const canCheckNewRepoAvailability =
         repoMode === 'new'
@@ -267,19 +289,15 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         && selectedAccountLogin.length > 0
         && normalizedNewRepoName.length > 0
         && newRepoNameValid
-    const isCheckingNewRepoAvailability = canCheckNewRepoAvailability && isLoadingRepos
+    const isCheckingNewRepoAvailability = canCheckNewRepoAvailability && isLoadingSelectedAccountRepos
     const isNewRepoNameTaken = useMemo(() => {
-        if (!canCheckNewRepoAvailability || !repos) {
+        if (!canCheckNewRepoAvailability || !selectedAccountRepos) {
             return false
         }
 
-        const owner = selectedAccountLogin.toLowerCase()
         const candidateName = normalizedNewRepoName.toLowerCase()
-        return repos.some((item) =>
-            item.owner.toLowerCase() === owner
-            && item.name.toLowerCase() === candidateName,
-        )
-    }, [canCheckNewRepoAvailability, repos, selectedAccountLogin, normalizedNewRepoName])
+        return selectedAccountRepos.some((item) => item.name.toLowerCase() === candidateName)
+    }, [canCheckNewRepoAvailability, selectedAccountRepos, normalizedNewRepoName])
     const isPending = createMutation.isPending || createRepoMutation.isPending
 
     const canCreate = canCreateProject({
@@ -292,6 +310,12 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         hasSelectedAccount,
         newRepoNameValid,
         newRepoNameTaken: isNewRepoNameTaken,
+        hasGitHubRepoError: repoMode === 'existing'
+            ? !!existingRepoErrorMessage
+            : !!selectedAccountRepoErrorMessage,
+        isCheckingGitHubRepoState: repoMode === 'existing'
+            ? isLoadingRepos
+            : isCheckingNewRepoAvailability,
         isPending,
     })
 
@@ -305,32 +329,48 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
         setNewRepoDescription('')
         setNewRepoPrivate(false)
         setSelectedAccountId(undefined)
+        setSubmissionError(null)
     }
 
     const handleCreate = async () => {
         if (!canCreate) return
 
+        setSubmissionError(null)
         let repositoryFullName = repo.trim()
 
         if (repoMode === 'new') {
-            const createdRepo = await createRepoMutation.mutateAsync({
-                name: normalizedNewRepoName,
-                description: newRepoDescription.trim() || undefined,
-                private: newRepoPrivate,
-                accountId: selectedAccountId,
-            })
-            repositoryFullName = createdRepo.fullName
+            try {
+                const createdRepo = await createRepoMutation.mutateAsync({
+                    name: normalizedNewRepoName,
+                    description: newRepoDescription.trim() || undefined,
+                    private: newRepoPrivate,
+                    accountId: selectedAccountId,
+                })
+                repositoryFullName = createdRepo.fullName
+            } catch (error) {
+                setSubmissionError(getApiErrorMessage(error, 'Unable to create the GitHub repository.'))
+                return
+            }
         }
 
-        const project = await createMutation.mutateAsync({
-            title: title.trim(),
-            description: description.trim(),
-            repo: repositoryFullName,
-        })
+        try {
+            const project = await createMutation.mutateAsync({
+                title: title.trim(),
+                description: description.trim(),
+                repo: repositoryFullName,
+            })
 
-        resetForm()
-        onOpenChange(false)
-        onCreated?.(project.slug)
+            resetForm()
+            onOpenChange(false)
+            onCreated?.(project.slug)
+        } catch (error) {
+            setSubmissionError(getApiErrorMessage(
+                error,
+                repoMode === 'new'
+                    ? 'The GitHub repository was created, but Fleet could not create the project.'
+                    : 'Unable to create the project.',
+            ))
+        }
     }
 
     return (
@@ -392,10 +432,11 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                 <Field
                                     label="GitHub Repository"
                                     required
-                                    validationState={repo.trim().length > 0 && !hasSelectedRepo ? 'error' : undefined}
-                                    validationMessage={repo.trim().length > 0 && !hasSelectedRepo
-                                        ? 'Select a repository from your linked GitHub list.'
-                                        : undefined}
+                                    validationState={existingRepoErrorMessage || (repo.trim().length > 0 && !hasSelectedRepo) ? 'error' : undefined}
+                                    validationMessage={existingRepoErrorMessage
+                                        ?? (repo.trim().length > 0 && !hasSelectedRepo
+                                            ? 'Select a repository from your linked GitHub list.'
+                                            : undefined)}
                                     hint={
                                         hasGitHub ? undefined : (
                                             <Text className={styles.repoHint}>
@@ -407,7 +448,9 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                     {hasGitHub ? (
                                         <Combobox
                                             className={styles.repoCombobox}
-                                            placeholder={isLoadingRepos ? 'Loading repositories...' : 'Search your repositories...'}
+                                            placeholder={existingRepoErrorMessage
+                                                ? 'Reconnect GitHub to load repositories'
+                                                : (isLoadingRepos ? 'Loading repositories...' : 'Search your repositories...')}
                                             value={repo || repoSearch}
                                             freeform
                                             onInput={(event: SyntheticEvent<HTMLInputElement>) => {
@@ -427,6 +470,10 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                             {isLoadingRepos ? (
                                                 <Option disabled key="__loading" text="">
                                                     <Spinner size="tiny" label="Loading repos..." />
+                                                </Option>
+                                            ) : existingRepoErrorMessage ? (
+                                                <Option key="__error" disabled text="">
+                                                    {existingRepoErrorMessage}
                                                 </Option>
                                             ) : filteredRepos.length > 0 ? (
                                                 filteredRepos.map((item) => (
@@ -466,8 +513,9 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                     <Field
                                         label="GitHub Account"
                                         required
-                                        validationState={hasGitHub && !hasSelectedAccount ? 'error' : undefined}
-                                        validationMessage={hasGitHub && !hasSelectedAccount ? 'Select which GitHub account to use.' : undefined}
+                                        validationState={selectedAccountRepoErrorMessage || (hasGitHub && !hasSelectedAccount) ? 'error' : undefined}
+                                        validationMessage={selectedAccountRepoErrorMessage
+                                            ?? (hasGitHub && !hasSelectedAccount ? 'Select which GitHub account to use.' : undefined)}
                                         hint={
                                             hasGitHub ? 'Primary account is selected by default.' : (
                                                 <Text className={styles.repoHint}>
@@ -525,7 +573,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                             value={newRepoName}
                                             onChange={(_event, data) => setNewRepoName(data.value)}
                                         />
-                                        {canCheckNewRepoAvailability && (
+                                        {canCheckNewRepoAvailability && !selectedAccountRepoErrorMessage && (
                                             <div className={styles.repoAvailabilityRow}>
                                                 {isCheckingNewRepoAvailability ? (
                                                     <Spinner size="extra-tiny" />
@@ -563,6 +611,9 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                                         onChange={(_event, data) => setNewRepoPrivate(!!data.checked)}
                                     />
                                 </div>
+                            )}
+                            {submissionError && (
+                                <Text className={styles.formError}>{submissionError}</Text>
                             )}
                         </div>
                     </DialogContent>

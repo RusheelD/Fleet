@@ -239,7 +239,7 @@ export function Layout() {
     }, [location.state])
 
     useEffect(() => {
-        if (preferences) {
+        if (typeof preferences?.sidebarCollapsed === 'boolean') {
             setSidebarExpanded(!preferences.sidebarCollapsed)
         }
     }, [preferences?.sidebarCollapsed])

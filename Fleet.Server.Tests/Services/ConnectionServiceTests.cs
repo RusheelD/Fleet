@@ -133,7 +133,7 @@ public class ConnectionServiceTests
     }
 
     [TestMethod]
-    public async Task LinkGitHubAsync_StoresRefreshTokenMetadataWhenGitHubReturnsExpiringTokens()
+    public async Task LinkGitHubAsync_PersistsOAuthAccessTokenWithoutRefreshMetadata()
     {
         LinkedAccount? createdAccount = null;
         _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
@@ -145,8 +145,8 @@ public class ConnectionServiceTests
         var responses = new Queue<HttpResponseMessage>([
             JsonResponse(HttpStatusCode.OK, """
                 {
-                  "access_token": "access-123",
-                  "refresh_token": "refresh-123",
+                  "access_token": "gho_access-123",
+                  "refresh_token": "ghr_refresh-123",
                   "expires_in": 28800,
                   "refresh_token_expires_in": 15897600,
                   "token_type": "bearer",
@@ -179,21 +179,14 @@ public class ConnectionServiceTests
         var httpClient = new HttpClient(handler.Object);
         _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
 
-        var beforeLink = DateTime.UtcNow;
         var state = await _sut.CreateGitHubOAuthStateAsync(UserId);
 
         var result = await _sut.LinkGitHubAsync(UserId, "code-123", "http://redirect", state.State);
 
         Assert.AreEqual("octocat", result.ConnectedAs);
         Assert.IsNotNull(createdAccount);
-        Assert.AreEqual("access-123", createdAccount.AccessToken);
-        Assert.AreEqual("refresh-123", createdAccount.RefreshToken);
+        Assert.AreEqual("gho_access-123", createdAccount.AccessToken);
         Assert.AreEqual("12345", createdAccount.ExternalUserId);
-        Assert.IsNotNull(createdAccount.AccessTokenExpiresAtUtc);
-        Assert.IsNotNull(createdAccount.RefreshTokenExpiresAtUtc);
-        Assert.IsTrue(createdAccount.AccessTokenExpiresAtUtc > beforeLink.AddHours(7));
-        Assert.IsTrue(createdAccount.AccessTokenExpiresAtUtc < beforeLink.AddHours(9));
-        Assert.IsTrue(createdAccount.RefreshTokenExpiresAtUtc > beforeLink.AddDays(180));
     }
 
     // ── GetGitHubRepositoriesAsync ───────────────────────────
@@ -227,47 +220,96 @@ public class ConnectionServiceTests
     }
 
     [TestMethod]
-    public async Task GetGitHubRepositoriesAsync_RefreshesExpiredAccessTokenBeforeListingRepos()
+    public async Task GetGitHubRepositoriesAsync_UsesStoredOAuthAccessToken_WhenLegacyRefreshMetadataExists()
     {
         var account = new LinkedAccount
         {
             Id = 1,
             Provider = "GitHub",
             ConnectedAs = "octocat",
-            AccessToken = "expired-access-token",
-            AccessTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(-10),
-            RefreshToken = "refresh-123",
-            RefreshTokenExpiresAtUtc = DateTime.UtcNow.AddMonths(1),
+            AccessToken = "gho_access-token",
             UserProfileId = UserId,
             IsPrimary = true,
         };
 
         _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
             .ReturnsAsync([account]);
-        _connectionRepo.Setup(r => r.UpdateAsync(account))
-            .Returns(Task.CompletedTask);
 
         string? repoListToken = null;
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                if ((request.RequestUri?.ToString() ?? string.Empty).Contains("/user/repos", StringComparison.Ordinal))
+                    repoListToken = request.Headers.Authorization?.Parameter;
+
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK, """
+                    [
+                      {
+                        "full_name": "octocat/demo-repo",
+                        "name": "demo-repo",
+                        "owner": { "login": "octocat" },
+                        "description": "Demo description",
+                        "private": false,
+                        "html_url": "https://github.com/octocat/demo-repo"
+                      }
+                    ]
+                    """));
+            });
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        var repos = await _sut.GetGitHubRepositoriesAsync(UserId);
+
+        Assert.AreEqual(1, repos.Count);
+        Assert.AreEqual("gho_access-token", repoListToken);
+        Assert.AreEqual("gho_access-token", account.AccessToken);
+        _connectionRepo.Verify(r => r.UpdateAsync(It.IsAny<LinkedAccount>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task GetGitHubRepositoriesAsync_SkipsUnauthorizedAccount_WhenAnotherAccountIsValid()
+    {
+        var invalidAccount = new LinkedAccount
+        {
+            Id = 1,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "gho_invalid-token",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+        var validAccount = new LinkedAccount
+        {
+            Id = 2,
+            Provider = "GitHub",
+            ConnectedAs = "hubot",
+            AccessToken = "gho_valid-token",
+            UserProfileId = UserId,
+        };
+
+        _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
+            .ReturnsAsync([invalidAccount, validAccount]);
+
+        var seenTokens = new List<string?>();
         var responses = new Queue<HttpResponseMessage>([
-            JsonResponse(HttpStatusCode.OK, """
-                {
-                  "access_token": "fresh-access-token",
-                  "refresh_token": "fresh-refresh-token",
-                  "expires_in": 28800,
-                  "refresh_token_expires_in": 15897600,
-                  "token_type": "bearer",
-                  "scope": "repo read:user user:email"
-                }
-                """),
+            JsonResponse(HttpStatusCode.Unauthorized, """{ "message": "Bad credentials" }"""),
             JsonResponse(HttpStatusCode.OK, """
                 [
                   {
-                    "full_name": "octocat/demo-repo",
+                    "full_name": "hubot/demo-repo",
                     "name": "demo-repo",
-                    "owner": { "login": "octocat" },
+                    "owner": { "login": "hubot" },
                     "description": "Demo description",
                     "private": false,
-                    "html_url": "https://github.com/octocat/demo-repo"
+                    "html_url": "https://github.com/hubot/demo-repo"
                   }
                 ]
                 """),
@@ -283,7 +325,9 @@ public class ConnectionServiceTests
             .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
             {
                 if ((request.RequestUri?.ToString() ?? string.Empty).Contains("/user/repos", StringComparison.Ordinal))
-                    repoListToken = request.Headers.Authorization?.Parameter;
+                {
+                    seenTokens.Add(request.Headers.Authorization?.Parameter);
+                }
 
                 if (responses.Count == 0)
                     throw new InvalidOperationException("No queued HTTP response.");
@@ -297,10 +341,132 @@ public class ConnectionServiceTests
         var repos = await _sut.GetGitHubRepositoriesAsync(UserId);
 
         Assert.AreEqual(1, repos.Count);
-        Assert.AreEqual("fresh-access-token", repoListToken);
-        Assert.AreEqual("fresh-access-token", account.AccessToken);
-        Assert.AreEqual("fresh-refresh-token", account.RefreshToken);
-        _connectionRepo.Verify(r => r.UpdateAsync(account), Times.Once);
+        CollectionAssert.AreEqual(new[] { "gho_invalid-token", "gho_valid-token" }, seenTokens);
+    }
+
+    [TestMethod]
+    public async Task GetGitHubRepositoriesAsync_AllAccountsUnauthorized_ThrowsRelinkMessage()
+    {
+        var firstAccount = new LinkedAccount
+        {
+            Id = 1,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "gho_invalid-token-1",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+        var secondAccount = new LinkedAccount
+        {
+            Id = 2,
+            Provider = "GitHub",
+            ConnectedAs = "hubot",
+            AccessToken = "gho_invalid-token-2",
+            UserProfileId = UserId,
+        };
+
+        _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
+            .ReturnsAsync([firstAccount, secondAccount]);
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(JsonResponse(HttpStatusCode.Unauthorized, """{ "message": "Bad credentials" }"""));
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => _sut.GetGitHubRepositoriesAsync(UserId));
+
+        StringAssert.Contains(ex.Message, "Please re-link your GitHub account");
+    }
+
+    [TestMethod]
+    public async Task ResolveGitHubAccessTokenForRepoAsync_UsesStoredOAuthAccessToken()
+    {
+        const string repoFullName = "octocat/demo-repo";
+        var account = new LinkedAccount
+        {
+            Id = 1,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "gho_access-token",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+
+        _connectionRepo.Setup(r => r.GetByProviderAllAsync(UserId, "GitHub"))
+            .ReturnsAsync([account]);
+
+        string? repoProbeToken = null;
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                if ((request.RequestUri?.ToString() ?? string.Empty).Contains($"/repos/{repoFullName}", StringComparison.Ordinal))
+                    repoProbeToken = request.Headers.Authorization?.Parameter;
+
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK, """
+                    {
+                      "full_name": "octocat/demo-repo"
+                    }
+                    """));
+            });
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        var token = await _sut.ResolveGitHubAccessTokenForRepoAsync(UserId, repoFullName);
+
+        Assert.AreEqual("gho_access-token", token);
+        Assert.AreEqual("gho_access-token", repoProbeToken);
+        Assert.AreEqual("gho_access-token", account.AccessToken);
+        _connectionRepo.Verify(r => r.UpdateAsync(It.IsAny<LinkedAccount>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task GetGitHubRepositoriesAsync_SpecificAccountUnauthorized_ThrowsRelinkMessage()
+    {
+        var account = new LinkedAccount
+        {
+            Id = 7,
+            Provider = "GitHub",
+            ConnectedAs = "octocat",
+            AccessToken = "gho_invalid-token",
+            UserProfileId = UserId,
+            IsPrimary = true,
+        };
+
+        _connectionRepo.Setup(r => r.GetByIdAsync(UserId, account.Id))
+            .ReturnsAsync(account);
+
+        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(JsonResponse(HttpStatusCode.Unauthorized, """{ "message": "Bad credentials" }"""));
+
+        var httpClient = new HttpClient(handler.Object);
+        _httpClientFactory.Setup(f => f.CreateClient("GitHub")).Returns(httpClient);
+
+        var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => _sut.GetGitHubRepositoriesAsync(UserId, account.Id));
+
+        StringAssert.Contains(ex.Message, "Please re-link your GitHub account");
     }
 
     [TestMethod]

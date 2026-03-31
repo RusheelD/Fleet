@@ -61,6 +61,9 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var args = JsonDocument.Parse(argumentsJson).RootElement;
         var id = UpdateWorkItemTool.GetInt(args, "id") ?? 0;
 
@@ -69,7 +72,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
         var levelName = UpdateWorkItemTool.GetString(args, "level");
         if (!string.IsNullOrWhiteSpace(levelName))
         {
-            var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+            var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
             levelId = levels.FirstOrDefault(l => l.Name.Equals(levelName, StringComparison.OrdinalIgnoreCase))?.Id;
         }
 
@@ -89,7 +92,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                 LevelId: levelId
             );
 
-            var updated = await workItemService.UpdateAsync(context.ProjectId, id, updateReq);
+            var updated = await workItemService.UpdateAsync(projectId, id, updateReq);
             if (updated is not null)
             {
                 return JsonSerializer.Serialize(new
@@ -123,7 +126,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
             LevelId: levelId
         );
 
-        var created = await workItemService.CreateAsync(context.ProjectId, createReq);
+        var created = await workItemService.CreateAsync(projectId, createReq);
 
         return JsonSerializer.Serialize(new
         {

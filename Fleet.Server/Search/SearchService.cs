@@ -38,17 +38,17 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
                     $"{w.State} \u00b7 Priority {w.Priority}", w.Project.Title, w.Project.Slug)));
         }
 
-        // Search chat sessions (scoped to user's projects)
+        // Search chat sessions owned by the current user, including global chat.
         if (includeAll || normalizedType == "chats")
         {
             var chats = await context.ChatSessions
                 .AsNoTracking()
                 .Include(c => c.Project)
-                .Where(c => c.Project.OwnerId == ownerId)
+                .Where(c => c.OwnerId == ownerId)
                 .ToListAsync();
             results.AddRange(chats.Select(c =>
                 new SearchResultDto("chat", c.Title, c.LastMessage,
-                    $"{c.Project.Title} \u00b7 {c.Timestamp}", c.Project.Slug)));
+                    $"{(c.Project?.Title ?? "Global chat")} \u00b7 {c.Timestamp}", c.Project?.Slug)));
         }
 
         // Search agent executions (scoped to user's projects)

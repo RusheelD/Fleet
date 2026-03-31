@@ -1,5 +1,7 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig, type ConfigEnv, type UserConfig } from 'vite'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { Socket } from 'node:net'
+import { defineConfig, type ConfigEnv, type ProxyOptions, type UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const LOCAL_FALLBACK = 'http://127.0.0.1:5421'
@@ -44,6 +46,25 @@ function resolveLocalProxyTarget(): string {
   return LOCAL_FALLBACK
 }
 
+function isServerResponse(value: Socket | ServerResponse<IncomingMessage>): value is ServerResponse<IncomingMessage> {
+  return 'writeHead' in value
+}
+
+const configureDevProxy: NonNullable<ProxyOptions['configure']> = (proxy) => {
+  proxy.on('error', (err, _req, res) => {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
+      if (isServerResponse(res) && !res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Backend not ready' }))
+      }
+      return
+    }
+
+    console.error(`[vite] proxy error: ${err.message}`)
+  })
+}
+
 export default defineConfig((config: ConfigEnv): UserConfig => {
   const server = config.command === 'serve'
     ? {
@@ -57,20 +78,7 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
           secure: false,
           // Suppress noisy ECONNREFUSED errors during backend startup.
           // The browser receives a 502 and the frontend fetch layer can retry.
-          configure: (proxy: any) => {
-            proxy.on('error', (err: Error, _req: any, res: any) => {
-              const code = (err as NodeJS.ErrnoException).code
-              if (code === 'ECONNREFUSED' || code === 'ECONNRESET') {
-                if (res && 'writeHead' in res && !res.headersSent) {
-                  res.writeHead(502, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ error: 'Backend not ready' }))
-                }
-                return
-              }
-
-              console.error(`[vite] proxy error: ${err.message}`)
-            })
-          },
+          configure: configureDevProxy,
         },
       },
     }

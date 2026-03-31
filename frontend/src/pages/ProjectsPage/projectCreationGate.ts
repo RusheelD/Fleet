@@ -8,6 +8,8 @@ export interface ProjectCreationGateInput {
   hasSelectedAccount: boolean
   newRepoNameValid: boolean
   newRepoNameTaken: boolean
+  hasGitHubRepoError: boolean
+  isCheckingGitHubRepoState: boolean
   isPending: boolean
 }
 
@@ -16,6 +18,8 @@ export function canCreateProject(input: ProjectCreationGateInput): boolean {
     && input.slugPreview.length > 0
     && input.slugAvailable
     && input.hasGitHub
+    && !input.hasGitHubRepoError
+    && !input.isCheckingGitHubRepoState
     && !input.isPending
 
   if (!baseChecksPass) {

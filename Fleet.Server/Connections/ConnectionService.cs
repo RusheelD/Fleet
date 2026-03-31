@@ -20,7 +20,6 @@ public class ConnectionService(
     ILogger<ConnectionService> logger) : IConnectionService
 {
     private static readonly TimeSpan OAuthStateLifetime = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan GitHubAccessTokenRefreshSkew = TimeSpan.FromMinutes(5);
     private readonly IGitHubTokenProtector _tokenProtector = tokenProtector ?? new NoOpTokenProtector();
     private readonly IDataProtector _stateProtector =
         (dataProtectionProvider ?? DataProtectionProvider.Create("Fleet.ConnectionService"))
@@ -115,11 +114,6 @@ public class ConnectionService(
             // Update the existing linked account with fresh token/profile
             existing.ConnectedAs = gitHubUser.Login;
             existing.AccessToken = _tokenProtector.Protect(tokenBody.AccessToken);
-            existing.AccessTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.ExpiresIn);
-            existing.RefreshToken = string.IsNullOrWhiteSpace(tokenBody.RefreshToken)
-                ? null
-                : _tokenProtector.Protect(tokenBody.RefreshToken);
-            existing.RefreshTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.RefreshTokenExpiresIn);
             existing.ExternalUserId = externalUserId;
             existing.ConnectedAt = DateTime.UtcNow;
             if (!hasPrimary)
@@ -135,11 +129,6 @@ public class ConnectionService(
             Provider = "GitHub",
             ConnectedAs = gitHubUser.Login,
             AccessToken = _tokenProtector.Protect(tokenBody.AccessToken),
-            AccessTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.ExpiresIn),
-            RefreshToken = string.IsNullOrWhiteSpace(tokenBody.RefreshToken)
-                ? null
-                : _tokenProtector.Protect(tokenBody.RefreshToken),
-            RefreshTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.RefreshTokenExpiresIn),
             ExternalUserId = externalUserId,
             ConnectedAt = DateTime.UtcNow,
             UserProfileId = userId,
@@ -272,14 +261,6 @@ public class ConnectionService(
 
             if (await RepoExistsForTokenAsync(client, accessToken, repoFullName, cancellationToken))
                 return accessToken;
-
-            var refreshedToken = await RefreshGitHubAccessTokenAsync(account, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(refreshedToken) &&
-                !string.Equals(refreshedToken, accessToken, StringComparison.Ordinal) &&
-                await RepoExistsForTokenAsync(client, refreshedToken, repoFullName, cancellationToken))
-            {
-                return refreshedToken;
-            }
         }
 
         return null;
@@ -328,6 +309,7 @@ public class ConnectionService(
         var httpClient = httpClientFactory.CreateClient("GitHub");
         var reposByFullName = new Dictionary<string, GitHubRepoDto>(StringComparer.OrdinalIgnoreCase);
         var hasUsableToken = false;
+        var hasAuthorizedRepositoryAccess = false;
 
         foreach (var account in accounts)
         {
@@ -335,7 +317,7 @@ public class ConnectionService(
             if (string.IsNullOrEmpty(accessToken))
             {
                 if (accountId is > 0)
-                    throw new InvalidOperationException("GitHub access token is missing.");
+                    throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
                 continue;
             }
 
@@ -349,7 +331,28 @@ public class ConnectionService(
                 request.Headers.UserAgent.ParseAdd("Fleet/1.0");
 
                 var response = await httpClient.SendAsync(request);
-                response.EnsureSuccessStatusCode();
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    if (accountId is > 0)
+                    {
+                        throw new InvalidOperationException(
+                            "GitHub connection is no longer valid. Please re-link your GitHub account.");
+                    }
+
+                    logger.LogWarning(
+                        "Skipping invalid GitHub token for account {AccountId} ({ConnectedAs}) while listing repositories.",
+                        account.Id,
+                        account.ConnectedAs);
+                    break;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var details = await GetGitHubErrorDetailsAsync(response);
+                    throw new InvalidOperationException($"GitHub repository listing failed: {details}");
+                }
+
+                hasAuthorizedRepositoryAccess = true;
 
                 var pageRepos = await response.Content.ReadFromJsonAsync<List<GitHubRepoListItem>>();
                 if (pageRepos is null || pageRepos.Count == 0)
@@ -380,6 +383,12 @@ public class ConnectionService(
 
         if (!hasUsableToken)
             throw new InvalidOperationException("GitHub access token is missing. Please re-link your GitHub account.");
+
+        if (!hasAuthorizedRepositoryAccess)
+        {
+            throw new InvalidOperationException(
+                "GitHub connection is no longer valid. Please re-link your GitHub account.");
+        }
 
         var repos = reposByFullName.Values
             .OrderBy(r => r.FullName, StringComparer.OrdinalIgnoreCase)
@@ -421,6 +430,12 @@ public class ConnectionService(
             true));
 
         var createResponse = await httpClient.SendAsync(createRequest);
+        if (createResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new InvalidOperationException(
+                "GitHub connection is no longer valid. Please re-link your GitHub account.");
+        }
+
         if (!createResponse.IsSuccessStatusCode)
         {
             var error = await createResponse.Content.ReadFromJsonAsync<GitHubApiErrorResponse>();
@@ -471,6 +486,11 @@ public class ConnectionService(
             {
                 existingSha = null;
             }
+            else if (getResponse.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                throw new InvalidOperationException(
+                    "GitHub connection is no longer valid. Please re-link your GitHub account.");
+            }
             else if (!getResponse.IsSuccessStatusCode)
             {
                 var details = await GetGitHubErrorDetailsAsync(getResponse);
@@ -498,6 +518,12 @@ public class ConnectionService(
             existingSha));
 
         var putResponse = await httpClient.SendAsync(putRequest);
+        if (putResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new InvalidOperationException(
+                "GitHub connection is no longer valid. Please re-link your GitHub account.");
+        }
+
         if (!putResponse.IsSuccessStatusCode)
         {
             var details = await GetGitHubErrorDetailsAsync(putResponse);
@@ -541,106 +567,12 @@ public class ConnectionService(
             ?? throw new InvalidOperationException("No GitHub account is linked.");
     }
 
-    private async Task<string?> GetValidGitHubAccessTokenAsync(
+    private Task<string?> GetValidGitHubAccessTokenAsync(
         LinkedAccount account,
         CancellationToken cancellationToken)
     {
-        var accessToken = _tokenProtector.Unprotect(account.AccessToken);
-        var now = DateTime.UtcNow;
-        var isAccessTokenExpiring = IsTokenExpiring(account.AccessTokenExpiresAtUtc, now);
-        var refreshTokenAvailable = !string.IsNullOrWhiteSpace(_tokenProtector.Unprotect(account.RefreshToken));
-
-        if (!string.IsNullOrWhiteSpace(accessToken) &&
-            !isAccessTokenExpiring)
-        {
-            return accessToken;
-        }
-
-        if (refreshTokenAvailable)
-        {
-            var refreshedToken = await RefreshGitHubAccessTokenAsync(account, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(refreshedToken))
-                return refreshedToken;
-        }
-
-        return isAccessTokenExpiring ? null : accessToken;
-    }
-
-    private async Task<string?> RefreshGitHubAccessTokenAsync(
-        LinkedAccount account,
-        CancellationToken cancellationToken)
-    {
-        var refreshToken = _tokenProtector.Unprotect(account.RefreshToken);
-        if (string.IsNullOrWhiteSpace(refreshToken))
-            return null;
-
-        if (account.RefreshTokenExpiresAtUtc is not null &&
-            account.RefreshTokenExpiresAtUtc <= DateTime.UtcNow)
-        {
-            logger.LogWarning(
-                "GitHub refresh token has expired for account {AccountId} ({ConnectedAs})",
-                account.Id,
-                account.ConnectedAs);
-            return null;
-        }
-
-        var clientId = configuration["GitHub:ClientId"]
-            ?? throw new InvalidOperationException("GitHub:ClientId is not configured.");
-        var clientSecret = configuration["GitHub:ClientSecret"]
-            ?? throw new InvalidOperationException("GitHub:ClientSecret is not configured.");
-
-        var httpClient = httpClientFactory.CreateClient("GitHub");
-        using var refreshRequest = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            { "client_id", clientId },
-            { "client_secret", clientSecret },
-            { "grant_type", "refresh_token" },
-            { "refresh_token", refreshToken },
-        });
-
-        using var response = await httpClient.PostAsync(
-            "https://github.com/login/oauth/access_token",
-            refreshRequest,
-            cancellationToken);
-
-        var tokenBody = await response.Content.ReadFromJsonAsync<GitHubTokenResponse>(cancellationToken: cancellationToken);
-        if (!response.IsSuccessStatusCode || tokenBody is null || string.IsNullOrWhiteSpace(tokenBody.AccessToken))
-        {
-            logger.LogWarning(
-                "GitHub token refresh failed for account {AccountId}: status={StatusCode}, error={Error}",
-                account.Id,
-                response.StatusCode,
-                tokenBody?.Error);
-            return null;
-        }
-
-        account.AccessToken = _tokenProtector.Protect(tokenBody.AccessToken);
-        account.AccessTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.ExpiresIn);
-
-        if (!string.IsNullOrWhiteSpace(tokenBody.RefreshToken))
-            account.RefreshToken = _tokenProtector.Protect(tokenBody.RefreshToken);
-
-        account.RefreshTokenExpiresAtUtc = ComputeTokenExpiryUtc(tokenBody.RefreshTokenExpiresIn)
-            ?? account.RefreshTokenExpiresAtUtc;
-
-        await connectionRepository.UpdateAsync(account);
-        return tokenBody.AccessToken;
-    }
-
-    private static DateTime? ComputeTokenExpiryUtc(int? expiresInSeconds)
-    {
-        if (expiresInSeconds is null || expiresInSeconds <= 0)
-            return null;
-
-        return DateTime.UtcNow.AddSeconds(expiresInSeconds.Value);
-    }
-
-    private static bool IsTokenExpiring(DateTime? expiresAtUtc, DateTime nowUtc)
-    {
-        if (expiresAtUtc is null)
-            return false;
-
-        return expiresAtUtc <= nowUtc.Add(GitHubAccessTokenRefreshSkew);
+        _ = cancellationToken;
+        return Task.FromResult(_tokenProtector.Unprotect(account.AccessToken));
     }
     private async Task EnsureSinglePrimaryGitHubAsync(int userId)
     {
@@ -677,15 +609,6 @@ public class ConnectionService(
     {
         [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
-
-        [JsonPropertyName("expires_in")]
-        public int? ExpiresIn { get; set; }
-
-        [JsonPropertyName("refresh_token")]
-        public string? RefreshToken { get; set; }
-
-        [JsonPropertyName("refresh_token_expires_in")]
-        public int? RefreshTokenExpiresIn { get; set; }
 
         [JsonPropertyName("token_type")]
         public string? TokenType { get; set; }

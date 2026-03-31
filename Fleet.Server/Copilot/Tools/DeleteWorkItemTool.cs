@@ -28,11 +28,14 @@ public class DeleteWorkItemTool(IWorkItemService workItemService) : IChatTool
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var args = JsonDocument.Parse(argumentsJson).RootElement;
         var id = UpdateWorkItemTool.GetInt(args, "id") ?? 0;
         if (id <= 0) return "Error: 'id' (work-item number) is required.";
 
-        var deleted = await workItemService.DeleteAsync(context.ProjectId, id);
+        var deleted = await workItemService.DeleteAsync(projectId, id);
         return deleted
             ? JsonSerializer.Serialize(new { Id = id, Deleted = true })
             : $"Error: work item #{id} not found.";

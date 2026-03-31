@@ -10,7 +10,7 @@ import {
 } from '@fluentui/react-components'
 import { ErrorCircleRegular, CheckmarkCircleRegular } from '@fluentui/react-icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { linkGitHub } from '../../proxies'
+import { getApiErrorMessage, linkGitHub } from '../../proxies'
 
 // Module-level set survives React strict mode remounts.
 // Prevents the single-use OAuth code from being sent twice.
@@ -93,7 +93,7 @@ export function GitHubCallbackPage() {
             })
             .catch((err: unknown) => {
                 setStatus('error')
-                setErrorMessage(err instanceof Error ? err.message : 'Failed to link GitHub account.')
+                setErrorMessage(getApiErrorMessage(err, 'Failed to link GitHub account.'))
             })
         // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only
     }, [])

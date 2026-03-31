@@ -26,10 +26,10 @@ import {
     RocketRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
-import { SummaryCard, ExecutionCard, LogPanel, StartExecutionDialog } from './'
-import { useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs } from '../../proxies'
+import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
+import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
-import { openExecutionDocumentation } from './executionDocs'
+import { hasExecutionDocumentation } from './executionDocs'
 
 const useStyles = makeStyles({
     page: {
@@ -169,6 +169,7 @@ export function AgentMonitorPage() {
     const clearLogs = useClearLogs(projectId)
     const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
+    const [selectedDocumentation, setSelectedDocumentation] = useState<ExecutionDocumentation | null>(null)
     const [searchQuery, setSearchQuery] = useState('')
     const toasterId = useId('agent-monitor-toaster')
     const { dispatchToast } = useToastController(toasterId)
@@ -212,9 +213,9 @@ export function AgentMonitorPage() {
                 )
                 void refetchExec()
             },
-            onError: () => {
+            onError: (error) => {
                 dispatchToast(
-                    <Toast><ToastTitle>Failed to start agent execution</ToastTitle></Toast>,
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to start agent execution.')}</ToastTitle></Toast>,
                     { intent: 'error' },
                 )
             },
@@ -267,9 +268,9 @@ export function AgentMonitorPage() {
                 void refetchExec()
                 void refetchLogs()
             },
-            onError: () => {
+            onError: (error) => {
                 dispatchToast(
-                    <Toast><ToastTitle>Failed to retry execution</ToastTitle></Toast>,
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to retry execution.')}</ToastTitle></Toast>,
                     { intent: 'error' },
                 )
             },
@@ -279,13 +280,15 @@ export function AgentMonitorPage() {
     const handleViewDocs = (executionId: string) => {
         fetchExecutionDocumentation.mutate(executionId, {
             onSuccess: (docs) => {
-                const didOpen = openExecutionDocumentation(docs)
-                if (!didOpen) {
+                if (!hasExecutionDocumentation(docs)) {
                     dispatchToast(
                         <Toast><ToastTitle>No documentation output is available for this execution</ToastTitle></Toast>,
                         { intent: 'info' },
                     )
+                    return
                 }
+
+                setSelectedDocumentation(docs)
             },
             onError: () => {
                 dispatchToast(
@@ -325,6 +328,15 @@ export function AgentMonitorPage() {
     return (
         <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
             <Toaster toasterId={toasterId} />
+            <ExecutionDocsDialog
+                docs={selectedDocumentation}
+                open={!!selectedDocumentation}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSelectedDocumentation(null)
+                    }
+                }}
+            />
             <PageHeader
                 title="Agent Monitor"
                 subtitle="Track agent executions and view real-time logs"

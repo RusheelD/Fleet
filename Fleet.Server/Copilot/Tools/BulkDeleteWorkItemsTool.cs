@@ -30,6 +30,9 @@ public class BulkDeleteWorkItemsTool(IWorkItemService workItemService) : IChatTo
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var root = JsonDocument.Parse(argumentsJson).RootElement;
         if (!root.TryGetProperty("ids", out var idsEl) || idsEl.ValueKind != JsonValueKind.Array)
             return "Error: 'ids' array is required.";
@@ -45,7 +48,7 @@ public class BulkDeleteWorkItemsTool(IWorkItemService workItemService) : IChatTo
 
             try
             {
-                var deleted = await workItemService.DeleteAsync(context.ProjectId, id);
+                var deleted = await workItemService.DeleteAsync(projectId, id);
                 results.Add(new { Id = id, Deleted = deleted });
             }
             catch (Exception ex)

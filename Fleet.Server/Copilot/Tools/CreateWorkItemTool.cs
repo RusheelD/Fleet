@@ -64,13 +64,16 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var args = ParseArgs(argumentsJson);
 
         // Resolve level name to ID
         int? levelId = null;
         if (!string.IsNullOrWhiteSpace(args.Level))
         {
-            var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+            var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
             var match = levels.FirstOrDefault(l =>
                 l.Name.Equals(args.Level, StringComparison.OrdinalIgnoreCase));
             levelId = match?.Id;
@@ -89,7 +92,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             LevelId: levelId
         );
 
-        var created = await workItemService.CreateAsync(context.ProjectId, request);
+        var created = await workItemService.CreateAsync(projectId, request);
 
         return JsonSerializer.Serialize(new
         {

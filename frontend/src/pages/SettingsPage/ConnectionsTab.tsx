@@ -19,7 +19,7 @@ import {
 } from '@fluentui/react-components'
 import { PlugConnectedRegular, StarRegular } from '@fluentui/react-icons'
 import { AccountRow } from './'
-import { getGitHubOAuthState, getGitHubOAuthClientId, useSetPrimaryGitHubAccount, useUnlinkGitHub } from '../../proxies'
+import { getApiErrorMessage, getGitHubOAuthState, getGitHubOAuthClientId, useSetPrimaryGitHubAccount, useUnlinkGitHub } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import type { LinkedAccount } from '../../models'
 
@@ -192,7 +192,7 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
             const { state } = await getGitHubOAuthState()
             window.location.href = buildGitHubAuthUrl(clientId, state)
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unable to start GitHub OAuth flow.'
+            const message = getApiErrorMessage(error, 'Unable to start GitHub OAuth flow.')
             setConnectError(message)
         } finally {
             setIsConnecting(false)
@@ -299,7 +299,7 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
                 </DialogSurface>
             </Dialog>
 
-            {connectError && !hasGitHubConnections && (
+            {connectError && (
                 <Caption1 className={styles.connectError}>{connectError}</Caption1>
             )}
 

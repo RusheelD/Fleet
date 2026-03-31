@@ -1,4 +1,4 @@
-export { ApiError, setTokenGetter, fetchWithAuth, get, post, put, del, postForm } from './proxy'
+export { ApiError, getApiErrorMessage, setTokenGetter, fetchWithAuth, get, post, put, del, postForm } from './proxy'
 export {
   getProjects,
   getProjectDashboard,

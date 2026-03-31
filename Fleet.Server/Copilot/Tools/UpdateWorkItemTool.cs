@@ -62,6 +62,9 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var args = JsonDocument.Parse(argumentsJson).RootElement;
         var id = GetInt(args, "id") ?? 0;
         if (id <= 0) return "Error: 'id' (work-item number) is required.";
@@ -69,7 +72,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
         int? levelId = null;
         if (args.TryGetProperty("level", out var lvProp) && lvProp.GetString() is string lvName)
         {
-            var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+            var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
             levelId = levels.FirstOrDefault(l => l.Name.Equals(lvName, StringComparison.OrdinalIgnoreCase))?.Id;
         }
 
@@ -86,7 +89,7 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             LevelId: levelId
         );
 
-        var updated = await workItemService.UpdateAsync(context.ProjectId, id, request);
+        var updated = await workItemService.UpdateAsync(projectId, id, request);
         if (updated is null) return $"Error: work item #{id} not found.";
 
         return JsonSerializer.Serialize(new

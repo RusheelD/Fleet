@@ -11,6 +11,45 @@ export class ApiError extends Error {
   }
 }
 
+function extractApiErrorMessage(body: unknown): string | undefined {
+  if (typeof body === 'string') {
+    const normalized = body.trim()
+    return normalized.length > 0 ? normalized : undefined
+  }
+
+  if (!body || typeof body !== 'object') {
+    return undefined
+  }
+
+  const record = body as Record<string, unknown>
+  for (const key of ['detail', 'message', 'error_description', 'error']) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim()
+    }
+  }
+
+  return undefined
+}
+
+export function getApiErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {
+  if (error instanceof ApiError) {
+    return extractApiErrorMessage(error.body) ?? `${fallback} (HTTP ${error.status})`
+  }
+
+  if (error instanceof Error) {
+    const normalized = error.message.trim()
+    return normalized.length > 0 ? normalized : fallback
+  }
+
+  if (typeof error === 'string') {
+    const normalized = error.trim()
+    return normalized.length > 0 ? normalized : fallback
+  }
+
+  return fallback
+}
+
 /**
  * Module-level token getter. Set by the auth provider at startup
  * so that proxy functions can acquire MSAL access tokens outside React.

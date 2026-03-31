@@ -11,6 +11,8 @@ const validInput: ProjectCreationGateInput = {
   hasSelectedAccount: true,
   newRepoNameValid: true,
   newRepoNameTaken: false,
+  hasGitHubRepoError: false,
+  isCheckingGitHubRepoState: false,
   isPending: false,
 }
 
@@ -27,6 +29,14 @@ describe('canCreateProject', () => {
   it('blocks creation when slug is unavailable or request is pending', () => {
     expect(canCreateProject({ ...validInput, slugAvailable: false })).toBe(false)
     expect(canCreateProject({ ...validInput, isPending: true })).toBe(false)
+  })
+
+  it('blocks creation when GitHub repository access is in an error state', () => {
+    expect(canCreateProject({ ...validInput, hasGitHubRepoError: true })).toBe(false)
+  })
+
+  it('blocks creation while GitHub repository state is still loading', () => {
+    expect(canCreateProject({ ...validInput, isCheckingGitHubRepoState: true })).toBe(false)
   })
 
   it('requires account selection and valid repository name for new mode', () => {

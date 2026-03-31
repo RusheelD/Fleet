@@ -48,11 +48,14 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
 
     public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
     {
+        if (!context.TryGetProjectId(out var projectId))
+            return ChatToolContext.ProjectScopeRequiredMessage;
+
         var root = JsonDocument.Parse(argumentsJson).RootElement;
         if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
             return "Error: 'items' array is required.";
 
-        var levels = await workItemLevelService.GetByProjectIdAsync(context.ProjectId);
+        var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
         var results = new List<object>();
         var createdNumbers = new List<int>(); // tracks WIT numbers by batch index for @N refs
 
@@ -85,7 +88,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                         LevelId: levelId
                     );
 
-                    var updated = await workItemService.UpdateAsync(context.ProjectId, id, updateReq);
+                    var updated = await workItemService.UpdateAsync(projectId, id, updateReq);
                     if (updated is not null)
                     {
                         createdNumbers.Add(updated.WorkItemNumber);
@@ -119,7 +122,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                     LevelId: levelId
                 );
 
-                var created = await workItemService.CreateAsync(context.ProjectId, createReq);
+                var created = await workItemService.CreateAsync(projectId, createReq);
                 createdNumbers.Add(created.WorkItemNumber);
                 results.Add(new
                 {
