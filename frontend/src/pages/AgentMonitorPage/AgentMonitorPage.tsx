@@ -18,6 +18,7 @@ import {
 import {
     BotRegular,
     PlayRegular,
+    PauseRegular,
     CheckmarkCircleRegular,
     ErrorCircleRegular,
     DismissCircleRegular,
@@ -180,6 +181,7 @@ export function AgentMonitorPage() {
     const allLogs = logs ?? []
 
     const running = allExecutions.filter((e) => e.status === 'running')
+    const paused = allExecutions.filter((e) => e.status === 'paused')
     const completed = allExecutions.filter((e) => e.status === 'completed')
     const failed = allExecutions.filter((e) => e.status === 'failed')
     const cancelled = allExecutions.filter((e) => e.status === 'cancelled')
@@ -190,6 +192,7 @@ export function AgentMonitorPage() {
 
     const filteredByTab =
         tab === 'active' ? running :
+            tab === 'paused' ? paused :
             tab === 'completed' ? completed :
                 tab === 'failed' ? failed :
                     tab === 'cancelled' ? cancelled :
@@ -261,10 +264,13 @@ export function AgentMonitorPage() {
     }
 
     const handleRetry = (executionId: string) => {
+        const execution = allExecutions.find((item) => item.id === executionId)
+        const action = execution?.status === 'paused' ? 'resume' : 'retry'
+
         retryExecution.mutate(executionId, {
             onSuccess: (result) => {
                 dispatchToast(
-                    <Toast><ToastTitle>Execution retried (new ID: {result.executionId})</ToastTitle></Toast>,
+                    <Toast><ToastTitle>Execution {action === 'resume' ? 'resumed' : 'retried'} (new ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
                 void refetchExec()
@@ -272,7 +278,7 @@ export function AgentMonitorPage() {
             },
             onError: (error) => {
                 dispatchToast(
-                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to retry execution.')}</ToastTitle></Toast>,
+                    <Toast><ToastTitle>{getApiErrorMessage(error, `Failed to ${action} execution.`)}</ToastTitle></Toast>,
                     { intent: 'error' },
                 )
             },
@@ -438,6 +444,14 @@ export function AgentMonitorPage() {
                     isActive={tab === 'active'}
                 />
                 <SummaryCard
+                    icon={<PauseRegular />}
+                    iconClassName={styles.summaryIconBrand}
+                    value={paused.length}
+                    label="Paused"
+                    onClick={() => setTab('paused')}
+                    isActive={tab === 'paused'}
+                />
+                <SummaryCard
                     icon={<CheckmarkCircleRegular />}
                     iconClassName={styles.summaryIconSuccess}
                     value={completed.length}
@@ -478,6 +492,7 @@ export function AgentMonitorPage() {
                 size={isDense ? 'small' : 'medium'}
             >
                 <Tab value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
+                <Tab value="paused" icon={<PauseRegular />}>Paused ({paused.length})</Tab>
                 <Tab value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
                 <Tab value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>
                 <Tab value="cancelled" icon={<DismissCircleRegular />}>Cancelled ({cancelled.length})</Tab>

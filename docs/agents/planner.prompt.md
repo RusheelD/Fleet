@@ -80,6 +80,8 @@ Which sub-tasks map to which pipeline phase:
 4. **Parallelism where safe** — Identify which sub-tasks can run concurrently (same phase) vs. which have ordering dependencies.
 5. **Explicit scope boundaries** — Clearly state what each agent should and should not touch.
 
+6. **Dependency hygiene** â€” If the feature requires new Python or Node packages, call that out explicitly in the relevant sub-task so workers know to update `requirements.txt`, package manifests, lockfiles, and `.gitignore` as needed.
+
 ## What You Must NOT Do
 
 - Do not implement code — you only plan

@@ -13,7 +13,9 @@ public class RunCommandTool : IAgentTool
         "Execute a shell command in the repository directory. " +
         "Use this to run build commands, tests, linters, or other development tools. " +
         "Commands run with a timeout and path restrictions for safety. " +
-        "Examples: 'dotnet build', 'npm test', 'npm run lint', 'dotnet test'.";
+        "Python package installs are forced into a repo-local .venv, npm uses repo-local cache/prefix paths, " +
+        "and global package-manager mutations are blocked. " +
+        "Examples: 'dotnet build', 'npm test', 'npm run lint', 'dotnet test', 'python -m pytest'.";
 
     public string ParametersJsonSchema => """
         {

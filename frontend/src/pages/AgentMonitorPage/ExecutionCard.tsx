@@ -354,6 +354,15 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
         }
     }
 
+    const handleRetry = (mode: 'retry' | 'resume') => {
+        if (onRetry) {
+            onRetry(execution.id)
+            return
+        }
+
+        notify(`${mode === 'resume' ? 'Resume' : 'Retry'} is unavailable for this execution`, 'error')
+    }
+
     const reviewLoopCount = execution.reviewLoopCount ?? 0
     const lastReviewRecommendation = execution.lastReviewRecommendation ?? null
     const isAutoRemediating = execution.status === 'running' && (execution.currentPhase?.startsWith('Auto-remediation:') ?? false)
@@ -442,20 +451,28 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                                 size="small"
                                 icon={<ArrowClockwiseRegular />}
                                 aria-label="Retry"
-                                onClick={() => {
-                                    if (onRetry) {
-                                        onRetry(execution.id)
-                                    } else {
-                                        notify('Retry is unavailable for this execution', 'error')
-                                    }
-                                }}
+                                onClick={() => handleRetry('retry')}
                             />
                             {onDelete && (
                                 <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
                             )}
                         </>
                     )}
-                    {canDeleteExecution && execution.status !== 'running' && execution.status !== 'failed' && onDelete && (
+                    {execution.status === 'paused' && (
+                        <>
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<ArrowClockwiseRegular />}
+                                aria-label="Resume"
+                                onClick={() => handleRetry('resume')}
+                            />
+                            {onDelete && (
+                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                            )}
+                        </>
+                    )}
+                    {canDeleteExecution && execution.status !== 'running' && execution.status !== 'failed' && execution.status !== 'paused' && onDelete && (
                         <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
                     )}
                 </div>

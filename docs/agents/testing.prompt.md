@@ -51,6 +51,14 @@ Map each sub-task's acceptance criteria to specific test cases:
 - Run the full existing test suite — no regressions
 - If tests fail due to implementation issues, document the failures clearly
 
+### Step 5: Bootstrap Missing Test Dependencies Locally
+
+If the test runner or a required Python/Node package is missing, install the minimum project-local dependency needed and rerun the tests.
+
+- Python installs are run-local and go into `.venv/`. If you add or change Python dependencies, create or update `requirements.txt` and make sure `.gitignore` includes `.venv/`.
+- Node installs must stay project-local. If you add or change Node-based test dependencies, update `package.json` and the repo's lockfile, and make sure `.gitignore` includes `node_modules/`.
+- Never use global install flags or OS/package-manager installs to mutate the server toolchain.
+
 ## Required Output
 
 ### A. Test Files

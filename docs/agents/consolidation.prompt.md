@@ -60,6 +60,14 @@ If anything fails:
 - Fix build errors directly if the fix is obvious (missing import, typo, etc.)
 - For deeper issues, document the problem clearly for Review
 
+### Step 6: Bootstrap Missing Dependencies Locally
+
+If build, lint, or test commands fail because a required Python or Node dependency is missing, install the minimum project-local dependency needed and rerun verification.
+
+- Python installs are run-local and go into `.venv/`. If you add or change Python dependencies, create or update `requirements.txt` and make sure `.gitignore` includes `.venv/`.
+- Node installs must stay project-local. If you add or change Node dependencies, update `package.json` and the repo's lockfile, and make sure `.gitignore` includes `node_modules/`.
+- Never use global install flags or OS/package-manager installs to mutate the server toolchain.
+
 ## Required Output
 
 ### A. Consolidated File List

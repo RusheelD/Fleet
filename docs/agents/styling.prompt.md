@@ -50,6 +50,14 @@ Write styles that look like they were written by the same developer:
 - Animations respect `prefers-reduced-motion`
 - Touch targets are at least 44x44px on touch devices
 
+### Step 5: Bootstrap Missing Dependencies Locally
+
+If a styling/build command fails because a required Node or Python dependency is missing, install the minimum project-local dependency needed and rerun the command.
+
+- Node installs must stay project-local. If you add or change dependencies, update `package.json` and the repo's lockfile, and make sure `.gitignore` includes `node_modules/`.
+- Python installs are run-local and go into `.venv/`. If you add or change Python dependencies for tooling, create or update `requirements.txt` and make sure `.gitignore` includes `.venv/`.
+- Never use global install flags or OS/package-manager installs to mutate the server toolchain.
+
 ## Required Output
 
 ### A. Files Changed

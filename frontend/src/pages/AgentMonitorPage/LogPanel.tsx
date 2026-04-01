@@ -354,12 +354,17 @@ export function LogPanel({
         }
 
         for (const execution of sortedExecutions) {
+            const count = countByExecutionId.get(execution.id) ?? 0
+            if (count === 0) {
+                continue
+            }
+
             seen.add(execution.id)
             const inferredTitle = inferTitleFromLogs(logsByExecutionId.get(execution.id) ?? [])
             result.push({
                 value: `execution:${execution.id}`,
                 label: uniqueLabel(normalizeRunTitle(execution, inferredTitle)),
-                count: countByExecutionId.get(execution.id) ?? 0,
+                count,
             })
         }
 

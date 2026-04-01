@@ -40,6 +40,14 @@ public class RepoSandbox : IRepoSandbox
         ".lock", ".min.js", ".min.css",
     };
 
+    private static readonly string[] LocalGitIgnoreEntries =
+    [
+        ".venv/",
+        "node_modules/",
+    ];
+
+    private const string PythonVirtualEnvironmentDirectoryName = ".venv";
+
     public RepoSandbox(
         ILogger<RepoSandbox> logger,
         IOptions<RepoSandboxOptions> options,
@@ -142,6 +150,8 @@ public class RepoSandbox : IRepoSandbox
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"Git checkout failed: {result.Stderr}");
         }
+
+        EnsureLocalGitIgnoreEntries(_repoRoot, LocalGitIgnoreEntries);
 
         _logger.LogInformation("Cloned {Repo} and created branch {Branch}", repoFullName, branchName);
     }
@@ -304,9 +314,29 @@ public class RepoSandbox : IRepoSandbox
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
+            var normalizedCommand = command.Trim();
+            var commandName = Path.GetFileName(normalizedCommand).ToLowerInvariant();
+            var requiresPythonEnvironment = RequiresPythonVirtualEnvironment(commandName, arguments);
+            var requiresNodeEnvironment = RequiresNodeLocalEnvironment(commandName, arguments);
+
+            if (requiresPythonEnvironment)
+                await EnsurePythonVirtualEnvironmentAsync(cts.Token);
+
+            if (requiresNodeEnvironment)
+                EnsureNodeLocalEnvironment();
+
+            var effectiveCommand = normalizedCommand;
+            if (requiresPythonEnvironment)
+            {
+                if (IsDirectPipCommand(commandName))
+                    effectiveCommand = GetPipExecutablePath(_repoRoot);
+                else if (IsDirectPythonCommand(commandName))
+                    effectiveCommand = GetPythonExecutablePath(_repoRoot);
+            }
+
             var psi = new ProcessStartInfo
             {
-                FileName = command,
+                FileName = effectiveCommand,
                 Arguments = arguments,
                 WorkingDirectory = _repoRoot,
                 RedirectStandardOutput = true,
@@ -319,45 +349,40 @@ public class RepoSandbox : IRepoSandbox
             psi.Environment["HOME"] = _repoRoot;
             psi.Environment["USERPROFILE"] = _repoRoot;
 
-            using var process = new Process { StartInfo = psi };
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
-            var timedOut = false;
-
-            process.OutputDataReceived += (_, e) =>
+            if (requiresPythonEnvironment)
             {
-                if (e.Data is not null && stdout.Length < MaxOutputLength)
-                    stdout.AppendLine(e.Data);
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data is not null && stderr.Length < MaxOutputLength)
-                    stderr.AppendLine(e.Data);
-            };
-
-            try
-            {
-                process.Start();
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-
-                await process.WaitForExitAsync(cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                timedOut = true;
-                try { process.Kill(entireProcessTree: true); }
-                catch { /* best effort */ }
+                var existingPath = psi.Environment.TryGetValue("PATH", out var pathValue)
+                    ? pathValue ?? string.Empty
+                    : Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+                psi.Environment["PATH"] = PrependToPath(GetPythonVirtualEnvironmentBinDirectory(_repoRoot), existingPath);
+                psi.Environment["VIRTUAL_ENV"] = GetPythonVirtualEnvironmentRoot(_repoRoot);
+                psi.Environment["PIP_REQUIRE_VIRTUALENV"] = "1";
+                psi.Environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1";
+                psi.Environment["PIP_NO_INPUT"] = "1";
+                psi.Environment["PYTHONNOUSERSITE"] = "1";
+                psi.Environment["PIP_CACHE_DIR"] = EnsureGitInternalToolPath(_repoRoot, "fleet-pip-cache");
             }
 
-            _logger.LogInformation("Command finished: exit={ExitCode} timedOut={TimedOut}", process.ExitCode, timedOut);
+            if (requiresNodeEnvironment)
+            {
+                var npmCache = EnsureGitInternalToolPath(_repoRoot, "fleet-npm-cache");
+                var npmPrefix = EnsureGitInternalToolPath(_repoRoot, "fleet-npm-global");
+                var npmUserConfig = EnsureGitInternalFilePath(
+                    _repoRoot,
+                    "fleet-npmrc",
+                    "fund=false\nupdate-notifier=false\naudit=false\n");
+                psi.Environment["npm_config_cache"] = npmCache;
+                psi.Environment["NPM_CONFIG_CACHE"] = npmCache;
+                psi.Environment["npm_config_prefix"] = npmPrefix;
+                psi.Environment["NPM_CONFIG_PREFIX"] = npmPrefix;
+                psi.Environment["npm_config_userconfig"] = npmUserConfig;
+                psi.Environment["NPM_CONFIG_USERCONFIG"] = npmUserConfig;
+                psi.Environment["npm_config_update_notifier"] = "false";
+                psi.Environment["npm_config_fund"] = "false";
+                psi.Environment["npm_config_audit"] = "false";
+            }
 
-            return new CommandResult(
-                timedOut ? -1 : process.ExitCode,
-                stdout.ToString().TrimEnd(),
-                stderr.ToString().TrimEnd(),
-                timedOut
-            );
+            return await RunProcessAsync(psi, cts.Token);
         }
         finally
         {
@@ -546,8 +571,217 @@ public class RepoSandbox : IRepoSandbox
                 throw new UnauthorizedAccessException($"Blocked command: {command} {arguments}");
         }
 
+        var toolchainBlockReason = DetectGlobalToolchainMutation(command, arguments);
+        if (!string.IsNullOrWhiteSpace(toolchainBlockReason))
+            throw new UnauthorizedAccessException(toolchainBlockReason);
+
         if (IsProtectedBranchPush(combined))
             throw new UnauthorizedAccessException($"Blocked push to protected branch: {command} {arguments}");
+    }
+
+    internal static string? DetectGlobalToolchainMutation(string command, string arguments)
+    {
+        var commandName = Path.GetFileName(command).ToLowerInvariant();
+        var combined = $"{commandName} {arguments}".ToLowerInvariant();
+
+        string[] blockedSystemPackageMutations =
+        [
+            "apt-get install",
+            "apt install",
+            "apt-get upgrade",
+            "apt upgrade",
+            "yum install",
+            "dnf install",
+            "apk add",
+            "pacman -s",
+            "brew install",
+            "winget install",
+            "choco install",
+            "scoop install",
+            "dotnet workload install",
+        ];
+
+        if (blockedSystemPackageMutations.Any(pattern => combined.Contains(pattern, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Global toolchain mutation is blocked. Use project-local dependencies only.";
+        }
+
+        if (Regex.IsMatch(combined, @"\bnpm\s+(install|i|add|update|uninstall|remove|rm|link)\b.*(?:^|\s)(-g|--global)\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(combined, @"\bnpm\s+(?:-g|--global)\b.*\b(install|i|add|update|uninstall|remove|rm|link)\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(combined, @"\bnpm\s+global\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(combined, @"\bnpm\s+config\s+set\s+(prefix|cache)\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(combined, @"\bnpm\b.*(?:^|\s)--location=global\b", RegexOptions.IgnoreCase))
+        {
+            return "Global npm mutations are blocked. Use repo-local npm installs only.";
+        }
+
+        if (Regex.IsMatch(combined, @"\bdotnet\s+tool\s+(install|update|uninstall)\b.*(?:^|\s)(-g|--global)\b", RegexOptions.IgnoreCase))
+        {
+            return "Global dotnet tool mutations are blocked. Use repo-local tooling only.";
+        }
+
+        var referencesPip = Regex.IsMatch(combined, @"\b(pip3?|python3?\s+-m\s+pip|py\s+-m\s+pip)\b", RegexOptions.IgnoreCase);
+        if (referencesPip &&
+            Regex.IsMatch(combined, @"(?:^|\s)(--user|--target|-t|--prefix|--root|--break-system-packages)\b", RegexOptions.IgnoreCase))
+        {
+            return "Python package installs are forced into the run-local .venv. Global or redirected pip install flags are blocked.";
+        }
+
+        return null;
+    }
+
+    internal static string GetPythonVirtualEnvironmentRoot(string repoRoot)
+        => Path.Combine(repoRoot, PythonVirtualEnvironmentDirectoryName);
+
+    internal static string GetPythonVirtualEnvironmentBinDirectory(string repoRoot)
+        => Path.Combine(
+            GetPythonVirtualEnvironmentRoot(repoRoot),
+            OperatingSystem.IsWindows() ? "Scripts" : "bin");
+
+    internal static string GetPythonExecutablePath(string repoRoot)
+        => Path.Combine(
+            GetPythonVirtualEnvironmentBinDirectory(repoRoot),
+            OperatingSystem.IsWindows() ? "python.exe" : "python");
+
+    internal static string GetPipExecutablePath(string repoRoot)
+        => Path.Combine(
+            GetPythonVirtualEnvironmentBinDirectory(repoRoot),
+            OperatingSystem.IsWindows() ? "pip.exe" : "pip");
+
+    internal static void EnsureLocalGitIgnoreEntries(string repoRoot, IEnumerable<string> entries)
+    {
+        if (string.IsNullOrWhiteSpace(repoRoot))
+            throw new ArgumentException("Repository root is required.", nameof(repoRoot));
+
+        var filteredEntries = entries
+            .Select(entry => entry.Trim())
+            .Where(entry => !string.IsNullOrWhiteSpace(entry))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (filteredEntries.Length == 0)
+            return;
+
+        var infoDirectory = Path.Combine(repoRoot, ".git", "info");
+        Directory.CreateDirectory(infoDirectory);
+
+        var excludePath = Path.Combine(infoDirectory, "exclude");
+        var existingLines = File.Exists(excludePath)
+            ? File.ReadAllLines(excludePath)
+            : [];
+
+        var knownEntries = existingLines
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missingEntries = filteredEntries
+            .Where(entry => !knownEntries.Contains(entry))
+            .ToArray();
+        if (missingEntries.Length == 0)
+            return;
+
+        using var writer = new StreamWriter(excludePath, append: existingLines.Length > 0);
+        if (existingLines.Length > 0)
+            writer.WriteLine();
+
+        foreach (var entry in missingEntries)
+            writer.WriteLine(entry);
+    }
+
+    private static bool RequiresPythonVirtualEnvironment(string commandName, string arguments)
+    {
+        var combined = $"{commandName} {arguments}".ToLowerInvariant();
+        return Regex.IsMatch(
+            combined,
+            @"\b(pip3?|python3?|py|pytest|ruff|mypy|tox|coverage|uvicorn|flask|django-admin)\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool RequiresNodeLocalEnvironment(string commandName, string arguments)
+    {
+        var combined = $"{commandName} {arguments}".ToLowerInvariant();
+        return Regex.IsMatch(combined, @"\b(npm|npx|node)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsDirectPythonCommand(string commandName)
+        => commandName is "python" or "python3" or "py";
+
+    private static bool IsDirectPipCommand(string commandName)
+        => commandName is "pip" or "pip3";
+
+    private async Task EnsurePythonVirtualEnvironmentAsync(CancellationToken cancellationToken)
+    {
+        EnsureLocalGitIgnoreEntries(_repoRoot, [".venv/"]);
+
+        var pythonExecutablePath = GetPythonExecutablePath(_repoRoot);
+        if (File.Exists(pythonExecutablePath))
+            return;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = OperatingSystem.IsWindows() ? "python" : "python3",
+            WorkingDirectory = _repoRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-m");
+        psi.ArgumentList.Add("venv");
+        psi.ArgumentList.Add(PythonVirtualEnvironmentDirectoryName);
+        psi.Environment["HOME"] = _repoRoot;
+        psi.Environment["USERPROFILE"] = _repoRoot;
+
+        var result = await RunProcessAsync(psi, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create Python virtual environment at '{PythonVirtualEnvironmentDirectoryName}': {result.Stderr}");
+        }
+    }
+
+    private void EnsureNodeLocalEnvironment()
+    {
+        EnsureGitInternalToolPath(_repoRoot, "fleet-npm-cache");
+        EnsureGitInternalToolPath(_repoRoot, "fleet-npm-global");
+        EnsureGitInternalFilePath(
+            _repoRoot,
+            "fleet-npmrc",
+            "fund=false\nupdate-notifier=false\naudit=false\n");
+        EnsureLocalGitIgnoreEntries(_repoRoot, ["node_modules/"]);
+    }
+
+    private static string EnsureGitInternalToolPath(string repoRoot, string entryName)
+    {
+        var path = Path.Combine(repoRoot, ".git", entryName);
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static string EnsureGitInternalFilePath(string repoRoot, string entryName, string content)
+    {
+        var path = Path.Combine(repoRoot, ".git", entryName);
+        var parentDirectory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+            Directory.CreateDirectory(parentDirectory);
+
+        if (!File.Exists(path))
+            File.WriteAllText(path, content);
+
+        return path;
+    }
+
+    private static string PrependToPath(string segment, string existingPath)
+    {
+        if (string.IsNullOrWhiteSpace(existingPath))
+            return segment;
+
+        var separator = Path.PathSeparator;
+        var existingSegments = existingPath.Split(separator, StringSplitOptions.RemoveEmptyEntries);
+        if (existingSegments.Any(path => string.Equals(path, segment, StringComparison.OrdinalIgnoreCase)))
+            return existingPath;
+
+        return $"{segment}{separator}{existingPath}";
     }
 
     private static bool IsProtectedBranchPush(string combinedCommand)
@@ -693,6 +927,48 @@ public class RepoSandbox : IRepoSandbox
         return new InvalidOperationException(
             $"Failed to start git from '{gitExecutable}' in working directory '{workingDirectory}'. PATH='{pathEnvironment}'.",
             exception);
+    }
+
+    private async Task<CommandResult> RunProcessAsync(ProcessStartInfo psi, CancellationToken cancellationToken)
+    {
+        using var process = new Process { StartInfo = psi };
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+        var timedOut = false;
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null && stdout.Length < MaxOutputLength)
+                stdout.AppendLine(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null && stderr.Length < MaxOutputLength)
+                stderr.AppendLine(e.Data);
+        };
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            timedOut = true;
+            try { process.Kill(entireProcessTree: true); }
+            catch { /* best effort */ }
+        }
+
+        _logger.LogInformation("Command finished: exit={ExitCode} timedOut={TimedOut}", process.ExitCode, timedOut);
+
+        return new CommandResult(
+            timedOut ? -1 : process.ExitCode,
+            stdout.ToString().TrimEnd(),
+            stderr.ToString().TrimEnd(),
+            timedOut);
     }
 
     private async Task<CommandResult> RunGitAsync(string arguments, string? workingDir = null, CancellationToken cancellationToken = default)

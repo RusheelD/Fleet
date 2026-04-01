@@ -151,4 +151,66 @@ public class RepoSandboxTests
         Assert.AreEqual("Fleet Agent", result["GIT_COMMITTER_NAME"]);
         Assert.AreEqual("agent@fleet.dev", result["GIT_COMMITTER_EMAIL"]);
     }
+
+    [TestMethod]
+    public void DetectGlobalToolchainMutation_BlocksGlobalNpmInstall()
+    {
+        var result = RepoSandbox.DetectGlobalToolchainMutation("npm", "install -g typescript");
+
+        Assert.IsNotNull(result);
+    }
+
+    [TestMethod]
+    public void DetectGlobalToolchainMutation_BlocksRedirectedPipInstall()
+    {
+        var result = RepoSandbox.DetectGlobalToolchainMutation("python", "-m pip install --user requests");
+
+        Assert.IsNotNull(result);
+    }
+
+    [TestMethod]
+    public void DetectGlobalToolchainMutation_AllowsRepoLocalInstalls()
+    {
+        Assert.IsNull(RepoSandbox.DetectGlobalToolchainMutation("npm", "install"));
+        Assert.IsNull(RepoSandbox.DetectGlobalToolchainMutation("python", "-m pip install -r requirements.txt"));
+    }
+
+    [TestMethod]
+    public void GetPythonVirtualEnvironmentRoot_UsesRepoLocalDotVenv()
+    {
+        var repoRoot = Path.Combine("tmp", "repo");
+
+        var result = RepoSandbox.GetPythonVirtualEnvironmentRoot(repoRoot);
+
+        Assert.AreEqual(Path.Combine(repoRoot, ".venv"), result);
+    }
+
+    [TestMethod]
+    public void EnsureLocalGitIgnoreEntries_AppendsMissingEntriesOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var repoRoot = Path.Combine(root, "repo");
+        var gitInfoDirectory = Path.Combine(repoRoot, ".git", "info");
+        var excludePath = Path.Combine(gitInfoDirectory, "exclude");
+
+        try
+        {
+            Directory.CreateDirectory(gitInfoDirectory);
+            File.WriteAllText(excludePath, "bin/\n");
+
+            RepoSandbox.EnsureLocalGitIgnoreEntries(repoRoot, [".venv/", "node_modules/", ".venv/"]);
+
+            var lines = File.ReadAllLines(excludePath)
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToArray();
+            CollectionAssert.AreEqual(
+                new[] { "bin/", ".venv/", "node_modules/" },
+                lines);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
 }
