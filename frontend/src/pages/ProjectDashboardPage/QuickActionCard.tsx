@@ -1,12 +1,12 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Card,
 } from '@fluentui/react-components'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 import type { ReactNode } from 'react'
 
 const useStyles = makeStyles({
@@ -17,7 +17,7 @@ const useStyles = makeStyles({
         gap: '0.75rem',
         cursor: 'pointer',
         ':hover': {
-            boxShadow: tokens.shadow4,
+            boxShadow: appTokens.shadow.card,
         },
     },
     quickActionCardCompact: {
@@ -27,9 +27,17 @@ const useStyles = makeStyles({
         paddingRight: '0.625rem',
         gap: '0.5rem',
     },
+    quickActionCardMobile: {
+        alignItems: 'flex-start',
+        paddingTop: '0.875rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.875rem',
+        paddingRight: '0.875rem',
+    },
     quickActionIcon: {
         fontSize: '24px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
+        flexShrink: 0,
     },
     quickActionIconCompact: {
         fontSize: '16px',
@@ -41,6 +49,12 @@ const useStyles = makeStyles({
     quickActionDescCompact: {
         fontSize: '11px',
         lineHeight: '14px',
+    },
+    quickActionContent: {
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.125rem',
     },
 })
 
@@ -54,12 +68,20 @@ interface QuickActionCardProps {
 export function QuickActionCard({ icon, title, description, onClick }: QuickActionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
 
     return (
-        <Card className={mergeClasses(styles.quickActionCard, isCompact && styles.quickActionCardCompact)} onClick={onClick}>
+        <Card
+            className={mergeClasses(
+                styles.quickActionCard,
+                isCompact && styles.quickActionCardCompact,
+                isMobile && !isCompact && styles.quickActionCardMobile,
+            )}
+            onClick={onClick}
+        >
             <span className={mergeClasses(styles.quickActionIcon, isCompact && styles.quickActionIconCompact)}>{icon}</span>
-            <div>
+            <div className={styles.quickActionContent}>
                 <Text weight="semibold" block className={isCompact ? styles.quickActionTitleCompact : undefined}>
                     {title}
                 </Text>

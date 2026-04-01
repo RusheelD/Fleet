@@ -1,6 +1,5 @@
 import {
     makeStyles,
-    tokens,
     Title3,
     Button,
     Badge,
@@ -13,6 +12,7 @@ import { ArrowClockwiseRegular, CodeRegular, DeleteRegular } from '@fluentui/rea
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecution, LogEntry } from '../../models'
 import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
     info: 'logLevelInfo',
@@ -35,22 +35,11 @@ const useStyles = makeStyles({
     logPanel: {
         display: 'flex',
         flexDirection: 'column',
-        maxHeight: 'min(62vh, 560px)',
+        maxHeight: appTokens.size.logPanelMaxHeight,
         overflow: 'hidden',
-        backgroundColor: tokens.colorNeutralBackground1,
-        borderTopWidth: '1px',
-        borderRightWidth: '1px',
-        borderBottomWidth: '1px',
-        borderLeftWidth: '1px',
-        borderTopStyle: 'solid',
-        borderRightStyle: 'solid',
-        borderBottomStyle: 'solid',
-        borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke2,
-        borderRightColor: tokens.colorNeutralStroke2,
-        borderBottomColor: tokens.colorNeutralStroke2,
-        borderLeftColor: tokens.colorNeutralStroke2,
-        borderRadius: tokens.borderRadiusMedium,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        borderRadius: appTokens.radius.md,
     },
     logPanelMobile: {
         maxHeight: 'none',
@@ -60,18 +49,16 @@ const useStyles = makeStyles({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalL,
-        borderBottomWidth: '1px',
-        borderBottomStyle: 'solid',
-        borderBottomColor: tokens.colorNeutralStroke2,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.xl,
+        paddingRight: appTokens.space.xl,
+        borderBottom: appTokens.border.subtle,
     },
     logHeaderMobile: {
         flexDirection: 'column',
         alignItems: 'stretch',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     logHeaderTitleRow: {
         display: 'flex',
@@ -85,53 +72,61 @@ const useStyles = makeStyles({
         gap: '4px',
         flexWrap: 'wrap',
     },
+    logHeaderActionsMobile: {
+        width: '100%',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: '0.375rem',
+    },
     logTitle: {
         fontSize: '14px',
     },
     logList: {
         flex: 1,
         overflow: 'auto',
-        paddingTop: tokens.spacingVerticalXS,
-        paddingBottom: tokens.spacingVerticalXS,
-        paddingLeft: tokens.spacingHorizontalS,
-        paddingRight: tokens.spacingHorizontalS,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
         fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
         fontSize: '12px',
         lineHeight: '20px',
     },
     logListMobile: {
-        paddingTop: tokens.spacingVerticalXXS,
-        paddingBottom: tokens.spacingVerticalXXS,
-        paddingLeft: tokens.spacingHorizontalXS,
-        paddingRight: tokens.spacingHorizontalXS,
+        paddingTop: appTokens.space.xxxs,
+        paddingBottom: appTokens.space.xxxs,
+        paddingLeft: appTokens.space.xxs,
+        paddingRight: appTokens.space.xxs,
     },
     logEntry: {
         display: 'grid',
         gridTemplateColumns: '62px auto 14px 1fr',
-        gap: tokens.spacingHorizontalM,
+        gap: appTokens.space.md,
         alignItems: 'baseline',
-        paddingTop: tokens.spacingVerticalXS,
-        paddingBottom: tokens.spacingVerticalXS,
-        paddingLeft: tokens.spacingHorizontalS,
-        paddingRight: tokens.spacingHorizontalS,
-        borderRadius: tokens.borderRadiusSmall,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.sm,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground3,
+            backgroundColor: appTokens.color.pageBackground,
         },
     },
     logEntryMobile: {
         gridTemplateColumns: '56px 1fr',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         alignItems: 'start',
+        paddingLeft: appTokens.space.xxs,
+        paddingRight: appTokens.space.xxs,
     },
     logTime: {
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
         fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap',
     },
     logAgent: {
         fontWeight: 600,
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -149,16 +144,16 @@ const useStyles = makeStyles({
         alignSelf: 'center',
     },
     levelDotInfo: {
-        backgroundColor: tokens.colorNeutralForeground4,
+        backgroundColor: appTokens.color.textMuted,
     },
     levelDotWarn: {
-        backgroundColor: tokens.colorPaletteMarigoldForeground1,
+        backgroundColor: appTokens.color.warning,
     },
     levelDotError: {
-        backgroundColor: tokens.colorPaletteRedForeground1,
+        backgroundColor: appTokens.color.danger,
     },
     levelDotSuccess: {
-        backgroundColor: tokens.colorPaletteGreenForeground1,
+        backgroundColor: appTokens.color.success,
     },
     logMessage: {
         wordBreak: 'break-word',
@@ -168,30 +163,30 @@ const useStyles = makeStyles({
         gridColumnEnd: 3,
     },
     logLevelInfo: {
-        color: tokens.colorNeutralForeground1,
+        color: appTokens.color.textPrimary,
     },
     logLevelWarn: {
-        color: tokens.colorPaletteMarigoldForeground1,
+        color: appTokens.color.warning,
     },
     logLevelError: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     logLevelSuccess: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     emptyState: {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flex: 1,
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
         fontStyle: 'italic',
-        paddingTop: tokens.spacingVerticalXXL,
-        paddingBottom: tokens.spacingVerticalXXL,
+        paddingTop: appTokens.space.xxl,
+        paddingBottom: appTokens.space.xxl,
     },
     runTabsContainer: {
         padding: '6px 8px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        borderBottom: appTokens.border.subtle,
     },
     runTabsContainerMobile: {
         paddingTop: '4px',
@@ -457,7 +452,7 @@ export function LogPanel({
                     <Title3 className={styles.logTitle}>Live Logs</Title3>
                     <Badge appearance="filled" color="informative" size="small">{sortedVisibleLogs.length}</Badge>
                 </div>
-                <div className={styles.logHeaderActions}>
+                <div className={mergeClasses(styles.logHeaderActions, isMobile && styles.logHeaderActionsMobile)}>
                     <ToggleButton
                         appearance="subtle"
                         size="small"

@@ -18,27 +18,32 @@ import { PageHeader } from '../../components/shared'
 import { ProfileTab, ConnectionsTab, AppearanceTab, NotificationsTab, SecurityTab } from './'
 import { useUserSettings } from '../../proxies'
 import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     page: {
-        padding: '1.5rem 2rem',
-        maxWidth: '900px',
+        paddingTop: appTokens.space.xl,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        maxWidth: appTokens.width.pageNarrow,
         margin: '0 auto',
         width: '100%',
+        minWidth: 0,
     },
     pageMobile: {
-        paddingTop: '0.875rem',
-        paddingBottom: '0.875rem',
-        paddingLeft: '0.75rem',
-        paddingRight: '0.75rem',
+        paddingTop: appTokens.space.pageYMobile,
+        paddingBottom: appTokens.space.pageYMobile,
+        paddingLeft: appTokens.space.pageXMobile,
+        paddingRight: appTokens.space.pageXMobile,
     },
     tabListSpacing: {
-        marginBottom: '1.5rem',
+        marginBottom: appTokens.space.xl,
     },
     tabListSpacingMobile: {
-        marginBottom: '0.875rem',
+        marginBottom: appTokens.space.pageYMobile,
         overflowX: 'auto',
-        paddingBottom: '0.25rem',
+        paddingBottom: appTokens.space.xxs,
         whiteSpace: 'nowrap',
     },
 })

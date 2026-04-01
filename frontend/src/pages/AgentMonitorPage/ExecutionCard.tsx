@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Card,
@@ -32,6 +31,7 @@ import {
 import type { AgentExecution, AgentInfo } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
+import { appTokens } from '../../styles/appTokens'
 
 type ExecutionStepStatus = AgentInfo['status'] | 'paused'
 type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
@@ -64,48 +64,37 @@ function formatTimestamp(iso: string): string {
 
 const useStyles = makeStyles({
     executionCard: {
-        paddingTop: tokens.spacingVerticalM,
-        paddingBottom: tokens.spacingVerticalM,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalL,
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.xl,
+        paddingRight: appTokens.space.xl,
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
-        borderTopWidth: '1px',
-        borderRightWidth: '1px',
-        borderBottomWidth: '1px',
-        borderLeftWidth: '1px',
-        borderTopStyle: 'solid',
-        borderRightStyle: 'solid',
-        borderBottomStyle: 'solid',
-        borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke2,
-        borderRightColor: tokens.colorNeutralStroke2,
-        borderBottomColor: tokens.colorNeutralStroke2,
-        borderLeftColor: tokens.colorNeutralStroke2,
-        boxShadow: tokens.shadow4,
+        gap: appTokens.space.md,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     executionCardCompact: {
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
-        gap: tokens.spacingVerticalS,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        gap: appTokens.space.sm,
     },
     executionCardMobile: {
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalS,
-        paddingRight: tokens.spacingHorizontalS,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
     },
     executionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        gap: tokens.spacingHorizontalM,
+        gap: appTokens.space.md,
     },
     executionHeaderCompact: {
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     executionHeaderMobile: {
         flexDirection: 'column',
@@ -114,7 +103,7 @@ const useStyles = makeStyles({
     executionTitle: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXXS,
+        gap: appTokens.space.xxxs,
         minWidth: 0,
     },
     executionTitleCompact: {
@@ -131,40 +120,40 @@ const useStyles = makeStyles({
         textOverflow: 'clip',
     },
     titleTextCompact: {
-        fontSize: '12px',
-        lineHeight: '16px',
+        fontSize: appTokens.fontSize.sm,
+        lineHeight: appTokens.lineHeight.snug,
     },
     flexRowGap: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     flexRowGapCompact: {
-        gap: tokens.spacingHorizontalXS,
+        gap: appTokens.space.xs,
     },
     metaRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalXS,
-        color: tokens.colorNeutralForeground3,
+        gap: appTokens.space.xs,
+        color: appTokens.color.textTertiary,
         flexWrap: 'wrap',
     },
     metaRowCompact: {
         gap: '2px',
     },
     metaCaptionCompact: {
-        fontSize: '11px',
-        lineHeight: '14px',
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.tight,
     },
     metaIcon: {
-        fontSize: '12px',
+        fontSize: appTokens.fontSize.iconXs,
     },
     metaIconCompact: {
-        fontSize: '10px',
+        fontSize: appTokens.fontSize.xxs,
     },
     executionActions: {
         display: 'flex',
-        gap: tokens.spacingHorizontalXXS,
+        gap: appTokens.space.xxxs,
         flexShrink: 0,
         flexWrap: 'wrap',
     },
@@ -180,14 +169,14 @@ const useStyles = makeStyles({
     agentStep: {
         display: 'grid',
         gridTemplateColumns: '28px 1fr auto',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         alignItems: 'start',
-        paddingTop: tokens.spacingVerticalXS,
-        paddingBottom: tokens.spacingVerticalXS,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
     },
     agentStepCompact: {
         gridTemplateColumns: '24px 1fr auto',
-        gap: tokens.spacingHorizontalXS,
+        gap: appTokens.space.xs,
         paddingTop: '2px',
         paddingBottom: '2px',
     },
@@ -206,45 +195,45 @@ const useStyles = makeStyles({
     stepIconShell: {
         width: '24px',
         height: '24px',
-        borderRadius: tokens.borderRadiusCircular,
-        backgroundColor: tokens.colorNeutralBackground1,
+        borderRadius: appTokens.radius.full,
+        backgroundColor: appTokens.color.surface,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
         zIndex: 1,
-        boxShadow: `0 0 0 4px ${tokens.colorNeutralBackground1}`,
+        boxShadow: `0 0 0 4px ${appTokens.color.surface}`,
     },
     stepIconShellCompact: {
         width: '20px',
         height: '20px',
-        boxShadow: `0 0 0 3px ${tokens.colorNeutralBackground1}`,
+        boxShadow: `0 0 0 3px ${appTokens.color.surface}`,
     },
     stepIcon: {
-        fontSize: '16px',
+        fontSize: appTokens.fontSize.iconSm,
     },
     stepIconCompleted: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     stepIconPaused: {
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
     stepIconFailed: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     stepIconCancelled: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     stepIconIdle: {
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
     },
     connectorSegment: {
         position: 'absolute',
         left: '50%',
         transform: 'translateX(-50%)',
         width: '3px',
-        borderRadius: tokens.borderRadiusCircular,
-        backgroundColor: tokens.colorNeutralStroke2,
+        borderRadius: appTokens.radius.full,
+        backgroundColor: appTokens.color.border,
     },
     connectorTop: {
         top: 0,
@@ -255,38 +244,38 @@ const useStyles = makeStyles({
         bottom: 0,
     },
     connectorCompleted: {
-        backgroundColor: tokens.colorPaletteGreenForeground1,
+        backgroundColor: appTokens.color.success,
     },
     connectorRunning: {
-        backgroundColor: tokens.colorPaletteMarigoldForeground1,
+        backgroundColor: appTokens.color.warning,
     },
     connectorPaused: {
-        backgroundColor: tokens.colorBrandForeground1,
+        backgroundColor: appTokens.color.brand,
     },
     connectorFailed: {
-        backgroundColor: tokens.colorPaletteRedForeground1,
+        backgroundColor: appTokens.color.danger,
     },
     stepBody: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXXS,
+        gap: appTokens.space.xxxs,
     },
     roleName: {
-        lineHeight: '20px',
+        lineHeight: appTokens.lineHeight.base,
     },
     roleNameCompact: {
-        fontSize: '11px',
-        lineHeight: '14px',
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.tight,
     },
     taskCaption: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     taskCaptionRunning: {
-        color: tokens.colorNeutralForeground2,
+        color: appTokens.color.textSecondary,
     },
     taskCaptionCompact: {
-        fontSize: '10px',
-        lineHeight: '13px',
+        fontSize: appTokens.fontSize.xxs,
+        lineHeight: appTokens.lineHeight.tight,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -300,7 +289,7 @@ const useStyles = makeStyles({
     },
     stepProgress: {
         maxWidth: '120px',
-        marginTop: tokens.spacingVerticalXXS,
+        marginTop: appTokens.space.xxxs,
     },
     stepProgressCompact: {
         maxWidth: '88px',
@@ -312,25 +301,25 @@ const useStyles = makeStyles({
         minHeight: '20px',
     },
     progressPercent: {
-        fontSize: '11px',
+        fontSize: appTokens.fontSize.xs,
         fontVariantNumeric: 'tabular-nums',
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     progressPercentCompact: {
-        fontSize: '10px',
+        fontSize: appTokens.fontSize.xxs,
     },
     completedActions: {
         display: 'flex',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     runActions: {
         display: 'flex',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     completedActionsCompact: {
-        gap: tokens.spacingHorizontalXS,
+        gap: appTokens.space.xs,
     },
     completedActionsMobile: {
         width: '100%',

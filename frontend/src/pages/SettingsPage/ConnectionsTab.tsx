@@ -7,7 +7,6 @@ import {
     Caption1,
     Text,
     Button,
-    tokens,
     Dialog,
     DialogSurface,
     DialogTitle,
@@ -22,51 +21,52 @@ import { AccountRow } from './'
 import { getApiErrorMessage, getGitHubOAuthState, getGitHubOAuthClientId, useSetPrimaryGitHubAccount, useUnlinkGitHub } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import type { LinkedAccount } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const PLACEHOLDER_GITHUB_CLIENT_ID = 'YOUR_GITHUB_OAUTH_CLIENT_ID'
 
 const useStyles = makeStyles({
     section: {
-        padding: '1.25rem',
+        padding: `calc(${appTokens.space.lg} + ${appTokens.space.xxs})`,
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: appTokens.space.lg,
     },
     sectionMobile: {
-        paddingTop: '0.875rem',
-        paddingBottom: '0.875rem',
-        paddingLeft: '0.75rem',
-        paddingRight: '0.75rem',
+        paddingTop: appTokens.space.pageYMobile,
+        paddingBottom: appTokens.space.pageYMobile,
+        paddingLeft: appTokens.space.pageXMobile,
+        paddingRight: appTokens.space.pageXMobile,
     },
     sectionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     infoCard: {
-        padding: '1rem',
-        backgroundColor: tokens.colorNeutralBackground3,
-        borderRadius: tokens.borderRadiusMedium,
+        padding: appTokens.space.lg,
+        backgroundColor: appTokens.color.pageBackground,
+        borderRadius: appTokens.radius.md,
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
     },
     infoCardMobile: {
         alignItems: 'flex-start',
-        paddingTop: '0.75rem',
-        paddingBottom: '0.75rem',
-        paddingLeft: '0.625rem',
-        paddingRight: '0.625rem',
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
     },
     infoIcon: {
-        fontSize: '24px',
-        color: tokens.colorBrandForeground1,
+        fontSize: appTokens.fontSize.iconLg,
+        color: appTokens.color.brand,
         flexShrink: 0,
     },
     connectError: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     actionButtonMobile: {
         width: '100%',

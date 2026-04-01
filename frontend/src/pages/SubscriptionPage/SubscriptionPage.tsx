@@ -10,19 +10,24 @@ import { PageHeader } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
 import { useSubscription } from '../../proxies'
 import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     page: {
-        padding: '1.5rem 2rem',
-        maxWidth: '1100px',
+        paddingTop: appTokens.space.xl,
+        paddingRight: appTokens.space.pageX,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.pageX,
+        maxWidth: appTokens.width.pageMedium,
         margin: '0 auto',
         width: '100%',
+        minWidth: 0,
     },
     pageCompact: {
-        paddingTop: '1rem',
-        paddingBottom: '1rem',
-        paddingLeft: '1rem',
-        paddingRight: '1rem',
+        paddingTop: appTokens.space.lg,
+        paddingBottom: appTokens.space.lg,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
         maxWidth: '980px',
     },
     usageSection: {
@@ -50,9 +55,9 @@ const useStyles = makeStyles({
     },
     plansGrid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-        gap: '1rem',
-        marginTop: '1rem',
+        gridTemplateColumns: `repeat(auto-fill, minmax(${appTokens.width.planCardMin}, 1fr))`,
+        gap: appTokens.space.lg,
+        marginTop: appTokens.space.lg,
     },
     plansGridCompact: {
         gridTemplateColumns: '1fr',

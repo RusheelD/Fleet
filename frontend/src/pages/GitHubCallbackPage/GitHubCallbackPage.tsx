@@ -5,12 +5,12 @@ import {
     Spinner,
     Text,
     Card,
-    tokens,
     Button,
 } from '@fluentui/react-components'
 import { ErrorCircleRegular, CheckmarkCircleRegular } from '@fluentui/react-icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { getApiErrorMessage, linkGitHub } from '../../proxies'
+import { APP_MOBILE_MEDIA_QUERY, appTokens } from '../../styles/appTokens'
 
 // Module-level set survives React strict mode remounts.
 // Prevents the single-use OAuth code from being sent twice.
@@ -22,36 +22,39 @@ const useStyles = makeStyles({
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
-        padding: '2rem',
-        '@media (max-width: 900px)': {
+        padding: appTokens.space.xxl,
+        [APP_MOBILE_MEDIA_QUERY]: {
             alignItems: 'flex-start',
-            paddingTop: '1rem',
-            paddingBottom: '1rem',
-            paddingLeft: '0.75rem',
-            paddingRight: '0.75rem',
+            paddingTop: appTokens.space.lg,
+            paddingBottom: appTokens.space.lg,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     card: {
-        padding: '2rem',
+        padding: appTokens.space.xxl,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '1rem',
+        gap: appTokens.space.lg,
         maxWidth: '400px',
         width: '100%',
-        '@media (max-width: 900px)': {
-            padding: '1.25rem 1rem',
-            marginTop: '0.5rem',
+        [APP_MOBILE_MEDIA_QUERY]: {
+            paddingTop: `calc(${appTokens.space.lg} + ${appTokens.space.xxs})`,
+            paddingBottom: appTokens.space.lg,
+            paddingLeft: appTokens.space.lg,
+            paddingRight: appTokens.space.lg,
+            marginTop: appTokens.space.sm,
         },
     },
     icon: {
-        fontSize: '48px',
+        fontSize: appTokens.fontSize.iconXl,
     },
     successIcon: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     errorIcon: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
 })
 

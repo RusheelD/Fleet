@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Title3,
     Body1,
     Card,
@@ -15,7 +14,8 @@ import {
 } from '@fluentui/react-components'
 import { RocketRegular, ArrowUpRegular } from '@fluentui/react-icons'
 import type { CurrentPlan } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     currentPlan: {
@@ -32,8 +32,8 @@ const useStyles = makeStyles({
         paddingBottom: '0.625rem',
         paddingLeft: '0.75rem',
         paddingRight: '0.75rem',
-        marginBottom: '1rem',
-        gap: '0.5rem',
+        marginBottom: appTokens.space.lg,
+        gap: appTokens.space.sm,
     },
     planInfo: {
         display: 'flex',
@@ -53,7 +53,7 @@ const useStyles = makeStyles({
     },
     planBadgeIcon: {
         fontSize: '24px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
     planBadgeIconCompact: {
         fontSize: '16px',
@@ -61,6 +61,9 @@ const useStyles = makeStyles({
     compactBody: {
         fontSize: '12px',
         lineHeight: '16px',
+    },
+    upgradeButtonMobile: {
+        width: '100%',
     },
 })
 
@@ -71,6 +74,7 @@ interface CurrentPlanBannerProps {
 export function CurrentPlanBanner({ currentPlan }: CurrentPlanBannerProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const toasterId = useId('banner-toaster')
     const { dispatchToast } = useToastController(toasterId)
@@ -90,6 +94,7 @@ export function CurrentPlanBanner({ currentPlan }: CurrentPlanBannerProps) {
                 appearance="primary"
                 icon={<ArrowUpRegular />}
                 size={isCompact ? 'small' : 'medium'}
+                className={mergeClasses(isMobile && styles.upgradeButtonMobile)}
                 onClick={() => dispatchToast(<Toast><ToastTitle>Plan upgrades are not available in this version</ToastTitle></Toast>, { intent: 'info' })}
             >
                 Upgrade Plan

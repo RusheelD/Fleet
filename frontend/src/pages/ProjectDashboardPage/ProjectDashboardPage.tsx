@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Title3,
     Card,
     Button,
@@ -30,27 +29,33 @@ import { PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
 import { useProjectDashboardBySlug, useDeleteProject, useUpdateProject, resolveIcon } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
+import { appTokens, APP_MOBILE_MEDIA_QUERY } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     page: {
-        padding: '1.5rem 2rem',
-        maxWidth: '1400px',
+        paddingTop: appTokens.space.xl,
+        paddingRight: appTokens.space.pageX,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.pageX,
+        maxWidth: appTokens.width.pageLarge,
         margin: '0 auto',
         width: '100%',
+        minWidth: 0,
     },
     pageMobile: {
-        paddingTop: '0.875rem',
-        paddingBottom: '0.875rem',
-        paddingLeft: '0.75rem',
-        paddingRight: '0.75rem',
+        paddingTop: appTokens.space.pageYMobile,
+        paddingBottom: appTokens.space.pageYMobile,
+        paddingLeft: appTokens.space.pageXMobile,
+        paddingRight: appTokens.space.pageXMobile,
     },
     repoLink: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
-        color: tokens.colorBrandForegroundLink,
+        color: appTokens.color.brand,
         fontSize: '13px',
         cursor: 'pointer',
+        minWidth: 0,
         ':hover': {
             textDecoration: 'underline',
         },
@@ -65,15 +70,18 @@ const useStyles = makeStyles({
     },
     headerActionsMobile: {
         width: '100%',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+        gap: '0.5rem',
     },
     headerActionButtonMobile: {
-        flex: '1 1 140px',
+        width: '100%',
     },
     metricsGrid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        gap: '1rem',
-        marginBottom: '1.5rem',
+        gridTemplateColumns: `repeat(auto-fill, minmax(${appTokens.width.metricCardMin}, 1fr))`,
+        gap: appTokens.space.lg,
+        marginBottom: appTokens.space.xl,
     },
     metricsGridCompact: {
         gridTemplateColumns: '1fr 1fr',
@@ -83,9 +91,9 @@ const useStyles = makeStyles({
     twoColumns: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: '1.5rem',
-        marginBottom: '1.5rem',
-        '@media (max-width: 900px)': {
+        gap: appTokens.space.xl,
+        marginBottom: appTokens.space.xl,
+        [`@media ${APP_MOBILE_MEDIA_QUERY}`]: {
             gridTemplateColumns: '1fr',
         },
     },
@@ -98,7 +106,8 @@ const useStyles = makeStyles({
         padding: '1.25rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: appTokens.space.lg,
+        minWidth: 0,
     },
     sectionCardCompact: {
         paddingTop: '0.625rem',
@@ -129,9 +138,9 @@ const useStyles = makeStyles({
     },
     quickActions: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-        gap: '0.75rem',
-        marginBottom: '1.5rem',
+        gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${appTokens.width.quickActionMin}), 1fr))`,
+        gap: appTokens.space.md,
+        marginBottom: appTokens.space.xl,
     },
     quickActionsCompact: {
         gridTemplateColumns: '1fr 1fr',
@@ -145,8 +154,10 @@ const useStyles = makeStyles({
         gridTemplateColumns: '1fr 1fr',
     },
     repoLinkMobile: {
-        display: 'inline-flex',
+        display: 'flex',
+        flexWrap: 'wrap',
         marginBottom: '0.75rem',
+        wordBreak: 'break-word',
     },
 })
 

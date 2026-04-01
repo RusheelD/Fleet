@@ -8,20 +8,21 @@ import {
 import { SettingRow } from '../../components/shared'
 import { usePreferences, useIsMobile } from '../../hooks'
 import type { UserPreferences } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     section: {
-        padding: '1.25rem',
+        padding: `calc(${appTokens.space.lg} + ${appTokens.space.xxs})`,
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: appTokens.space.lg,
     },
     sectionMobile: {
-        paddingTop: '0.875rem',
-        paddingBottom: '0.875rem',
-        paddingLeft: '0.75rem',
-        paddingRight: '0.75rem',
-        gap: '0.75rem',
+        paddingTop: appTokens.space.pageYMobile,
+        paddingBottom: appTokens.space.pageYMobile,
+        paddingLeft: appTokens.space.pageXMobile,
+        paddingRight: appTokens.space.pageXMobile,
+        gap: appTokens.space.md,
     },
 })
 

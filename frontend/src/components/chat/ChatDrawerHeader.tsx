@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Button,
@@ -10,7 +9,8 @@ import {
     BotRegular,
     DismissRegular,
 } from '@fluentui/react-icons'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     drawerHeader: {
@@ -18,7 +18,7 @@ const useStyles = makeStyles({
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: '0.75rem 1rem',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        borderBottom: appTokens.border.subtle,
     },
     drawerHeaderCompact: {
         paddingTop: '0.375rem',
@@ -26,17 +26,24 @@ const useStyles = makeStyles({
         paddingLeft: '0.5rem',
         paddingRight: '0.5rem',
     },
+    drawerHeaderMobile: {
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: '0.5rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+    },
     drawerHeaderLeft: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.75rem',
+        minWidth: 0,
     },
     drawerHeaderLeftCompact: {
         gap: '0.5rem',
     },
     drawerHeaderIcon: {
         fontSize: '20px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
     drawerHeaderIconCompact: {
         fontSize: '14px',
@@ -44,6 +51,7 @@ const useStyles = makeStyles({
     drawerHeaderInfo: {
         display: 'flex',
         flexDirection: 'column',
+        minWidth: 0,
     },
     drawerHeaderCaption: {
         display: 'block',
@@ -66,10 +74,11 @@ interface ChatDrawerHeaderProps {
 export function ChatDrawerHeader({ onClose }: ChatDrawerHeaderProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
 
     return (
-        <div className={mergeClasses(styles.drawerHeader, isCompact && styles.drawerHeaderCompact)}>
+        <div className={mergeClasses(styles.drawerHeader, isCompact && styles.drawerHeaderCompact, isMobile && styles.drawerHeaderMobile)}>
             <div className={mergeClasses(styles.drawerHeaderLeft, isCompact && styles.drawerHeaderLeftCompact)}>
                 <BotRegular className={mergeClasses(styles.drawerHeaderIcon, isCompact && styles.drawerHeaderIconCompact)} />
                 <div className={styles.drawerHeaderInfo}>

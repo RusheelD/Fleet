@@ -1,6 +1,5 @@
 import {
     makeStyles,
-    tokens,
     Caption1,
     Text,
     Card,
@@ -12,7 +11,8 @@ import {
     PersonRegular,
     TagRegular,
 } from '@fluentui/react-icons'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { PriorityDot } from './'
 import { LevelBadge } from '../../components/shared'
@@ -25,7 +25,7 @@ const useStyles = makeStyles({
         gap: '0.5rem',
         cursor: 'pointer',
         ':hover': {
-            boxShadow: tokens.shadow4,
+            boxShadow: appTokens.shadow.card,
         },
     },
     workItemCardCompact: {
@@ -42,10 +42,10 @@ const useStyles = makeStyles({
         borderRightStyle: 'solid',
         borderBottomStyle: 'solid',
         borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke2,
-        borderRightColor: tokens.colorNeutralStroke2,
-        borderBottomColor: tokens.colorNeutralStroke2,
-        borderLeftColor: tokens.colorNeutralStroke2,
+        borderTopColor: appTokens.color.border,
+        borderRightColor: appTokens.color.border,
+        borderBottomColor: appTokens.color.border,
+        borderLeftColor: appTokens.color.border,
     },
     compactTopRow: {
         display: 'grid',
@@ -61,13 +61,17 @@ const useStyles = makeStyles({
         gap: '0.375rem',
         minWidth: 0,
     },
+    compactBottomRowMobile: {
+        gridTemplateColumns: '1fr',
+        alignItems: 'flex-start',
+    },
     cardTop: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
     },
     cardId: {
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
         fontWeight: 600,
         fontSize: '12px',
     },
@@ -80,9 +84,15 @@ const useStyles = makeStyles({
         fontWeight: 600,
         fontSize: '12px',
         lineHeight: '16px',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
+    },
+    cardTitleMobile: {
+        display: '-webkit-box',
+        WebkitLineClamp: '2',
+        WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
-        textOverflow: 'ellipsis',
     },
     cardFooter: {
         display: 'flex',
@@ -112,7 +122,7 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
         fontSize: '12px',
         minWidth: 0,
     },
@@ -121,6 +131,12 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
         maxWidth: '120px',
+    },
+    compactAssigneeMobile: {
+        maxWidth: 'none',
+        whiteSpace: 'normal',
+        overflow: 'visible',
+        textOverflow: 'clip',
     },
 })
 
@@ -133,10 +149,12 @@ interface WorkItemCardProps {
 export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isDense = isCompact || isMobile
     const level = item.levelId != null ? levelMap?.get(item.levelId) : undefined
 
-    if (isCompact) {
+    if (isDense) {
         return (
             <Card
                 className={mergeClasses(styles.workItemCard, styles.workItemCardCompact)}
@@ -145,10 +163,10 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
             >
                 <div className={styles.compactTopRow}>
                     <Text className={styles.cardId}>#{item.workItemNumber}</Text>
-                    <Text className={styles.cardTitleCompact}>{item.title}</Text>
+                    <Text className={mergeClasses(styles.cardTitleCompact, isMobile && styles.cardTitleMobile)}>{item.title}</Text>
                     <PriorityDot priority={item.priority} />
                 </div>
-                <div className={styles.compactBottomRow}>
+                <div className={mergeClasses(styles.compactBottomRow, isMobile && styles.compactBottomRowMobile)}>
                     <div className={styles.tagsRow}>
                         <LevelBadge level={level} />
                         {item.tags.slice(0, 1).map((tag) => (
@@ -161,7 +179,9 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
                     {item.assignedTo && (
                         <div className={styles.assignee}>
                             {item.isAI ? <BotRegular /> : <PersonRegular />}
-                            <Caption1 className={styles.compactAssignee}>{item.assignedTo}</Caption1>
+                            <Caption1 className={mergeClasses(styles.compactAssignee, isMobile && styles.compactAssigneeMobile)}>
+                                {item.assignedTo}
+                            </Caption1>
                         </div>
                     )}
                 </div>

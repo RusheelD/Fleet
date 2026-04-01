@@ -1,24 +1,26 @@
 import { makeStyles, mergeClasses, Text, Caption1, Switch } from '@fluentui/react-components'
 import type { ReactNode } from 'react'
 import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     settingRow: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '0.5rem 0',
-        gap: '0.75rem',
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        gap: appTokens.space.md,
     },
     settingRowMobile: {
         flexDirection: 'column',
         alignItems: 'flex-start',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
     },
     settingInfo: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.125rem',
+        gap: appTokens.space.xxxs,
         minWidth: 0,
     },
     switchMobile: {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { makeStyles, mergeClasses, tokens, Spinner } from '@fluentui/react-components'
+import { makeStyles, mergeClasses, Spinner } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatInput, AttachedFiles } from './'
@@ -10,7 +10,8 @@ import {
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession,
     cancelChatSessionRequests, sendChatMessage,
 } from '../../proxies'
-import { useChatGenerating, useAuth, usePreferences } from '../../hooks'
+import { useChatGenerating, useAuth, usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatMessageData, SendMessageResponse } from '../../models'
 import { resolveChatUserIdentity } from './initials'
 
@@ -18,7 +19,7 @@ const useStyles = makeStyles({
     drawer: {
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: tokens.colorNeutralBackground2,
+        backgroundColor: appTokens.color.surfaceAlt,
         flexShrink: 0,
         height: '100%',
         overflow: 'hidden',
@@ -26,6 +27,9 @@ const useStyles = makeStyles({
     },
     drawerCompact: {
         fontSize: '12px',
+    },
+    drawerMobile: {
+        paddingBottom: 'env(safe-area-inset-bottom)',
     },
     messagesContainer: {
         flex: 1,
@@ -37,7 +41,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
-        backgroundColor: tokens.colorNeutralBackground2,
+        backgroundColor: appTokens.color.surfaceAlt,
     },
     messagesContainerCompact: {
         paddingTop: '0.5rem',
@@ -46,10 +50,16 @@ const useStyles = makeStyles({
         paddingRight: '0.5rem',
         gap: '0.5rem',
     },
+    messagesContainerMobile: {
+        paddingTop: '0.625rem',
+        paddingBottom: '0.75rem',
+        paddingLeft: '0.625rem',
+        paddingRight: '0.625rem',
+    },
     thinkingRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         padding: '0.5rem 0.25rem',
     },
     thinkingRowCompact: {
@@ -57,6 +67,10 @@ const useStyles = makeStyles({
         paddingBottom: '0.25rem',
         paddingLeft: '0.125rem',
         paddingRight: '0.125rem',
+    },
+    thinkingRowMobile: {
+        paddingLeft: '0.25rem',
+        paddingRight: '0.25rem',
     },
 })
 
@@ -99,6 +113,7 @@ export function ChatDrawer({
     const { isGenerating, setIsGenerating } = useChatGenerating()
     const { user } = useAuth()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -421,7 +436,7 @@ export function ChatDrawer({
     }
 
     return (
-        <div className={mergeClasses(styles.drawer, isCompact && styles.drawerCompact)}>
+        <div className={mergeClasses(styles.drawer, isCompact && styles.drawerCompact, isMobile && styles.drawerMobile)}>
             <ChatDrawerHeader onClose={onClose} />
 
             <ChatSessionBar
@@ -441,14 +456,22 @@ export function ChatDrawer({
             {loadingChat ? (
                 <div
                     ref={messagesContainerRef}
-                    className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}
+                    className={mergeClasses(
+                        styles.messagesContainer,
+                        isCompact && styles.messagesContainerCompact,
+                        isMobile && styles.messagesContainerMobile,
+                    )}
                 >
                     <Spinner label="Loading chat..." />
                 </div>
             ) : (
                 <div
                     ref={messagesContainerRef}
-                    className={mergeClasses(styles.messagesContainer, isCompact && styles.messagesContainerCompact)}
+                    className={mergeClasses(
+                        styles.messagesContainer,
+                        isCompact && styles.messagesContainerCompact,
+                        isMobile && styles.messagesContainerMobile,
+                    )}
                 >
                     {displayMessages.map((msg) => (
                         <ChatMessage key={msg.id} message={msg} currentUserIdentity={currentUserIdentity} />
@@ -457,7 +480,13 @@ export function ChatDrawer({
                         <ToolEventMessage key={`tool-${i}`} event={evt} />
                     ))}
                     {isThinking && (
-                        <div className={mergeClasses(styles.thinkingRow, isCompact && styles.thinkingRowCompact)}>
+                        <div
+                            className={mergeClasses(
+                                styles.thinkingRow,
+                                isCompact && styles.thinkingRowCompact,
+                                isMobile && styles.thinkingRowMobile,
+                            )}
+                        >
                             <Spinner
                                 size="tiny"
                                 label={isGenerating

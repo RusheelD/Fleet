@@ -19,19 +19,24 @@ import { SearchResultCard } from './'
 import { useSearch } from '../../proxies'
 import { getSearchTypeForCategory, type SearchCategory } from './searchCategory'
 import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     page: {
-        padding: '1.5rem 2rem',
-        maxWidth: '900px',
+        paddingTop: appTokens.space.xl,
+        paddingRight: appTokens.space.pageX,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.pageX,
+        maxWidth: appTokens.width.pageNarrow,
         margin: '0 auto',
         width: '100%',
+        minWidth: 0,
     },
     pageCompact: {
-        paddingTop: '1rem',
-        paddingBottom: '1rem',
-        paddingLeft: '1rem',
-        paddingRight: '1rem',
+        paddingTop: appTokens.space.lg,
+        paddingBottom: appTokens.space.lg,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
         maxWidth: '760px',
     },
     searchBox: {

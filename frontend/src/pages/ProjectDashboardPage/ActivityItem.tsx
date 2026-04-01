@@ -1,32 +1,32 @@
 import {
     makeStyles,
-    tokens,
     Body1,
     Caption1,
 } from '@fluentui/react-components'
 import { ClockRegular } from '@fluentui/react-icons'
 import type { ReactNode } from 'react'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     activityItem: {
         display: 'flex',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         alignItems: 'flex-start',
     },
     activityIcon: {
         marginTop: '2px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
         flexShrink: 0,
     },
     activityContent: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.125rem',
+        gap: appTokens.space.xxxs,
         flex: 1,
     },
     clockSmallIcon: {
-        fontSize: '10px',
-        marginRight: '0.25rem',
+        fontSize: appTokens.fontSize.xxs,
+        marginRight: appTokens.space.xxs,
     },
 })
 

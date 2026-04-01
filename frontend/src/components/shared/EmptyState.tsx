@@ -1,18 +1,19 @@
-import { makeStyles, tokens, Body1, Caption1 } from '@fluentui/react-components'
+import { makeStyles, Body1, Caption1 } from '@fluentui/react-components'
 import { SearchRegular } from '@fluentui/react-icons'
 import type { ReactNode } from 'react'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     emptyState: {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '3rem',
-        gap: '0.75rem',
-        color: tokens.colorNeutralForeground3,
+        padding: appTokens.space.xxl,
+        gap: appTokens.space.md,
+        color: appTokens.color.textTertiary,
     },
     emptyIcon: {
-        fontSize: '48px',
+        fontSize: appTokens.fontSize.iconXl,
     },
 })
 

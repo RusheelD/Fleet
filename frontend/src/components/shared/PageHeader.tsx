@@ -1,28 +1,29 @@
-import { makeStyles, mergeClasses, tokens, Title2, Body1 } from '@fluentui/react-components'
+import { makeStyles, mergeClasses, Title2, Body1 } from '@fluentui/react-components'
 import type { ReactNode } from 'react'
 import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     header: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: '1.5rem',
+        marginBottom: appTokens.space.xl,
         flexWrap: 'wrap',
-        gap: '1rem',
+        gap: appTokens.space.lg,
     },
     headerLeft: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.25rem',
+        gap: appTokens.space.xxs,
         minWidth: 0,
     },
     subtitle: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     headerMobile: {
-        marginBottom: '1rem',
-        gap: '0.75rem',
+        marginBottom: appTokens.space.lg,
+        gap: appTokens.space.md,
     },
     actionsMobile: {
         width: '100%',

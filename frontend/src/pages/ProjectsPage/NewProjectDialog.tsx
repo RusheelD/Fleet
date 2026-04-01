@@ -12,7 +12,6 @@ import {
     DialogBody,
     DialogContent,
     DialogActions,
-    tokens,
     Text,
     Spinner,
     Combobox,
@@ -27,6 +26,7 @@ import { CheckmarkCircle16Filled, DismissCircle16Filled, LockClosedRegular } fro
 import { getApiErrorMessage, useCreateGitHubRepo, useCreateProject, useCheckSlug, useGitHubRepos, useUserSettings } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import { canCreateProject } from './projectCreationGate'
+import { appTokens } from '../../styles/appTokens'
 
 function generateSlugPreview(name: string): string {
     return name
@@ -53,33 +53,33 @@ const useStyles = makeStyles({
     dialogForm: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1.125rem',
+        gap: `calc(${appTokens.space.lg} + ${appTokens.space.xxs})`,
     },
     dialogFormMobile: {
-        gap: '0.875rem',
+        gap: appTokens.space.pageYMobile,
     },
     repoModeGroup: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     sectionStack: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalS,
+        gap: appTokens.space.sm,
     },
     repoHint: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.sm,
     },
     slugRow: {
         display: 'flex',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: tokens.spacingHorizontalXS,
-        marginTop: tokens.spacingVerticalXS,
-        backgroundColor: tokens.colorNeutralBackground2,
-        borderRadius: tokens.borderRadiusMedium,
+        gap: appTokens.space.xs,
+        marginTop: appTokens.space.xs,
+        backgroundColor: appTokens.color.surfaceAlt,
+        borderRadius: appTokens.radius.md,
         paddingTop: '2px',
         paddingBottom: '2px',
         paddingLeft: '6px',
@@ -87,24 +87,24 @@ const useStyles = makeStyles({
         width: '100%',
     },
     slugText: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
-        fontFamily: tokens.fontFamilyMonospace,
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.sm,
+        fontFamily: 'monospace',
     },
     slugAvailable: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     slugUnavailable: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     repoAvailabilityRow: {
         display: 'flex',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: tokens.spacingHorizontalXS,
-        marginTop: tokens.spacingVerticalXS,
-        backgroundColor: tokens.colorNeutralBackground2,
-        borderRadius: tokens.borderRadiusMedium,
+        gap: appTokens.space.xs,
+        marginTop: appTokens.space.xs,
+        backgroundColor: appTokens.color.surfaceAlt,
+        borderRadius: appTokens.radius.md,
         paddingTop: '2px',
         paddingBottom: '2px',
         paddingLeft: '6px',
@@ -112,15 +112,15 @@ const useStyles = makeStyles({
         width: '100%',
     },
     repoAvailabilityText: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
-        fontFamily: tokens.fontFamilyMonospace,
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.sm,
+        fontFamily: 'monospace',
     },
     repoAvailabilityAvailable: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     repoAvailabilityUnavailable: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     repoOption: {
         display: 'flex',
@@ -128,12 +128,12 @@ const useStyles = makeStyles({
         gap: '2px',
     },
     repoName: {
-        fontFamily: tokens.fontFamilyMonospace,
-        fontSize: tokens.fontSizeBase200,
+        fontFamily: 'monospace',
+        fontSize: appTokens.fontSize.sm,
     },
     repoDescription: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase100,
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.xs,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -144,28 +144,28 @@ const useStyles = makeStyles({
         whiteSpace: 'normal',
     },
     privateIcon: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: '12px',
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.sm,
         marginLeft: '4px',
     },
     repoCombobox: {
         width: '100%',
     },
     accountOptionMeta: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase100,
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.xs,
     },
     formError: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     privacyToggle: {
-        marginTop: tokens.spacingVerticalXXS,
+        marginTop: appTokens.space.xxxs,
     },
     dialogActionsMobile: {
         width: '100%',
         justifyContent: 'stretch',
         display: 'grid',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     dialogActionButtonMobile: {
         width: '100%',

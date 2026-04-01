@@ -3,51 +3,54 @@ import {
     Caption1,
     Text,
     Card,
-    tokens,
     mergeClasses,
 } from '@fluentui/react-components'
 import { usePreferences, useIsMobile } from '../../hooks'
 import type { KeyboardEvent, ReactNode } from 'react'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     summaryCard: {
-        padding: '0.75rem 1rem',
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         minWidth: '160px',
         flex: '1 1 160px',
     },
     summaryCardCompact: {
-        paddingTop: '0.375rem',
-        paddingBottom: '0.375rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
-        gap: '0.5rem',
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        gap: appTokens.space.sm,
         minWidth: '120px',
         flex: '1 1 120px',
     },
     summaryCardMobile: {
-        minWidth: 'calc(50% - 0.5rem)',
-        flex: '1 1 calc(50% - 0.5rem)',
+        minWidth: `calc(50% - ${appTokens.space.sm})`,
+        flex: `1 1 calc(50% - ${appTokens.space.sm})`,
     },
     summaryIcon: {
-        fontSize: '24px',
+        fontSize: appTokens.fontSize.iconLg,
     },
     summaryIconCompact: {
-        fontSize: '16px',
+        fontSize: appTokens.fontSize.iconSm,
     },
     summaryValue: {
-        fontSize: '20px',
-        fontWeight: 700,
+        fontSize: appTokens.fontSize.xl,
+        fontWeight: appTokens.fontWeight.bold,
     },
     summaryValueCompact: {
-        fontSize: '15px',
-        lineHeight: '16px',
+        fontSize: appTokens.fontSize.lg,
+        lineHeight: appTokens.lineHeight.snug,
     },
     labelCompact: {
-        fontSize: '11px',
-        lineHeight: '14px',
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.tight,
     },
     captionBlock: {
         display: 'block' as const,
@@ -56,12 +59,12 @@ const useStyles = makeStyles({
         cursor: 'pointer',
         userSelect: 'none',
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     summaryCardActive: {
-        backgroundColor: tokens.colorBrandBackground2,
-        boxShadow: `inset 0 0 0 1px ${tokens.colorBrandStroke1}`,
+        backgroundColor: appTokens.color.surfaceBrand,
+        boxShadow: appTokens.border.activeInset,
     },
 })
 

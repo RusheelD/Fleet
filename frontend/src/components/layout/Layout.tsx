@@ -3,7 +3,6 @@ import { useLocation, Outlet, useParams } from 'react-router-dom'
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Text,
     Button,
     Tooltip,
@@ -24,43 +23,51 @@ import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
 import { useCurrentProject, usePreferences, useServerEvents, ChatGeneratingProvider, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 import type { NavItemConfig } from '../../models'
 
-const SIDEBAR_WIDTH_EXPANDED = '260px'
-const SIDEBAR_WIDTH_COLLAPSED = '48px'
-const SIDEBAR_WIDTH_EXPANDED_COMPACT = '220px'
-const SIDEBAR_WIDTH_COLLAPSED_COMPACT = '44px'
+const SIDEBAR_WIDTH_EXPANDED = appTokens.size.sidebarExpanded
+const SIDEBAR_WIDTH_COLLAPSED = appTokens.size.sidebarCollapsed
+const SIDEBAR_WIDTH_EXPANDED_COMPACT = appTokens.size.sidebarExpandedCompact
+const SIDEBAR_WIDTH_COLLAPSED_COMPACT = appTokens.size.sidebarCollapsedCompact
+const MIN_CHAT_WIDTH = Number.parseInt(appTokens.size.chatMin, 10)
+const MAX_CHAT_WIDTH = Number.parseInt(appTokens.size.chatMax, 10)
+const DEFAULT_CHAT_WIDTH = Number.parseInt(appTokens.size.chatDefault, 10)
 
 const useStyles = makeStyles({
     root: {
-        backgroundColor: tokens.colorNeutralBackground2,
-        height: '100%',
+        backgroundColor: appTokens.color.surfaceAlt,
+        height: '100dvh',
+        minHeight: '100dvh',
+        minWidth: 0,
     },
     rootMobile: {
         position: 'relative',
         overflow: 'hidden',
+        width: '100%',
     },
 
     sidebarPane: {
         flexShrink: 0,
+        display: 'flex',
+        borderRight: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surface,
     },
 
     sidebar: {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        backgroundColor: tokens.colorNeutralBackground1,
-        borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-        transition: 'width 0.2s ease',
+        backgroundColor: appTokens.color.surface,
+        transition: `width ${appTokens.motion.normal} ease`,
         overflowX: 'hidden',
         overflowY: 'auto',
         flexShrink: 0,
-        boxShadow: `inset -1px 0 0 ${tokens.colorNeutralStroke2}`,
     },
     sidebarMobile: {
-        height: '100vh',
-        boxShadow: tokens.shadow64,
+        height: '100dvh',
+        boxShadow: appTokens.shadow.overlay,
     },
     sidebarExpanded: {
         width: SIDEBAR_WIDTH_EXPANDED,
@@ -78,18 +85,18 @@ const useStyles = makeStyles({
     mobileSidebarBackdrop: {
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
-        zIndex: 30,
+        backgroundColor: appTokens.color.overlayBackdrop,
+        zIndex: appTokens.zIndex.sidebarBackdrop,
     },
     mobileSidebarDrawer: {
         position: 'fixed',
         top: 0,
         left: 0,
         bottom: 0,
-        width: 'min(82vw, 300px)',
-        zIndex: 31,
+        width: appTokens.size.mobileSidebarWidth,
+        zIndex: appTokens.zIndex.sidebarDrawer,
         transform: 'translateX(-100%)',
-        transition: 'transform 0.2s ease',
+        transition: `transform ${appTokens.motion.normal} ease`,
         pointerEvents: 'none',
     },
     mobileSidebarDrawerOpen: {
@@ -99,64 +106,70 @@ const useStyles = makeStyles({
     mobileSidebarCloseRow: {
         display: 'flex',
         justifyContent: 'flex-end',
-        paddingTop: '0.25rem',
+        paddingTop: `max(${appTokens.space.xxs}, env(safe-area-inset-top))`,
         paddingBottom: 0,
-        paddingLeft: '0.25rem',
-        paddingRight: '0.25rem',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        paddingLeft: appTokens.space.xxs,
+        paddingRight: appTokens.space.xxs,
+        borderBottom: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
     },
 
     navSection: {
         display: 'flex',
         flexDirection: 'column',
-        padding: '0.5rem 0.375rem 0',
+        paddingTop: appTokens.space.sm,
+        paddingRight: appTokens.space.xs,
+        paddingBottom: 0,
+        paddingLeft: appTokens.space.xs,
         gap: '2px',
     },
     navSectionCompact: {
-        paddingTop: '0.25rem',
-        paddingLeft: '0.25rem',
-        paddingRight: '0.25rem',
+        paddingTop: appTokens.space.xxs,
+        paddingLeft: appTokens.space.xxs,
+        paddingRight: appTokens.space.xxs,
     },
     navSectionLabel: {
-        padding: '0.375rem 0.625rem 0.25rem',
+        paddingTop: appTokens.space.xs,
+        paddingRight: '0.625rem',
+        paddingBottom: appTokens.space.xxs,
+        paddingLeft: '0.625rem',
         fontSize: '11px',
         fontWeight: 600,
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         userSelect: 'none',
     },
     navSectionLabelCompact: {
-        paddingTop: '0.25rem',
-        paddingBottom: '0.125rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxxs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
         fontSize: '10px',
     },
 
     sidebarFooter: {
         marginTop: 'auto',
-        padding: '0.375rem',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        padding: appTokens.space.xs,
+        borderTop: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
     },
     sidebarFooterCompact: {
-        padding: '0.25rem',
+        padding: appTokens.space.xxs,
     },
     collapsedTopSlot: {
-        marginTop: '0.375rem',
-        marginLeft: '0.375rem',
-        marginRight: '0.375rem',
+        marginTop: appTokens.space.xs,
+        marginLeft: appTokens.space.xs,
+        marginRight: appTokens.space.xs,
         display: 'flex',
         justifyContent: 'center',
     },
     collapsedTopSlotCompact: {
-        marginTop: '0.25rem',
-        marginLeft: '0.25rem',
-        marginRight: '0.25rem',
+        marginTop: appTokens.space.xxs,
+        marginLeft: appTokens.space.xxs,
+        marginRight: appTokens.space.xxs,
     },
     collapsedExpandButton: {
         width: '100%',
@@ -170,13 +183,16 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        minHeight: 0,
+        minWidth: 0,
         overflow: 'hidden',
-        backgroundColor: tokens.colorNeutralBackground3,
+        backgroundColor: appTokens.color.pageBackground,
     },
     mainContent: {
         flex: 1,
         overflow: 'auto',
         minWidth: 0,
+        minHeight: 0,
     },
     contentWithChat: {
         display: 'flex',
@@ -184,15 +200,16 @@ const useStyles = makeStyles({
         flex: 1,
         overflow: 'hidden',
         minWidth: 0,
+        minHeight: 0,
     },
     chatPane: {
         flexShrink: 0,
         height: '100%',
         display: 'flex',
         flexDirection: 'row',
-        backgroundColor: tokens.colorNeutralBackground1,
-        borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
-        transition: 'width 0.18s ease',
+        backgroundColor: appTokens.color.surface,
+        borderLeft: appTokens.border.subtle,
+        transition: `width ${appTokens.motion.fast} ease`,
     },
     chatPaneResizing: {
         transition: 'none',
@@ -200,8 +217,9 @@ const useStyles = makeStyles({
     chatOverlayMobile: {
         position: 'fixed',
         inset: 0,
-        zIndex: 40,
-        backgroundColor: tokens.colorNeutralBackground1,
+        zIndex: appTokens.zIndex.chatOverlay,
+        backgroundColor: appTokens.color.surface,
+        paddingBottom: 'env(safe-area-inset-bottom)',
     },
     resizeHandle: {
         width: '6px',
@@ -210,11 +228,11 @@ const useStyles = makeStyles({
         flexShrink: 0,
         transition: 'background-color 0.15s',
         ':hover': {
-            backgroundColor: tokens.colorBrandBackground2,
+            backgroundColor: appTokens.color.surfaceBrand,
         },
     },
     resizeHandleActive: {
-        backgroundColor: tokens.colorBrandBackground2,
+        backgroundColor: appTokens.color.surfaceBrand,
     },
 })
 
@@ -256,9 +274,6 @@ export function Layout() {
         }
     }, [isMobile, location.pathname])
 
-    const MIN_CHAT_WIDTH = 340
-    const MAX_CHAT_WIDTH = 800
-    const DEFAULT_CHAT_WIDTH = 480
     const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH)
     const isResizing = useRef(false)
     const [isResizingActive, setIsResizingActive] = useState(false)

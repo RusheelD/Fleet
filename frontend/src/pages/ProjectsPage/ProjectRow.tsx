@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Badge,
@@ -13,61 +12,65 @@ import {
 } from '@fluentui/react-icons'
 import { usePreferences } from '../../hooks'
 import type { ProjectData } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     row: {
         display: 'grid',
         gridTemplateColumns: '2fr 1fr 80px 80px 80px 100px 140px',
         alignItems: 'center',
-        padding: '0.5rem 0.75rem',
-        gap: '0.75rem',
-        borderRadius: tokens.borderRadiusMedium,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        gap: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
         cursor: 'pointer',
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     rowCompact: {
         gridTemplateColumns: '2fr 1.2fr 56px 56px 64px 72px 120px',
-        paddingTop: '0.375rem',
-        paddingBottom: '0.375rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
-        gap: '0.5rem',
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        gap: appTokens.space.sm,
     },
     nameCell: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.125rem',
+        gap: appTokens.space.xxxs,
         minWidth: 0,
     },
     title: {
-        fontWeight: 600,
-        fontSize: '13px',
+        fontWeight: appTokens.fontWeight.semibold,
+        fontSize: appTokens.fontSize.md,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
     },
     titleCompact: {
-        fontSize: '12px',
-        lineHeight: '16px',
+        fontSize: appTokens.fontSize.sm,
+        lineHeight: appTokens.lineHeight.snug,
     },
     description: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
     },
     descriptionCompact: {
-        fontSize: '11px',
-        lineHeight: '14px',
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.tight,
     },
     repoCell: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.375rem',
+        gap: appTokens.space.xs,
         minWidth: 0,
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     repoText: {
         whiteSpace: 'nowrap',
@@ -82,16 +85,16 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '0.375rem',
+        gap: appTokens.space.xs,
     },
     activityCell: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.375rem',
-        color: tokens.colorNeutralForeground4,
+        gap: appTokens.space.xs,
+        color: appTokens.color.textMuted,
     },
     clockIcon: {
-        fontSize: '12px',
+        fontSize: appTokens.fontSize.iconXs,
         flexShrink: 0,
     },
 })

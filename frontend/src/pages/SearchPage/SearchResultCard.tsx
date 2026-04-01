@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Card,
@@ -17,7 +16,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import type { SearchResult } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const ICON_MAP: Record<string, ReactNode> = {
     project: <FolderRegular />,
@@ -38,10 +38,12 @@ const useStyles = makeStyles({
         padding: '0.75rem 1rem',
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'space-between',
         gap: '0.75rem',
         cursor: 'pointer',
+        minWidth: 0,
         ':hover': {
-            boxShadow: tokens.shadow4,
+            boxShadow: appTokens.shadow.card,
         },
     },
     resultCardCompact: {
@@ -50,11 +52,27 @@ const useStyles = makeStyles({
         paddingLeft: '0.5rem',
         paddingRight: '0.5rem',
         gap: '0.5rem',
-        borderRadius: tokens.borderRadiusMedium,
+        borderRadius: appTokens.radius.md,
+    },
+    resultCardMobile: {
+        alignItems: 'stretch',
+        flexDirection: 'column',
+        gap: '0.5rem',
+    },
+    resultLead: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        minWidth: 0,
+        flex: 1,
+    },
+    resultLeadMobile: {
+        alignItems: 'flex-start',
+        gap: '0.5rem',
     },
     resultIcon: {
         fontSize: '20px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
         flexShrink: 0,
     },
     resultIconCompact: {
@@ -79,7 +97,7 @@ const useStyles = makeStyles({
         lineHeight: '16px',
     },
     resultDesc: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -92,7 +110,8 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
+        flexWrap: 'wrap',
     },
     resultMetaCompact: {
         gap: '2px',
@@ -103,6 +122,9 @@ const useStyles = makeStyles({
     clockSmallIconCompact: {
         fontSize: '9px',
     },
+    resultBadgeMobile: {
+        alignSelf: 'flex-start',
+    },
 })
 
 interface SearchResultCardProps {
@@ -112,6 +134,7 @@ interface SearchResultCardProps {
 export function SearchResultCard({ result }: SearchResultCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const navigate = useNavigate()
 
@@ -136,17 +159,26 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
     }
 
     return (
-        <Card className={mergeClasses(styles.resultCard, isCompact && styles.resultCardCompact)} onClick={handleClick}>
-            <span className={mergeClasses(styles.resultIcon, isCompact && styles.resultIconCompact)}>{ICON_MAP[result.type]}</span>
-            <div className={styles.resultContent}>
-                <Text className={mergeClasses(styles.resultTitle, isCompact && styles.resultTitleCompact)}>{result.title}</Text>
-                <Caption1 className={mergeClasses(styles.resultDesc, isCompact && styles.resultDescCompact)}>{result.description}</Caption1>
-                <div className={mergeClasses(styles.resultMeta, isCompact && styles.resultMetaCompact)}>
-                    <ClockRegular className={mergeClasses(styles.clockSmallIcon, isCompact && styles.clockSmallIconCompact)} />
-                    <Caption1>{result.meta}</Caption1>
+        <Card
+            className={mergeClasses(
+                styles.resultCard,
+                isCompact && styles.resultCardCompact,
+                isMobile && styles.resultCardMobile,
+            )}
+            onClick={handleClick}
+        >
+            <div className={mergeClasses(styles.resultLead, isMobile && styles.resultLeadMobile)}>
+                <span className={mergeClasses(styles.resultIcon, isCompact && styles.resultIconCompact)}>{ICON_MAP[result.type]}</span>
+                <div className={styles.resultContent}>
+                    <Text className={mergeClasses(styles.resultTitle, isCompact && styles.resultTitleCompact)}>{result.title}</Text>
+                    <Caption1 className={mergeClasses(styles.resultDesc, isCompact && styles.resultDescCompact)}>{result.description}</Caption1>
+                    <div className={mergeClasses(styles.resultMeta, isCompact && styles.resultMetaCompact)}>
+                        <ClockRegular className={mergeClasses(styles.clockSmallIcon, isCompact && styles.clockSmallIconCompact)} />
+                        <Caption1>{result.meta}</Caption1>
+                    </div>
                 </div>
             </div>
-            <Badge appearance="outline" color={BADGE_MAP[result.type]} size="small">
+            <Badge appearance="outline" color={BADGE_MAP[result.type]} size="small" className={mergeClasses(isMobile && styles.resultBadgeMobile)}>
                 {result.type}
             </Badge>
         </Card>

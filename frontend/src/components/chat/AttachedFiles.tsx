@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Badge,
     Button,
     Text,
@@ -13,6 +12,7 @@ import {
 } from '@fluentui/react-icons'
 import type { ChatAttachment } from '../../models'
 import { usePreferences } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 type AttachmentListItem = ChatAttachment & {
     isUploading?: boolean
@@ -22,49 +22,44 @@ const useStyles = makeStyles({
     container: {
         display: 'flex',
         flexWrap: 'wrap',
-        gap: '0.375rem',
-        padding: '0.5rem 1rem',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        gap: appTokens.space.xs,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        borderTop: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
         flexShrink: 0,
     },
     containerCompact: {
-        gap: '0.25rem',
-        paddingTop: '0.25rem',
-        paddingBottom: '0.25rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
+        gap: appTokens.space.xxs,
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
     },
     chip: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.25rem',
-        backgroundColor: tokens.colorNeutralBackground3,
-        borderRadius: tokens.borderRadiusMedium,
-        padding: '0.125rem 0.375rem 0.125rem 0.5rem',
+        gap: appTokens.space.xxs,
+        backgroundColor: appTokens.color.pageBackground,
+        borderRadius: appTokens.radius.md,
+        paddingTop: appTokens.space.xxxs,
+        paddingRight: appTokens.space.xs,
+        paddingBottom: appTokens.space.xxxs,
+        paddingLeft: appTokens.space.sm,
         maxWidth: '200px',
     },
     chipUploading: {
-        backgroundColor: tokens.colorNeutralBackground4,
-        borderTopWidth: '1px',
-        borderRightWidth: '1px',
-        borderBottomWidth: '1px',
-        borderLeftWidth: '1px',
-        borderTopStyle: 'dashed',
-        borderRightStyle: 'dashed',
-        borderBottomStyle: 'dashed',
-        borderLeftStyle: 'dashed',
-        borderTopColor: tokens.colorNeutralStroke2,
-        borderRightColor: tokens.colorNeutralStroke2,
-        borderBottomColor: tokens.colorNeutralStroke2,
-        borderLeftColor: tokens.colorNeutralStroke2,
+        backgroundColor: appTokens.color.surfaceRaised,
+        border: `1px dashed ${appTokens.color.border}`,
     },
     chipCompact: {
         maxWidth: '170px',
         paddingTop: '0.0625rem',
         paddingBottom: '0.0625rem',
-        paddingLeft: '0.375rem',
-        paddingRight: '0.25rem',
+        paddingLeft: appTokens.space.xs,
+        paddingRight: appTokens.space.xxs,
     },
     fileName: {
         overflow: 'hidden',
@@ -72,8 +67,8 @@ const useStyles = makeStyles({
         whiteSpace: 'nowrap',
     },
     fileNameCompact: {
-        fontSize: '11px',
-        lineHeight: '14px',
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.tight,
     },
 })
 

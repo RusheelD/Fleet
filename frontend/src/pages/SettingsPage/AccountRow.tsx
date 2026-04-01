@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Text,
     Badge,
@@ -11,26 +10,27 @@ import {
 import { OpenRegular } from '@fluentui/react-icons'
 import type { ReactNode } from 'react'
 import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     accountRow: {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0.75rem',
-        borderRadius: tokens.borderRadiusMedium,
-        backgroundColor: tokens.colorNeutralBackground3,
-        gap: '0.75rem',
+        padding: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        backgroundColor: appTokens.color.pageBackground,
+        gap: appTokens.space.md,
     },
     accountRowMobile: {
         flexDirection: 'column',
         alignItems: 'stretch',
-        gap: '0.625rem',
+        gap: appTokens.space.sm,
     },
     accountInfo: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         minWidth: 0,
     },
     accountInfoMobile: {
@@ -41,7 +41,7 @@ const useStyles = makeStyles({
     },
     connectionActions: {
         display: 'flex',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         alignItems: 'center',
         flexWrap: 'wrap',
     },
@@ -52,14 +52,14 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     actionsSlotMobile: {
         width: '100%',
         justifyContent: 'stretch',
         display: 'grid',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         '> .fui-Button': {
             width: '100%',
         },

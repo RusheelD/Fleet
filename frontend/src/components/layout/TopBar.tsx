@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Text,
     Button,
     Tooltip,
@@ -18,31 +17,39 @@ import { useNavigate } from 'react-router-dom'
 import { UserMenu } from './'
 import { useMarkAllNotificationsAsRead, useNotifications } from '../../proxies'
 import { useAuth, usePreferences } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     topBar: {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 1.25rem',
-        minHeight: '52px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground1,
+        gap: appTokens.space.md,
+        paddingTop: 0,
+        paddingRight: '1.25rem',
+        paddingBottom: 0,
+        paddingLeft: '1.25rem',
+        height: appTokens.size.topBar,
+        flexShrink: 0,
+        borderBottom: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surface,
         backdropFilter: 'blur(2px)',
+        minWidth: 0,
     },
     topBarCompact: {
         paddingTop: 0,
         paddingBottom: 0,
-        paddingLeft: '0.75rem',
-        paddingRight: '0.75rem',
-        minHeight: '42px',
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        height: appTokens.size.topBarCompact,
     },
     topBarMobile: {
         paddingTop: 0,
         paddingBottom: 0,
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
-        minHeight: '44px',
+        paddingLeft: appTokens.space.xs,
+        paddingRight: appTokens.space.xs,
+        height: appTokens.size.topBarMobile,
+        gap: appTokens.space.xs,
     },
     topBarLeft: {
         display: 'flex',
@@ -51,20 +58,21 @@ const useStyles = makeStyles({
         minWidth: 0,
     },
     topBarLeftMobile: {
-        gap: '0.375rem',
-        flex: 1,
+        gap: appTokens.space.xxs,
+        flex: '1 1 auto',
+        overflow: 'hidden',
     },
     topBarRight: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.375rem',
+        gap: appTokens.space.xs,
         flexShrink: 0,
     },
     topBarRightCompact: {
-        gap: '0.125rem',
+        gap: appTokens.space.xxxs,
     },
     topBarRightMobile: {
-        gap: 0,
+        gap: '2px',
         minWidth: 0,
     },
     tierBadge: {
@@ -100,7 +108,7 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
         fontSize: '13px',
         minWidth: 0,
         overflow: 'hidden',
@@ -112,15 +120,17 @@ const useStyles = makeStyles({
     breadcrumbMobile: {
         fontSize: '12px',
         maxWidth: '100%',
+        overflow: 'hidden',
     },
     breadcrumbItem: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.25rem',
         minWidth: 0,
+        maxWidth: '100%',
     },
     breadcrumbSep: {
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
     },
     breadcrumbLink: {
         minWidth: 0,
@@ -130,7 +140,7 @@ const useStyles = makeStyles({
         whiteSpace: 'nowrap',
     },
     breadcrumbCurrent: {
-        color: tokens.colorNeutralForeground1,
+        color: appTokens.color.textPrimary,
         fontWeight: 600,
         minWidth: 0,
         overflow: 'hidden',
@@ -165,7 +175,9 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, 
     const markAllRead = useMarkAllNotificationsAsRead()
     const unreadCount = notifications?.length ?? 0
     const tier = (user?.role ?? 'free').toString().toUpperCase()
-    const visibleBreadcrumbs = isMobile ? breadcrumbs.slice(-1) : breadcrumbs
+    const visibleBreadcrumbs = isMobile
+        ? breadcrumbs.slice(Math.max(0, breadcrumbs.length - 2))
+        : breadcrumbs
 
     return (
         <div className={mergeClasses(styles.topBar, isCompact && styles.topBarCompact, isMobile && styles.topBarMobile)}>

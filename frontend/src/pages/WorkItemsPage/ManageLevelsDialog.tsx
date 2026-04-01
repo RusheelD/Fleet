@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
     makeStyles,
-    tokens,
     Button,
     Input,
     Field,
@@ -35,6 +34,7 @@ import {
     LEVEL_ICON_NAMES,
 } from '../../proxies'
 import type { WorkItemLevel } from '../../models'
+import { APP_MOBILE_MEDIA_QUERY, appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     dialogSurface: {
@@ -44,43 +44,46 @@ const useStyles = makeStyles({
     levelList: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px',
+        gap: appTokens.space.xxs,
     },
     levelRow: {
         display: 'grid',
         gridTemplateColumns: '32px 1fr auto',
         alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.375rem 0.5rem',
-        borderRadius: tokens.borderRadiusMedium,
-        '@media (max-width: 900px)': {
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        [APP_MOBILE_MEDIA_QUERY]: {
             gridTemplateColumns: '24px 1fr',
-            rowGap: '0.375rem',
+            rowGap: appTokens.space.xs,
         },
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     levelPreview: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
     },
     levelIcon: {
         display: 'flex',
         alignItems: 'center',
-        fontSize: '16px',
+        fontSize: appTokens.fontSize.iconSm,
     },
     levelMeta: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.25rem',
+        gap: appTokens.space.xxs,
     },
     levelActions: {
         display: 'flex',
         alignItems: 'center',
         gap: '2px',
-        '@media (max-width: 900px)': {
+        [APP_MOBILE_MEDIA_QUERY]: {
             gridColumnStart: 1,
             gridColumnEnd: 3,
             justifyContent: 'flex-end',
@@ -90,18 +93,18 @@ const useStyles = makeStyles({
     editForm: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.75rem',
-        padding: '0.75rem',
-        borderRadius: tokens.borderRadiusMedium,
-        backgroundColor: tokens.colorNeutralBackground3,
+        gap: appTokens.space.md,
+        padding: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        backgroundColor: appTokens.color.pageBackground,
     },
     editFormRow: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: '0.75rem',
-        '@media (max-width: 900px)': {
+        gap: appTokens.space.md,
+        [APP_MOBILE_MEDIA_QUERY]: {
             gridTemplateColumns: '1fr',
-            gap: '0.5rem',
+            gap: appTokens.space.sm,
         },
     },
     colorPreview: {
@@ -116,10 +119,10 @@ const useStyles = makeStyles({
         borderRightStyle: 'solid',
         borderBottomStyle: 'solid',
         borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke1,
-        borderRightColor: tokens.colorNeutralStroke1,
-        borderBottomColor: tokens.colorNeutralStroke1,
-        borderLeftColor: tokens.colorNeutralStroke1,
+        borderTopColor: appTokens.color.borderSubtle,
+        borderRightColor: appTokens.color.borderSubtle,
+        borderBottomColor: appTokens.color.borderSubtle,
+        borderLeftColor: appTokens.color.borderSubtle,
         cursor: 'pointer',
         flexShrink: 0,
     },
@@ -134,11 +137,11 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: tokens.borderRadiusMedium,
+        borderRadius: appTokens.radius.md,
         cursor: 'pointer',
-        fontSize: '14px',
+        fontSize: appTokens.fontSize.sm,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     iconOptionSelected: {
@@ -147,47 +150,44 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: tokens.borderRadiusMedium,
+        borderRadius: appTokens.radius.md,
         cursor: 'pointer',
-        fontSize: '14px',
-        backgroundColor: tokens.colorBrandBackground2,
-        outline: `2px solid ${tokens.colorBrandStroke1}`,
+        fontSize: appTokens.fontSize.sm,
+        backgroundColor: appTokens.color.surfaceBrand,
+        outline: `2px solid ${appTokens.color.brandStroke}`,
     },
     emptyState: {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '0.5rem',
-        padding: '1.5rem',
-        color: tokens.colorNeutralForeground3,
+        gap: appTokens.space.sm,
+        padding: appTokens.space.xl,
+        color: appTokens.color.textTertiary,
     },
     dialogContent: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         maxHeight: '60vh',
         overflow: 'auto',
     },
     editActions: {
         display: 'flex',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         justifyContent: 'flex-end',
-        '@media (max-width: 900px)': {
+        [APP_MOBILE_MEDIA_QUERY]: {
             flexDirection: 'column',
             alignItems: 'stretch',
         },
     },
     editActionButtonMobile: {
-        '@media (max-width: 900px)': {
+        [APP_MOBILE_MEDIA_QUERY]: {
             width: '100%',
         },
     },
 })
 
-const DEFAULT_COLORS = [
-    '#8764B8', '#0078D4', '#00B7C3', '#498205', '#D13438', '#8A8886',
-    '#E3008C', '#CA5010', '#107C10', '#005B70', '#004E8C', '#7719AA',
-]
+const DEFAULT_COLORS = appTokens.palette.workItemLevels
 
 interface EditState {
     id: number | null // null = new level
@@ -237,7 +237,7 @@ export function ManageLevelsDialog({ projectId, open, onOpenChange }: ManageLeve
             id: null,
             name: '',
             iconName: 'circle',
-            color: '#0078D4',
+            color: appTokens.color.workItemLevelDefault,
             ordinal: sorted.length,
         })
     }, [sorted.length])
@@ -466,7 +466,7 @@ function LevelEditForm({ editState, setEditState, onSave, onCancel, isBusy, styl
                                     className={styles.colorPreview}
                                     style={{
                                         backgroundColor: c,
-                                        outline: editState.color === c ? `2px solid ${tokens.colorBrandStroke1}` : undefined,
+                                        outline: editState.color === c ? `2px solid ${appTokens.color.brandStroke}` : undefined,
                                         outlineOffset: '1px',
                                     }}
                                     onClick={() => setEditState({ ...editState, color: c })}

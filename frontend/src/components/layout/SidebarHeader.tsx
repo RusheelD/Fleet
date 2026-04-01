@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Text,
     Button,
 } from '@fluentui/react-components'
@@ -9,6 +8,7 @@ import {
     RocketRegular,
     ChevronLeftRegular,
 } from '@fluentui/react-icons'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     sidebarHeader: {
@@ -16,10 +16,11 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.625rem',
         padding: '0 0.625rem',
-        minHeight: '52px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        height: appTokens.size.sidebarHeader,
+        flexShrink: 0,
+        borderBottom: appTokens.border.subtle,
         position: 'relative',
-        backgroundColor: tokens.colorNeutralBackground2,
+        backgroundColor: appTokens.color.surfaceAlt,
     },
     sidebarHeaderCollapsed: {
         justifyContent: 'center',
@@ -27,7 +28,7 @@ const useStyles = makeStyles({
         gap: 0,
     },
     brandIcon: {
-        color: tokens.colorPaletteDarkOrangeForeground1,
+        color: appTokens.color.accentOrange,
         fontSize: '20px',
         flexShrink: 0,
     },

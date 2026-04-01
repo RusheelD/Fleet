@@ -1,40 +1,43 @@
 import {
     makeStyles,
-    tokens,
     Caption1,
     Text,
 } from '@fluentui/react-components'
 import { WrenchRegular } from '@fluentui/react-icons'
 import type { ToolEvent } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     container: {
         display: 'flex',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         alignItems: 'flex-start',
-        padding: '0.5rem 0.75rem',
-        borderRadius: tokens.borderRadiusMedium,
-        backgroundColor: tokens.colorNeutralBackground4,
-        fontSize: '12px',
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        backgroundColor: appTokens.color.surfaceRaised,
+        fontSize: appTokens.fontSize.sm,
     },
     icon: {
-        color: tokens.colorBrandForeground1,
-        fontSize: '14px',
+        color: appTokens.color.brand,
+        fontSize: appTokens.fontSize.sm,
         marginTop: '2px',
         flexShrink: 0,
     },
     content: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.125rem',
+        gap: appTokens.space.xxxs,
         minWidth: 0,
     },
     toolName: {
         fontFamily: 'monospace',
-        fontWeight: 600,
+        fontWeight: appTokens.fontWeight.semibold,
     },
     result: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
         maxHeight: '100px',

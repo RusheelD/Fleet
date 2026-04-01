@@ -1,6 +1,6 @@
 import {
     makeStyles,
-    tokens,
+    mergeClasses,
     Title3,
     Caption1,
     Text,
@@ -14,30 +14,67 @@ import {
     ClockRegular,
     BotRegular,
 } from '@fluentui/react-icons'
+import { useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 import type { ProjectData } from '../../models'
 
 const useStyles = makeStyles({
     projectCard: {
         cursor: 'pointer',
+        transitionProperty: 'transform, box-shadow',
+        transitionDuration: appTokens.motion.fast,
+        minWidth: 0,
         ':hover': {
-            boxShadow: tokens.shadow8,
+            boxShadow: appTokens.shadow.cardHover,
+            transform: 'translateY(-2px)',
         },
+    },
+    projectCardMobile: {
+        borderRadius: appTokens.radius.lg,
+    },
+    title: {
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    description: {
+        color: appTokens.color.textTertiary,
+        display: '-webkit-box',
+        WebkitLineClamp: '2',
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
     },
     cardPreview: {
         padding: '0 1rem 1rem',
         display: 'flex',
         flexDirection: 'column',
+        gap: '0.875rem',
+        minWidth: 0,
+    },
+    cardPreviewMobile: {
+        paddingTop: '0.125rem',
+        paddingBottom: '0.875rem',
+        paddingLeft: '0.875rem',
+        paddingRight: '0.875rem',
         gap: '0.75rem',
     },
     repoRow: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
+        minWidth: 0,
+        flexWrap: 'wrap',
+    },
+    repoText: {
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
     },
     statsRow: {
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
         gap: '0.5rem',
         textAlign: 'center',
     },
@@ -53,7 +90,7 @@ const useStyles = makeStyles({
     },
     statLabel: {
         fontSize: '12px',
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
     },
     activityRow: {
         display: 'flex',
@@ -61,15 +98,27 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.5rem',
         flexWrap: 'wrap',
+        minWidth: 0,
+    },
+    activityRowMobile: {
+        flexDirection: 'column',
+        alignItems: 'flex-start',
     },
     agentBadge: {
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
+        minWidth: 0,
+        flexWrap: 'wrap',
+    },
+    activityTime: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.25rem',
     },
     clockIcon: {
         fontSize: '12px',
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
     },
 })
 
@@ -80,17 +129,18 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, onClick }: ProjectCardProps) {
     const styles = useStyles()
+    const isMobile = useIsMobile()
 
     return (
-        <Card className={styles.projectCard} onClick={onClick}>
+        <Card className={mergeClasses(styles.projectCard, isMobile && styles.projectCardMobile)} onClick={onClick}>
             <CardHeader
-                header={<Title3>{project.title}</Title3>}
-                description={<Caption1>{project.description}</Caption1>}
+                header={<Title3 className={styles.title}>{project.title}</Title3>}
+                description={<Caption1 className={styles.description}>{project.description}</Caption1>}
             />
-            <CardPreview className={styles.cardPreview}>
+            <CardPreview className={mergeClasses(styles.cardPreview, isMobile && styles.cardPreviewMobile)}>
                 <div className={styles.repoRow}>
                     <FolderRegular />
-                    <Text size={200}>{project.repo}</Text>
+                    <Text size={200} className={styles.repoText}>{project.repo}</Text>
                 </div>
 
                 <div className={styles.statsRow}>
@@ -108,7 +158,7 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
                     </div>
                 </div>
 
-                <div className={styles.activityRow}>
+                <div className={mergeClasses(styles.activityRow, isMobile && styles.activityRowMobile)}>
                     <div className={styles.agentBadge}>
                         <BotRegular />
                         {project.agents.running > 0 ? (
@@ -121,7 +171,7 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
                             </Badge>
                         )}
                     </div>
-                    <div className={styles.stat}>
+                    <div className={styles.activityTime}>
                         <ClockRegular className={styles.clockIcon} />
                         <Caption1>{project.lastActivity}</Caption1>
                     </div>

@@ -2,7 +2,6 @@ import { useRef, useCallback, useEffect } from 'react'
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Caption1,
     Button,
     Menu,
@@ -17,16 +16,17 @@ import {
     ChevronDownRegular,
     TaskListAddRegular,
 } from '@fluentui/react-icons'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     inputArea: {
         padding: '0.75rem 1rem',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        borderTop: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         flexShrink: 0,
     },
     inputAreaCompact: {
@@ -36,6 +36,9 @@ const useStyles = makeStyles({
         paddingRight: '0.5rem',
         gap: '0.25rem',
     },
+    inputAreaMobile: {
+        paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))',
+    },
     inputRow: {
         display: 'flex',
         gap: '0.5rem',
@@ -44,13 +47,17 @@ const useStyles = makeStyles({
     inputRowCompact: {
         gap: '0.375rem',
     },
+    inputRowMobile: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
+    },
     inputTextarea: {
         flex: 1,
-        fontFamily: tokens.fontFamilyBase,
-        fontSize: tokens.fontSizeBase300,
-        lineHeight: tokens.lineHeightBase300,
+        fontFamily: 'inherit',
+        fontSize: '13px',
+        lineHeight: '18px',
         padding: '6px 12px',
-        borderRadius: tokens.borderRadiusMedium,
+        borderRadius: appTokens.radius.md,
         borderTopWidth: '1px',
         borderRightWidth: '1px',
         borderBottomWidth: '1px',
@@ -59,12 +66,12 @@ const useStyles = makeStyles({
         borderRightStyle: 'solid',
         borderBottomStyle: 'solid',
         borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke1,
-        borderRightColor: tokens.colorNeutralStroke1,
-        borderBottomColor: tokens.colorNeutralStroke1,
-        borderLeftColor: tokens.colorNeutralStroke1,
-        backgroundColor: tokens.colorNeutralBackground1,
-        color: tokens.colorNeutralForeground1,
+        borderTopColor: appTokens.color.border,
+        borderRightColor: appTokens.color.border,
+        borderBottomColor: appTokens.color.border,
+        borderLeftColor: appTokens.color.border,
+        backgroundColor: appTokens.color.surface,
+        color: appTokens.color.textPrimary,
         resize: 'none',
         overflow: 'hidden',
         minHeight: '60px',
@@ -73,19 +80,19 @@ const useStyles = makeStyles({
         ':focus': {
             outlineWidth: '2px',
             outlineStyle: 'solid',
-            outlineColor: tokens.colorBrandStroke1,
+            outlineColor: appTokens.color.brandStroke,
             borderTopColor: 'transparent',
             borderRightColor: 'transparent',
             borderBottomColor: 'transparent',
             borderLeftColor: 'transparent',
         },
         '::placeholder': {
-            color: tokens.colorNeutralForeground4,
+            color: appTokens.color.textMuted,
         },
     },
     inputTextareaCompact: {
-        fontSize: tokens.fontSizeBase200,
-        lineHeight: tokens.lineHeightBase200,
+        fontSize: '12px',
+        lineHeight: '16px',
         paddingTop: '4px',
         paddingBottom: '4px',
         paddingLeft: '8px',
@@ -95,6 +102,10 @@ const useStyles = makeStyles({
     sendGroup: {
         display: 'flex',
         alignSelf: 'flex-end',
+    },
+    sendGroupMobile: {
+        width: '100%',
+        alignSelf: 'stretch',
     },
     sendButton: {
         borderTopRightRadius: 0,
@@ -106,23 +117,37 @@ const useStyles = makeStyles({
         minWidth: 'auto',
         paddingLeft: '4px',
         paddingRight: '4px',
-        borderLeft: `1px solid ${tokens.colorNeutralForegroundOnBrand}`,
+        borderLeft: `1px solid ${appTokens.color.textOnBrand}`,
     },
     inputActions: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.5rem',
+    },
+    inputActionsMobile: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
     },
     inputButtons: {
         display: 'flex',
         gap: '0.25rem',
     },
+    inputButtonsMobile: {
+        width: '100%',
+        '> .fui-Button': {
+            width: '100%',
+        },
+    },
     inputHint: {
-        color: tokens.colorNeutralForeground4,
+        color: appTokens.color.textMuted,
     },
     inputHintCompact: {
         fontSize: '10px',
         lineHeight: '12px',
+    },
+    inputHintMobile: {
+        alignSelf: 'flex-start',
     },
     hiddenInput: {
         display: 'none',
@@ -143,6 +168,7 @@ interface ChatInputProps {
 export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate = true, onFileSelect, disabled, uploading }: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -175,8 +201,8 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
     }
 
     return (
-        <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact)}>
-            <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact)}>
+        <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact, isMobile && styles.inputAreaMobile)}>
+            <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact, isMobile && styles.inputRowMobile)}>
                 <textarea
                     ref={textareaRef}
                     placeholder="Describe what you want to build..."
@@ -192,7 +218,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                         }
                     }}
                 />
-                <div className={styles.sendGroup}>
+                <div className={mergeClasses(styles.sendGroup, isMobile && styles.sendGroupMobile)}>
                     {canGenerate ? (
                         <>
                             <Button
@@ -247,8 +273,8 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                     )}
                 </div>
             </div>
-            <div className={styles.inputActions}>
-                <div className={styles.inputButtons}>
+            <div className={mergeClasses(styles.inputActions, isMobile && styles.inputActionsMobile)}>
+                <div className={mergeClasses(styles.inputButtons, isMobile && styles.inputButtonsMobile)}>
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -266,7 +292,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                         {uploading ? 'Uploading...' : 'Attach .md'}
                     </Button>
                 </div>
-                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact)}>
+                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, isMobile && styles.inputHintMobile)}>
                     Attach .md files for AI context
                 </Caption1>
             </div>

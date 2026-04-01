@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react'
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Tab,
     TabList,
     Toolbar,
@@ -31,21 +30,26 @@ import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecuti
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
+import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     page: {
-        padding: '1.5rem 2rem',
+        paddingTop: appTokens.space.xl,
+        paddingRight: appTokens.space.pageX,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.pageX,
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
         overflow: 'hidden',
-        backgroundColor: tokens.colorNeutralBackground3,
+        backgroundColor: appTokens.color.pageBackground,
+        minWidth: 0,
     },
     pageCompact: {
-        paddingTop: '0.875rem',
-        paddingBottom: '0.875rem',
-        paddingLeft: '1rem',
-        paddingRight: '1rem',
+        paddingTop: appTokens.space.pageYMobile,
+        paddingBottom: appTokens.space.pageYMobile,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
     },
     headerActions: {
         display: 'flex',
@@ -65,6 +69,9 @@ const useStyles = makeStyles({
     },
     actionsToolbarMobile: {
         alignItems: 'stretch',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: '0.5rem',
     },
     toolbarButtonMobile: {
         flex: '1 1 120px',
@@ -72,7 +79,7 @@ const useStyles = makeStyles({
     summaryRow: {
         display: 'flex',
         gap: '1rem',
-        marginBottom: '1.5rem',
+        marginBottom: appTokens.space.xl,
         flexWrap: 'wrap',
     },
     summaryRowCompact: {
@@ -81,23 +88,25 @@ const useStyles = makeStyles({
     },
     summaryRowMobile: {
         gap: '0.5rem',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     },
     summaryIconWarning: {
-        color: tokens.colorPaletteMarigoldForeground1,
+        color: appTokens.color.warning,
     },
     summaryIconSuccess: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
     },
     summaryIconDanger: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
     summaryIconBrand: {
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
     tabListSpacing: {
-        marginBottom: '1rem',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        paddingBottom: '0.5rem',
+        marginBottom: appTokens.space.lg,
+        borderBottom: appTokens.border.subtle,
+        paddingBottom: appTokens.space.sm,
         overflowX: 'auto',
         whiteSpace: 'nowrap',
     },
@@ -108,10 +117,11 @@ const useStyles = makeStyles({
     mainContent: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: '1.5rem',
+        gap: appTokens.space.xl,
         flex: 1,
         overflow: 'hidden',
-        '@media (max-width: 1000px)': {
+        minHeight: 0,
+        [`@media ${APP_NARROW_LAYOUT_MEDIA_QUERY}`]: {
             gridTemplateColumns: '1fr',
         },
     },
@@ -122,6 +132,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        minHeight: 0,
     },
     executionList: {
         flex: 1,
@@ -149,6 +160,7 @@ const useStyles = makeStyles({
         minWidth: '140px',
         width: '100%',
         flex: '1 1 100%',
+        gridColumn: '1 / -1',
     },
 })
 

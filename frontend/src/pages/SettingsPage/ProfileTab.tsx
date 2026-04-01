@@ -19,34 +19,35 @@ import { SaveRegular, CheckmarkRegular } from '@fluentui/react-icons'
 import { useUpdateProfile } from '../../proxies'
 import { useAuth, useIsMobile } from '../../hooks'
 import type { UserProfile } from '../../models'
+import { APP_MOBILE_MEDIA_QUERY, appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     section: {
-        padding: '1.25rem',
+        padding: `calc(${appTokens.space.lg} + ${appTokens.space.xxs})`,
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
-        '@media (max-width: 900px)': {
-            paddingTop: '0.875rem',
-            paddingBottom: '0.875rem',
-            paddingLeft: '0.75rem',
-            paddingRight: '0.75rem',
+        gap: appTokens.space.lg,
+        [APP_MOBILE_MEDIA_QUERY]: {
+            paddingTop: appTokens.space.pageYMobile,
+            paddingBottom: appTokens.space.pageYMobile,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     sectionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     profileRow: {
         display: 'flex',
-        gap: '1.5rem',
+        gap: appTokens.space.xl,
         alignItems: 'stretch',
         flexWrap: 'wrap',
-        '@media (max-width: 900px)': {
-            gap: '0.875rem',
+        [APP_MOBILE_MEDIA_QUERY]: {
+            gap: appTokens.space.pageYMobile,
             flexDirection: 'column',
         },
     },
@@ -54,8 +55,8 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '0.5rem',
-        '@media (max-width: 900px)': {
+        gap: appTokens.space.sm,
+        [APP_MOBILE_MEDIA_QUERY]: {
             alignItems: 'flex-start',
         },
     },
@@ -63,16 +64,16 @@ const useStyles = makeStyles({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         minWidth: 0,
         width: '100%',
     },
     formRow: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: '0.75rem',
+        gap: appTokens.space.md,
         minWidth: 0,
-        '@media (max-width: 900px)': {
+        [APP_MOBILE_MEDIA_QUERY]: {
             gridTemplateColumns: '1fr',
         },
     },

@@ -1,7 +1,6 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Title3,
     Caption1,
     Text,
@@ -18,7 +17,8 @@ import {
 import { CheckmarkCircleRegular } from '@fluentui/react-icons'
 import type { PlanData } from '../../models'
 import { resolveIcon } from '../../proxies'
-import { usePreferences } from '../../hooks'
+import { usePreferences, useIsMobile } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     planCard: {
@@ -36,6 +36,12 @@ const useStyles = makeStyles({
         paddingRight: '0.75rem',
         gap: '0.5rem',
     },
+    planCardMobile: {
+        paddingTop: '1rem',
+        paddingBottom: '1rem',
+        paddingLeft: '0.875rem',
+        paddingRight: '0.875rem',
+    },
     planCardCurrent: {
         borderTopWidth: '2px',
         borderRightWidth: '2px',
@@ -45,10 +51,10 @@ const useStyles = makeStyles({
         borderRightStyle: 'solid',
         borderBottomStyle: 'solid',
         borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorBrandStroke1,
-        borderRightColor: tokens.colorBrandStroke1,
-        borderBottomColor: tokens.colorBrandStroke1,
-        borderLeftColor: tokens.colorBrandStroke1,
+        borderTopColor: appTokens.color.brandStroke,
+        borderRightColor: appTokens.color.brandStroke,
+        borderBottomColor: appTokens.color.brandStroke,
+        borderLeftColor: appTokens.color.brandStroke,
     },
     planName: {
         display: 'flex',
@@ -72,7 +78,7 @@ const useStyles = makeStyles({
         lineHeight: '24px',
     },
     priceUnit: {
-        color: tokens.colorNeutralForeground3,
+        color: appTokens.color.textTertiary,
     },
     planFeatures: {
         display: 'flex',
@@ -94,14 +100,21 @@ const useStyles = makeStyles({
         fontSize: '12px',
         lineHeight: '16px',
     },
+    featureRowMobile: {
+        alignItems: 'flex-start',
+    },
     featureIcon: {
-        color: tokens.colorPaletteGreenForeground1,
+        color: appTokens.color.success,
         flexShrink: 0,
     },
     currentBadge: {
         position: 'absolute' as const,
         top: '-10px',
         right: '16px',
+    },
+    currentBadgeMobile: {
+        position: 'static',
+        alignSelf: 'flex-start',
     },
     fullWidthButton: {
         width: '100%',
@@ -119,6 +132,7 @@ interface PlanCardProps {
 export function PlanCard({ plan }: PlanCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
+    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const toasterId = useId('plan-toaster')
     const { dispatchToast } = useToastController(toasterId)
@@ -135,6 +149,7 @@ export function PlanCard({ plan }: PlanCardProps) {
             className={mergeClasses(
                 styles.planCard,
                 isCompact && styles.planCardCompact,
+                isMobile && !isCompact && styles.planCardMobile,
                 plan.isCurrent ? styles.planCardCurrent : undefined,
             )}
         >
@@ -143,7 +158,7 @@ export function PlanCard({ plan }: PlanCardProps) {
                 <Badge
                     appearance="filled"
                     color="brand"
-                    className={styles.currentBadge}
+                    className={mergeClasses(styles.currentBadge, isMobile && styles.currentBadgeMobile)}
                 >
                     Current
                 </Badge>
@@ -160,7 +175,14 @@ export function PlanCard({ plan }: PlanCardProps) {
             <Divider />
             <div className={mergeClasses(styles.planFeatures, isCompact && styles.planFeaturesCompact)}>
                 {plan.features.map((feature) => (
-                    <div key={feature} className={mergeClasses(styles.featureRow, isCompact && styles.featureRowCompact)}>
+                    <div
+                        key={feature}
+                        className={mergeClasses(
+                            styles.featureRow,
+                            isCompact && styles.featureRowCompact,
+                            isMobile && styles.featureRowMobile,
+                        )}
+                    >
                         <CheckmarkCircleRegular className={styles.featureIcon} />
                         <Text>{feature}</Text>
                     </div>

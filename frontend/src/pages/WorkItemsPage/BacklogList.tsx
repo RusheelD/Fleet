@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import {
     makeStyles,
-    tokens,
     Caption1,
     Text,
     Badge,
@@ -24,6 +23,7 @@ import {
     MIN_WORK_ITEM_COLUMN_WIDTHS,
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
+import { appTokens } from '../../styles/appTokens'
 
 /* ── Sortable columns ─────────────────────────────────────── */
 type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
@@ -35,20 +35,20 @@ const useStyles = makeStyles({
         overflow: 'auto',
         display: 'flex',
         flexDirection: 'column',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        borderTop: appTokens.border.subtle,
     },
 
     /* ── header row ────────────────────────────────────────── */
     header: {
         display: 'grid',
         alignItems: 'center',
-        paddingTop: tokens.spacingVerticalXS,
-        paddingBottom: tokens.spacingVerticalXS,
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
-        gap: tokens.spacingHorizontalS,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        gap: appTokens.space.sm,
+        borderBottom: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
         position: 'sticky',
         top: 0,
         zIndex: 1,
@@ -61,7 +61,7 @@ const useStyles = makeStyles({
         cursor: 'pointer',
         userSelect: 'none',
         ':hover': {
-            color: tokens.colorNeutralForeground1,
+            color: appTokens.color.textPrimary,
         },
     },
     selectHeaderCell: {
@@ -71,15 +71,15 @@ const useStyles = makeStyles({
     },
 
     headerText: {
-        fontSize: '11px',
-        fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground3,
+        fontSize: appTokens.fontSize.xs,
+        fontWeight: appTokens.fontWeight.semibold,
+        color: appTokens.color.textTertiary,
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
     },
     sortIcon: {
-        fontSize: '10px',
-        color: tokens.colorNeutralForeground3,
+        fontSize: appTokens.fontSize.xxs,
+        color: appTokens.color.textTertiary,
     },
 
     /* ── data rows ─────────────────────────────────────────── */
@@ -88,21 +88,21 @@ const useStyles = makeStyles({
         alignItems: 'center',
         paddingTop: '3px',
         paddingBottom: '3px',
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
-        gap: tokens.spacingHorizontalS,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        gap: appTokens.space.sm,
+        borderBottom: appTokens.border.subtleAlt,
         borderLeft: '3px solid transparent',
         cursor: 'pointer',
         minHeight: '34px',
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     rowSelected: {
-        backgroundColor: tokens.colorBrandBackground2,
+        backgroundColor: appTokens.color.surfaceBrand,
         ':hover': {
-            backgroundColor: tokens.colorBrandBackground2,
+            backgroundColor: appTokens.color.surfaceBrand,
         },
     },
     selectCell: {
@@ -125,11 +125,11 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
     typeName: {
-        fontSize: '12px',
+        fontSize: appTokens.fontSize.sm,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
-        color: tokens.colorNeutralForeground2,
+        color: appTokens.color.textSecondary,
     },
     titleIcon: {
         fontSize: '16px',
@@ -146,7 +146,7 @@ const useStyles = makeStyles({
         minWidth: 0,
     },
     titleText: {
-        fontSize: '13px',
+        fontSize: appTokens.fontSize.md,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -174,14 +174,14 @@ const useStyles = makeStyles({
 
     /* ── ID column ─────────────────────────────────────────── */
     idText: {
-        color: tokens.colorNeutralForeground2,
-        fontSize: '12px',
+        color: appTokens.color.textSecondary,
+        fontSize: appTokens.fontSize.sm,
     },
 
     /* ── Difficulty column ──────────────────────────────────── */
     difficultyText: {
-        fontSize: '12px',
-        color: tokens.colorNeutralForeground2,
+        fontSize: appTokens.fontSize.sm,
+        color: appTokens.color.textSecondary,
     },
 
     /* ── Assigned To column ────────────────────────────────── */
@@ -189,8 +189,8 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
-        color: tokens.colorNeutralForeground2,
-        fontSize: '12px',
+        color: appTokens.color.textSecondary,
+        fontSize: appTokens.fontSize.sm,
         minWidth: 0,
     },
     assigneeIcon: {
@@ -215,9 +215,9 @@ const useStyles = makeStyles({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '12px',
+        fontSize: appTokens.fontSize.sm,
         lineHeight: '18px',
-        fontWeight: tokens.fontWeightMedium,
+        fontWeight: appTokens.fontWeight.medium,
         paddingLeft: '8px',
         paddingRight: '8px',
         flex: '1 1 0',
@@ -245,12 +245,12 @@ const useStyles = makeStyles({
             content: '""',
             width: '2px',
             borderRadius: '999px',
-            backgroundColor: tokens.colorNeutralStroke2,
+            backgroundColor: appTokens.color.border,
             transitionProperty: 'background-color',
-            transitionDuration: '0.15s',
+            transitionDuration: appTokens.motion.fast,
         },
         ':hover::after': {
-            backgroundColor: tokens.colorBrandForeground1,
+            backgroundColor: appTokens.color.brand,
         },
     },
     headerCellResizable: {

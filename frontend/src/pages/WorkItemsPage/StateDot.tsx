@@ -1,25 +1,25 @@
 import {
     makeStyles,
-    tokens,
 } from '@fluentui/react-components'
+import { appTokens } from '../../styles/appTokens'
 
 const STATE_DOT_COLORS: Record<string, string> = {
-    'New': tokens.colorNeutralForeground3,
-    'Active': tokens.colorCompoundBrandForeground1,
-    'In Progress': tokens.colorPaletteMarigoldForeground1,
-    'In Progress (AI)': tokens.colorPaletteMarigoldForeground1,
-    'In-PR': tokens.colorPaletteBerryForeground2,
-    'In-PR (AI)': tokens.colorPaletteBerryForeground2,
-    'Resolved': tokens.colorPaletteGreenForeground1,
-    'Resolved (AI)': tokens.colorPaletteGreenForeground1,
-    'Closed': tokens.colorPaletteGreenForeground1,
+    'New': appTokens.color.textTertiary,
+    'Active': appTokens.color.brand,
+    'In Progress': appTokens.color.warning,
+    'In Progress (AI)': appTokens.color.warning,
+    'In-PR': appTokens.color.accentOrange,
+    'In-PR (AI)': appTokens.color.accentOrange,
+    'Resolved': appTokens.color.success,
+    'Resolved (AI)': appTokens.color.success,
+    'Closed': appTokens.color.success,
 }
 
 const useStyles = makeStyles({
     dot: {
         width: '10px',
         height: '10px',
-        borderRadius: '50%',
+        borderRadius: appTokens.radius.full,
         display: 'inline-block',
         flexShrink: 0,
         borderTopWidth: '1.5px',
@@ -43,7 +43,7 @@ interface StateDotProps {
 
 export function StateDot({ state }: StateDotProps) {
     const styles = useStyles()
-    const color = STATE_DOT_COLORS[state] ?? tokens.colorNeutralForeground3
+    const color = STATE_DOT_COLORS[state] ?? appTokens.color.textTertiary
 
     return (
         <span

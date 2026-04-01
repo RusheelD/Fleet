@@ -1,8 +1,9 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useMsal } from '@azure/msal-react'
 import { InteractionStatus } from '@azure/msal-browser'
-import { Spinner, makeStyles, tokens } from '@fluentui/react-components'
+import { Spinner, makeStyles } from '@fluentui/react-components'
 import { useAuth } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     loading: {
@@ -10,7 +11,7 @@ const useStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        padding: tokens.spacingVerticalXXL,
+        padding: appTokens.space.xxl,
     },
 })
 

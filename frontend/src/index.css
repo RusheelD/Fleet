@@ -1,4 +1,89 @@
-/* Minimal reset — FluentUI handles theming & typography */
+/* Minimal reset - Fluent UI handles theming and typography. */
+:root {
+  --app-space-3xs: 0.125rem;
+  --app-space-2xs: 0.25rem;
+  --app-space-xs: 0.375rem;
+  --app-space-sm: 0.5rem;
+  --app-space-md: 0.75rem;
+  --app-space-lg: 1rem;
+  --app-space-xl: 1.5rem;
+  --app-space-2xl: 2rem;
+
+  --app-font-size-2xs: 10px;
+  --app-font-size-xs: 11px;
+  --app-font-size-sm: 12px;
+  --app-font-size-md: 13px;
+  --app-font-size-lg: 15px;
+  --app-font-size-xl: 20px;
+  --app-font-size-metric: 24px;
+  --app-font-size-icon-xs: 12px;
+  --app-font-size-icon-sm: 16px;
+  --app-font-size-icon-md: 18px;
+  --app-font-size-icon-lg: 24px;
+  --app-font-size-icon-xl: 48px;
+  --app-line-height-tight: 14px;
+  --app-line-height-snug: 16px;
+  --app-line-height-base: 20px;
+  --app-line-height-relaxed: 24px;
+
+  --app-page-padding-x: 2rem;
+  --app-page-padding-x-mobile: 0.75rem;
+  --app-page-padding-y-mobile: 0.875rem;
+
+  --app-shell-top-bar-height: 52px;
+  --app-shell-top-bar-height-compact: 42px;
+  --app-shell-top-bar-height-mobile: 48px;
+  --app-shell-sidebar-header-height: 52px;
+  --app-shell-sidebar-width: 260px;
+  --app-shell-sidebar-width-compact: 220px;
+  --app-shell-sidebar-collapsed-width: 48px;
+  --app-shell-sidebar-collapsed-width-compact: 44px;
+  --app-shell-mobile-sidebar-width: min(82vw, 300px);
+  --app-shell-chat-width-default: 480px;
+  --app-shell-chat-width-min: 340px;
+  --app-shell-chat-width-max: 800px;
+
+  --app-page-max-width-narrow: 900px;
+  --app-page-max-width-medium: 1100px;
+  --app-page-max-width-large: 1400px;
+  --app-project-card-min-width: 320px;
+  --app-quick-action-min-width: 220px;
+  --app-metric-card-min-width: 200px;
+  --app-plan-card-min-width: 280px;
+
+  --app-radius-full: 999px;
+  --app-motion-fast: 0.15s;
+  --app-motion-normal: 0.2s;
+  --app-monitor-log-max-height: min(62vh, 560px);
+
+  --app-overlay-backdrop: rgba(0, 0, 0, 0.35);
+  --app-auth-glow-a: rgba(232, 138, 42, 0.14);
+  --app-auth-glow-b: rgba(240, 154, 62, 0.12);
+  --app-on-brand-surface-soft: rgba(255, 255, 255, 0.1);
+  --app-on-brand-surface-muted: rgba(255, 255, 255, 0.12);
+  --app-on-brand-surface-strong: rgba(255, 255, 255, 0.15);
+  --app-on-brand-border-soft: rgba(255, 255, 255, 0.25);
+  --app-on-brand-border-strong: rgba(255, 255, 255, 0.4);
+  --app-on-brand-text-muted: rgba(255, 255, 255, 0.8);
+  --app-google-blue: #4285F4;
+  --app-google-green: #34A853;
+  --app-google-yellow: #FBBC05;
+  --app-google-red: #EA4335;
+  --app-work-item-level-default: var(--app-google-blue);
+  --app-work-item-level-1: #8764B8;
+  --app-work-item-level-2: #0078D4;
+  --app-work-item-level-3: #00B7C3;
+  --app-work-item-level-4: #498205;
+  --app-work-item-level-5: #D13438;
+  --app-work-item-level-6: #8A8886;
+  --app-work-item-level-7: #E3008C;
+  --app-work-item-level-8: #CA5010;
+  --app-work-item-level-9: #107C10;
+  --app-work-item-level-10: #005B70;
+  --app-work-item-level-11: #004E8C;
+  --app-work-item-level-12: #7719AA;
+}
+
 *,
 *::before,
 *::after {
@@ -14,11 +99,31 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
+  min-height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #root {
   height: 100%;
+  min-height: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
 }
 
 html[data-density='compact'] {
@@ -57,12 +162,28 @@ html[data-density='compact'] .fui-Tab {
   .fui-DialogSurface {
     width: calc(100vw - 0.75rem) !important;
     max-width: calc(100vw - 0.75rem) !important;
-    max-height: calc(100vh - 0.75rem) !important;
+    max-height: calc(100dvh - 0.75rem) !important;
     margin: 0.375rem !important;
+    border-radius: 18px !important;
+  }
+
+  .fui-DialogBody {
+    max-height: 100%;
   }
 
   .fui-DialogContent {
     overflow: auto;
+    min-width: 0;
+  }
+
+  .fui-DialogActions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .fui-DialogActions > * {
+    flex: 1 1 12rem;
+    min-width: 0;
   }
 
   .fui-Field .fui-Input,
@@ -77,5 +198,10 @@ html[data-density='compact'] .fui-Tab {
     max-width: 100%;
     overflow-x: auto;
     white-space: nowrap;
+    scrollbar-width: thin;
+  }
+
+  .fui-Card {
+    min-width: 0;
   }
 }

@@ -1,8 +1,8 @@
 import {
     makeStyles,
-    tokens,
     mergeClasses,
 } from '@fluentui/react-components'
+import { appTokens } from '../../styles/appTokens'
 
 const PRIORITY_DOT_CLASSES: Record<number, 'priorityDotP1' | 'priorityDotP2' | 'priorityDotP3' | 'priorityDotP4'> = {
     1: 'priorityDotP1',
@@ -15,21 +15,21 @@ const useStyles = makeStyles({
     priorityDot: {
         width: '8px',
         height: '8px',
-        borderRadius: '50%',
+        borderRadius: appTokens.radius.full,
         display: 'inline-block',
         flexShrink: 0,
     },
     priorityDotP1: {
-        backgroundColor: tokens.colorPaletteRedForeground1,
+        backgroundColor: appTokens.color.danger,
     },
     priorityDotP2: {
-        backgroundColor: tokens.colorPaletteMarigoldForeground1,
+        backgroundColor: appTokens.color.warning,
     },
     priorityDotP3: {
-        backgroundColor: tokens.colorBrandForeground1,
+        backgroundColor: appTokens.color.brand,
     },
     priorityDotP4: {
-        backgroundColor: tokens.colorNeutralForeground3,
+        backgroundColor: appTokens.color.textTertiary,
     },
 })
 

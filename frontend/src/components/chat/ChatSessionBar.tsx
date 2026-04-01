@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
     makeStyles,
-    tokens,
     Button,
     Input,
     Menu,
@@ -22,61 +21,62 @@ import {
 } from '@fluentui/react-icons'
 import type { ChatSessionData } from '../../models'
 import { useIsMobile, usePreferences } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     sessionBar: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
-        paddingTop: '0.5rem',
-        paddingBottom: '0.5rem',
-        paddingLeft: '1rem',
-        paddingRight: '1rem',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        borderBottom: appTokens.border.subtle,
     },
     sessionBarCompact: {
-        gap: '0.25rem',
-        paddingTop: '0.25rem',
-        paddingBottom: '0.25rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
+        gap: appTokens.space.xxs,
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
     },
     controlRow: {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
     },
     sessionMeta: {
-        fontSize: '12px',
-        color: tokens.colorNeutralForeground3,
+        fontSize: appTokens.fontSize.sm,
+        color: appTokens.color.textTertiary,
     },
     sessionsScroller: {
         display: 'flex',
         alignItems: 'stretch',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         overflowX: 'auto',
         overflowY: 'hidden',
         scrollbarWidth: 'thin',
-        paddingBottom: '0.125rem',
+        paddingBottom: appTokens.space.xxxs,
     },
     sessionsScrollerCompact: {
-        gap: '0.25rem',
+        gap: appTokens.space.xxs,
     },
     sessionChip: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.25rem',
+        gap: appTokens.space.xxs,
         flexShrink: 0,
         minWidth: '0',
         maxWidth: 'min(320px, 84vw)',
     },
     sessionChipCompact: {
-        gap: '0.125rem',
-        fontSize: '11px',
+        gap: appTokens.space.xxxs,
+        fontSize: appTokens.fontSize.xs,
     },
     sessionChipActive: {
-        fontWeight: 600,
+        fontWeight: appTokens.fontWeight.semibold,
     },
     sessionButton: {
         maxWidth: '240px',
@@ -102,7 +102,7 @@ const useStyles = makeStyles({
     renameRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.25rem',
+        gap: appTokens.space.xxs,
     },
     deleteButton: {
         flexShrink: 0,
@@ -114,11 +114,11 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
     emptyState: {
-        paddingTop: '0.25rem',
-        paddingBottom: '0.25rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
-        color: tokens.colorNeutralForeground3,
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        color: appTokens.color.textTertiary,
     },
 })
 

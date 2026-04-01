@@ -1,13 +1,13 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Title3,
     Text,
 } from '@fluentui/react-components'
 import { WorkItemCard } from './'
 import { usePreferences } from '../../hooks'
 import type { WorkItem, WorkItemLevel } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     boardColumn: {
@@ -16,12 +16,12 @@ const useStyles = makeStyles({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
     },
     boardColumnCompact: {
         minWidth: '220px',
         maxWidth: '240px',
-        gap: '0.375rem',
+        gap: appTokens.space.xs,
     },
     boardColumnMobile: {
         minWidth: '100%',
@@ -31,56 +31,48 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0.5rem 0.75rem',
-        backgroundColor: tokens.colorNeutralBackground3,
-        borderRadius: tokens.borderRadiusMedium,
-        borderTopWidth: '1px',
-        borderRightWidth: '1px',
-        borderBottomWidth: '1px',
-        borderLeftWidth: '1px',
-        borderTopStyle: 'solid',
-        borderRightStyle: 'solid',
-        borderBottomStyle: 'solid',
-        borderLeftStyle: 'solid',
-        borderTopColor: tokens.colorNeutralStroke2,
-        borderRightColor: tokens.colorNeutralStroke2,
-        borderBottomColor: tokens.colorNeutralStroke2,
-        borderLeftColor: tokens.colorNeutralStroke2,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        backgroundColor: appTokens.color.pageBackground,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
     },
     columnHeaderCompact: {
-        paddingTop: '0.25rem',
-        paddingBottom: '0.25rem',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
     },
     columnTitle: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
     },
     columnTitleText: {
-        fontSize: '14px',
+        fontSize: appTokens.fontSize.sm,
     },
     columnTitleTextCompact: {
-        fontSize: '12px',
-        lineHeight: '16px',
+        fontSize: appTokens.fontSize.sm,
+        lineHeight: appTokens.lineHeight.snug,
     },
     columnCount: {
-        backgroundColor: tokens.colorNeutralBackground5,
-        borderRadius: '99px',
-        padding: '0 0.5rem',
-        fontSize: '12px',
-        fontWeight: 600,
+        backgroundColor: appTokens.color.surfaceRaised,
+        borderRadius: appTokens.radius.full,
+        padding: `0 ${appTokens.space.sm}`,
+        fontSize: appTokens.fontSize.sm,
+        fontWeight: appTokens.fontWeight.semibold,
     },
     cardList: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: appTokens.space.sm,
         flex: 1,
         overflow: 'auto',
     },
     cardListCompact: {
-        gap: '0.375rem',
+        gap: appTokens.space.xs,
     },
     cardListMobile: {
         maxHeight: 'unset',

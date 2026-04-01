@@ -1,24 +1,24 @@
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Tooltip,
 } from '@fluentui/react-components'
 import { useNavigate } from 'react-router-dom'
 import type { NavItemConfig } from '../../models'
 import { usePreferences } from '../../hooks'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     navItem: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
-        padding: '0 0.75rem',
-        borderRadius: tokens.borderRadiusMedium,
+        gap: appTokens.space.md,
+        padding: `0 ${appTokens.space.md}`,
+        borderRadius: appTokens.radius.md,
         cursor: 'pointer',
-        color: tokens.colorNeutralForeground2,
+        color: appTokens.color.textSecondary,
         transitionProperty: 'background, color, transform',
-        transitionDuration: '0.12s',
+        transitionDuration: appTokens.motion.fast,
         borderTopStyle: 'none',
         borderRightStyle: 'none',
         borderBottomStyle: 'none',
@@ -26,37 +26,37 @@ const useStyles = makeStyles({
         backgroundColor: 'transparent',
         width: '100%',
         textAlign: 'left',
-        fontSize: '13px',
+        fontSize: appTokens.fontSize.md,
         minHeight: '36px',
         position: 'relative',
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
-            color: tokens.colorNeutralForeground1,
+            backgroundColor: appTokens.color.surfaceHover,
+            color: appTokens.color.textPrimary,
             transform: 'translateX(1px)',
         },
         ':focus-visible': {
-            outline: `2px solid ${tokens.colorStrokeFocus2}`,
+            outline: `2px solid ${appTokens.color.focusOutline}`,
             outlineOffset: '-2px',
         },
     },
     navItemCompact: {
         minHeight: '30px',
-        paddingLeft: '0.5rem',
-        paddingRight: '0.5rem',
-        gap: '0.5rem',
-        fontSize: '12px',
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        gap: appTokens.space.sm,
+        fontSize: appTokens.fontSize.sm,
     },
     navItemCollapsed: {
         justifyContent: 'center',
         padding: 0,
     },
     navItemActive: {
-        backgroundColor: tokens.colorBrandBackground2,
-        color: tokens.colorBrandForeground1,
-        fontWeight: 600,
+        backgroundColor: appTokens.color.surfaceBrand,
+        color: appTokens.color.brand,
+        fontWeight: appTokens.fontWeight.semibold,
         ':hover': {
-            backgroundColor: tokens.colorBrandBackground2Hover,
-            color: tokens.colorBrandForeground1,
+            backgroundColor: appTokens.color.surfaceBrandHover,
+            color: appTokens.color.brand,
         },
     },
     navItemAccent: {
@@ -66,10 +66,10 @@ const useStyles = makeStyles({
         bottom: '6px',
         width: '3px',
         borderRadius: '0 2px 2px 0',
-        backgroundColor: tokens.colorBrandForeground1,
+        backgroundColor: appTokens.color.brand,
     },
     navItemIcon: {
-        fontSize: '18px',
+        fontSize: appTokens.fontSize.iconMd,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
@@ -77,7 +77,7 @@ const useStyles = makeStyles({
         width: '20px',
     },
     navItemIconCompact: {
-        fontSize: '16px',
+        fontSize: appTokens.fontSize.iconSm,
         width: '16px',
     },
     navItemLabel: {

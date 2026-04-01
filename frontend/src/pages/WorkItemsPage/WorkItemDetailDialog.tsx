@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
     makeStyles,
     mergeClasses,
-    tokens,
     Button,
     Input,
     Dropdown,
@@ -29,6 +28,7 @@ import { useIsMobile } from '../../hooks'
 import { StateDot } from './StateDot'
 import { PriorityDot } from './PriorityDot'
 import { formatWorkItemState } from './stateLabel'
+import { appTokens } from '../../styles/appTokens'
 
 const NONE_PARENT = '(None)'
 const NONE_LEVEL = '(None)'
@@ -78,8 +78,8 @@ const useStyles = makeStyles({
     overlay: {
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-        zIndex: 900,
+        backgroundColor: appTokens.color.overlayBackdrop,
+        zIndex: appTokens.zIndex.workItemOverlay,
     },
 
     /* Panel container */
@@ -90,9 +90,9 @@ const useStyles = makeStyles({
         bottom: 0,
         width: 'min(960px, 100vw)',
         maxWidth: '100vw',
-        backgroundColor: tokens.colorNeutralBackground1,
-        boxShadow: tokens.shadow64,
-        zIndex: 1000,
+        backgroundColor: appTokens.color.surface,
+        boxShadow: appTokens.shadow.overlay,
+        zIndex: appTokens.zIndex.workItemPanel,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -106,37 +106,37 @@ const useStyles = makeStyles({
     headerBar: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalM,
-        paddingTop: tokens.spacingVerticalM,
-        paddingBottom: tokens.spacingVerticalM,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalM,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground2,
+        gap: appTokens.space.md,
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.xl,
+        paddingRight: appTokens.space.md,
+        borderBottom: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
         flexShrink: 0,
     },
     headerBarMobile: {
         flexWrap: 'wrap',
-        gap: tokens.spacingHorizontalS,
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
     },
     headerType: {
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: appTokens.space.xs,
         flexShrink: 0,
     },
     headerTypeIcon: {
-        fontSize: '20px',
+        fontSize: appTokens.fontSize.xl,
         display: 'flex',
         alignItems: 'center',
     },
     headerId: {
-        color: tokens.colorNeutralForeground2,
-        fontSize: '14px',
+        color: appTokens.color.textSecondary,
+        fontSize: appTokens.fontSize.sm,
         flexShrink: 0,
     },
     headerTitle: {
@@ -148,13 +148,13 @@ const useStyles = makeStyles({
         order: 2,
     },
     headerTitleInput: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: tokens.fontSizeBase400,
+        fontWeight: appTokens.fontWeight.semibold,
+        fontSize: appTokens.fontSize.lg,
     },
     headerActions: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalXS,
+        gap: appTokens.space.xs,
         flexShrink: 0,
     },
 
@@ -163,37 +163,37 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalL,
-        paddingRight: tokens.spacingHorizontalL,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.xl,
+        paddingRight: appTokens.space.xl,
+        borderBottom: appTokens.border.subtleAlt,
         flexShrink: 0,
     },
     actionBarMobile: {
         flexDirection: 'column',
         alignItems: 'stretch',
-        gap: tokens.spacingVerticalS,
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
     },
     actionBarLeft: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     actionBarLeftMobile: {
         width: '100%',
         display: 'grid',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     actionButtonMobile: {
         width: '100%',
     },
     deleteButton: {
-        color: tokens.colorPaletteRedForeground1,
+        color: appTokens.color.danger,
     },
 
     /* Scrollable body */
@@ -202,32 +202,32 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         flex: 1,
         overflow: 'auto',
-        paddingTop: tokens.spacingVerticalL,
-        paddingBottom: tokens.spacingVerticalXL,
-        paddingLeft: tokens.spacingHorizontalXL,
-        paddingRight: tokens.spacingHorizontalXL,
-        gap: tokens.spacingVerticalL,
+        paddingTop: appTokens.space.xl,
+        paddingBottom: appTokens.space.xxl,
+        paddingLeft: appTokens.space.xxl,
+        paddingRight: appTokens.space.xxl,
+        gap: appTokens.space.xl,
     },
     bodyMobile: {
-        paddingTop: tokens.spacingVerticalM,
-        paddingBottom: tokens.spacingVerticalL,
-        paddingLeft: tokens.spacingHorizontalM,
-        paddingRight: tokens.spacingHorizontalM,
-        gap: tokens.spacingVerticalM,
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        gap: appTokens.space.md,
     },
 
     /* Fields grid (compact strip across top) */
     fieldsGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalM,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
+        gap: `${appTokens.space.md} ${appTokens.space.xl}`,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.md,
+        borderBottom: appTokens.border.subtleAlt,
     },
     fieldsGridMobile: {
         gridTemplateColumns: '1fr',
-        gap: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
+        gap: `${appTokens.space.sm} ${appTokens.space.sm}`,
     },
 
     /* Description (full width, fills remaining space) */
@@ -255,9 +255,9 @@ const useStyles = makeStyles({
 
     /* Section headers */
     sectionTitle: {
-        fontWeight: tokens.fontWeightSemibold,
-        fontSize: '13px',
-        color: tokens.colorNeutralForeground2,
+        fontWeight: appTokens.fontWeight.semibold,
+        fontSize: appTokens.fontSize.md,
+        color: appTokens.color.textSecondary,
         textTransform: 'uppercase',
         letterSpacing: '0.03em',
     },
@@ -269,17 +269,17 @@ const useStyles = makeStyles({
         gap: '2px',
     },
     fieldLabel: {
-        fontSize: '11px',
-        fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground3,
+        fontSize: appTokens.fontSize.xs,
+        fontWeight: appTokens.fontWeight.semibold,
+        color: appTokens.color.textTertiary,
         textTransform: 'uppercase',
         letterSpacing: '0.04em',
     },
     fieldValue: {
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
-        fontSize: '13px',
+        gap: appTokens.space.xs,
+        fontSize: appTokens.fontSize.md,
         minHeight: '28px',
     },
     fieldValueMobile: {
@@ -295,13 +295,13 @@ const useStyles = makeStyles({
     childRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: appTokens.space.xs,
         padding: '4px 8px',
-        borderRadius: tokens.borderRadiusMedium,
+        borderRadius: appTokens.radius.md,
         cursor: 'default',
-        fontSize: '13px',
+        fontSize: appTokens.fontSize.md,
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
+            backgroundColor: appTokens.color.surfaceHover,
         },
     },
     childRowMobile: {
@@ -327,8 +327,8 @@ const useStyles = makeStyles({
         flexBasis: '100%',
     },
     childId: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: '12px',
+        color: appTokens.color.textTertiary,
+        fontSize: appTokens.fontSize.sm,
         flexShrink: 0,
     },
 
@@ -485,7 +485,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                                 </Text>
                             </>
                         ) : (
-                            <Text weight="semibold" style={{ color: tokens.colorNeutralForeground3 }}>
+                            <Text weight="semibold" style={{ color: appTokens.color.textTertiary }}>
                                 Work Item
                             </Text>
                         )}
