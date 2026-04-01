@@ -204,6 +204,53 @@ public class AgentsControllerTests
     }
 
     [TestMethod]
+    public async Task ClearExecutionLogs_ReturnsOk()
+    {
+        _agentService.Setup(s => s.ClearExecutionLogsAsync(ProjectId, "exec-1"))
+            .ReturnsAsync(3);
+
+        var result = await _sut.ClearExecutionLogs(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task DeleteExecution_ReturnsOk()
+    {
+        _orchestrationService
+            .Setup(s => s.DeleteExecutionAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionDeletionResult("exec-1", 7));
+
+        var result = await _sut.DeleteExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task DeleteExecution_WhenMissing_Returns404()
+    {
+        _orchestrationService
+            .Setup(s => s.DeleteExecutionAsync(ProjectId, "missing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentExecutionDeletionResult?)null);
+
+        var result = await _sut.DeleteExecution(ProjectId, "missing");
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task DeleteExecution_WhenCompleted_ReturnsConflict()
+    {
+        _orchestrationService
+            .Setup(s => s.DeleteExecutionAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Completed runs cannot be deleted."));
+
+        var result = await _sut.DeleteExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<ConflictObjectResult>(result);
+    }
+
+    [TestMethod]
     public async Task GetExecutionDocumentation_NotFound_Returns404()
     {
         _orchestrationService

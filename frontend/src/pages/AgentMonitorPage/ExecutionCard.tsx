@@ -23,6 +23,7 @@ import {
     ClockRegular,
     CodeRegular,
     DocumentRegular,
+    DeleteRegular,
     BranchRegular,
     CheckmarkCircleFilled,
     DismissCircleFilled,
@@ -297,6 +298,7 @@ interface ExecutionCardProps {
     onPause?: (executionId: string) => void
     onCancel?: (executionId: string) => void
     onRetry?: (executionId: string) => void
+    onDelete?: (executionId: string) => void
     onViewDocs?: (executionId: string) => void
 }
 
@@ -317,7 +319,7 @@ function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
     }
 }
 
-export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDocs }: ExecutionCardProps) {
+export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete, onViewDocs }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -346,6 +348,27 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
         }
     }
 
+    const handleDelete = () => {
+        if (onDelete) {
+            onDelete(execution.id)
+        }
+    }
+
+    const reviewLoopCount = execution.reviewLoopCount ?? 0
+    const lastReviewRecommendation = execution.lastReviewRecommendation ?? null
+    const isAutoRemediating = execution.status === 'running' && (execution.currentPhase?.startsWith('Auto-remediation:') ?? false)
+    const canDeleteExecution =
+        execution.status === 'running' ||
+        execution.status === 'queued' ||
+        execution.status === 'paused' ||
+        execution.status === 'failed' ||
+        execution.status === 'cancelled'
+    const reviewLoopLabel = isAutoRemediating
+        ? `Auto-fixing${lastReviewRecommendation ? ` ${lastReviewRecommendation}` : ''}`
+        : reviewLoopCount > 0
+            ? `Self-corrected x${reviewLoopCount}`
+            : null
+
     const agents = (
         execution.status === 'failed' || execution.status === 'cancelled'
             ? execution.agents.map((agent) => ({
@@ -368,6 +391,15 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                         <Badge appearance="filled" color={STATUS_COLORS[execution.status]} size="small">
                             {execution.status}
                         </Badge>
+                        {reviewLoopLabel && (
+                            <Badge
+                                appearance="tint"
+                                color={isAutoRemediating ? 'warning' : 'informative'}
+                                size="small"
+                            >
+                                {reviewLoopLabel}
+                            </Badge>
+                        )}
                     </div>
                     <Text
                         weight="semibold"
@@ -387,28 +419,44 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onViewDoc
                             Branch: {execution.branchName}
                         </Caption1>
                     )}
+                    {reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating && (
+                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
+                            Final review outcome: {lastReviewRecommendation}
+                        </Caption1>
+                    )}
                 </div>
                 <div className={mergeClasses(styles.executionActions, isMobile && styles.executionActionsMobile)}>
                     {execution.status === 'running' && (
                         <>
                             <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={handlePause} />
                             <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={handleCancel} />
+                            {onDelete && (
+                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                            )}
                         </>
                     )}
                     {execution.status === 'failed' && (
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<ArrowClockwiseRegular />}
-                            aria-label="Retry"
-                            onClick={() => {
-                                if (onRetry) {
-                                    onRetry(execution.id)
-                                } else {
-                                    notify('Retry is unavailable for this execution', 'error')
-                                }
-                            }}
-                        />
+                        <>
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<ArrowClockwiseRegular />}
+                                aria-label="Retry"
+                                onClick={() => {
+                                    if (onRetry) {
+                                        onRetry(execution.id)
+                                    } else {
+                                        notify('Retry is unavailable for this execution', 'error')
+                                    }
+                                }}
+                            />
+                            {onDelete && (
+                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                            )}
+                        </>
+                    )}
+                    {canDeleteExecution && execution.status !== 'running' && execution.status !== 'failed' && onDelete && (
+                        <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
                     )}
                 </div>
             </div>

@@ -1,5 +1,6 @@
 using Fleet.Server.Agents;
 using Fleet.Server.Auth;
+using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -41,6 +42,19 @@ public class AgentsController(
             ServerEventTopics.LogsUpdated,
             new { projectId, deletedCount });
         return Ok(new { deletedCount });
+    }
+
+    [HttpDelete("executions/{executionId}/logs")]
+    public async Task<IActionResult> ClearExecutionLogs(string projectId, string executionId)
+    {
+        var deletedCount = await agentService.ClearExecutionLogsAsync(projectId, executionId);
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.LogsUpdated,
+            new { projectId, executionId, deletedCount });
+        return Ok(new { executionId, deletedCount });
     }
 
     /// <summary>
@@ -170,6 +184,37 @@ public class AgentsController(
             new { projectId });
 
         return Accepted(new { executionId = newExecutionId });
+    }
+
+    [HttpDelete("executions/{executionId}")]
+    public async Task<IActionResult> DeleteExecution(string projectId, string executionId)
+    {
+        AgentExecutionDeletionResult? result;
+        try
+        {
+            result = await orchestrationService.DeleteExecutionAsync(projectId, executionId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+
+        if (result is null)
+            return NotFound();
+
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.AgentsUpdated,
+            new { projectId, executionId, status = "deleted" });
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.LogsUpdated,
+            new { projectId, executionId, deletedCount = result.DeletedLogCount });
+
+        return Ok(result);
     }
 
     /// <summary>

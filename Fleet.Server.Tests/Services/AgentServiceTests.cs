@@ -75,4 +75,24 @@ public class AgentServiceTests
 
         Assert.AreEqual(0, result.Count);
     }
+
+    [TestMethod]
+    public async Task ClearLogsAsync_DelegatesToRepo()
+    {
+        _repo.Setup(r => r.ClearLogsByProjectIdAsync(ProjectId)).ReturnsAsync(4);
+
+        var result = await _sut.ClearLogsAsync(ProjectId);
+
+        Assert.AreEqual(4, result);
+    }
+
+    [TestMethod]
+    public async Task ClearExecutionLogsAsync_DelegatesToRepo()
+    {
+        _repo.Setup(r => r.ClearLogsByExecutionIdAsync(ProjectId, "exec-1")).ReturnsAsync(2);
+
+        var result = await _sut.ClearExecutionLogsAsync(ProjectId, "exec-1");
+
+        Assert.AreEqual(2, result);
+    }
 }

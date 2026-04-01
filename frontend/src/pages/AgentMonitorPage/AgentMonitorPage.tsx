@@ -27,7 +27,7 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
-import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs } from '../../proxies'
+import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 
@@ -167,6 +167,8 @@ export function AgentMonitorPage() {
     const retryExecution = useRetryExecution(projectId)
     const fetchExecutionDocumentation = useExecutionDocumentation(projectId)
     const clearLogs = useClearLogs(projectId)
+    const clearExecutionLogs = useClearExecutionLogs(projectId)
+    const deleteExecution = useDeleteExecution(projectId)
     const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
     const [selectedDocumentation, setSelectedDocumentation] = useState<ExecutionDocumentation | null>(null)
@@ -317,6 +319,61 @@ export function AgentMonitorPage() {
         })
     }
 
+    const handleClearRunLogs = (executionId: string) => {
+        const execution = allExecutions.find((item) => item.id === executionId)
+        const description = execution ? `run for #${execution.workItemId}` : 'this run'
+        if (!window.confirm(`Clear the logs for ${description}?`)) {
+            return
+        }
+
+        clearExecutionLogs.mutate(executionId, {
+            onSuccess: (result) => {
+                dispatchToast(
+                    <Toast><ToastTitle>Cleared {result.deletedCount} log entr{result.deletedCount === 1 ? 'y' : 'ies'} for this run</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchLogs()
+            },
+            onError: (error) => {
+                dispatchToast(
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to clear logs for this run.')}</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
+    const handleDelete = (executionId: string) => {
+        const execution = allExecutions.find((item) => item.id === executionId)
+        const description = execution
+            ? `Delete the ${execution.status} run for #${execution.workItemId}? This also removes its logs.`
+            : 'Delete this run and its logs?'
+        if (!window.confirm(description)) {
+            return
+        }
+
+        deleteExecution.mutate(executionId, {
+            onSuccess: (result) => {
+                if (selectedDocumentation?.executionId === executionId) {
+                    setSelectedDocumentation(null)
+                }
+
+                dispatchToast(
+                    <Toast><ToastTitle>Deleted run and {result.deletedLogCount} log entr{result.deletedLogCount === 1 ? 'y' : 'ies'}</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                void refetchExec()
+                void refetchLogs()
+            },
+            onError: (error) => {
+                dispatchToast(
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to delete run.')}</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
+
     if (loadingExec || loadingLogs) {
         return (
             <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
@@ -437,6 +494,7 @@ export function AgentMonitorPage() {
                                 onPause={handlePause}
                                 onCancel={handleCancel}
                                 onRetry={handleRetry}
+                                onDelete={handleDelete}
                                 onViewDocs={handleViewDocs}
                             />
                         ))}
@@ -445,10 +503,12 @@ export function AgentMonitorPage() {
 
                 <LogPanel
                     logs={allLogs}
-                    executions={filteredExecutions}
+                    executions={allExecutions}
                     onRefresh={() => void refetchLogs()}
-                    onClear={handleClearLogs}
-                    isClearing={clearLogs.isPending}
+                    onClearAll={handleClearLogs}
+                    onClearRun={handleClearRunLogs}
+                    isClearingAll={clearLogs.isPending}
+                    isClearingRun={clearExecutionLogs.isPending}
                 />
             </div>
 

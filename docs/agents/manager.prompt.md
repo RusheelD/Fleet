@@ -58,6 +58,8 @@ Manager is orchestration-only infrastructure. You must set up and hand off to Pl
 
 After receiving the Review report, choose exactly one:
 
+> Runtime note: Fleet's backend automatically applies the Review agent's STOP / PATCH / RESTART decision inside the same execution. The manager is not invoked a second time after Review, so make sure the earlier handoff context is clear enough for automatic remediation loops.
+
 ### STOP
 
 - No P0 or P1 issues remain.

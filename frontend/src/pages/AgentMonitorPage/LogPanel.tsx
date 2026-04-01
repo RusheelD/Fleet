@@ -258,11 +258,21 @@ interface LogPanelProps {
     logs: LogEntry[]
     executions?: AgentExecution[]
     onRefresh?: () => void
-    onClear?: () => void
-    isClearing?: boolean
+    onClearAll?: () => void
+    onClearRun?: (executionId: string) => void
+    isClearingAll?: boolean
+    isClearingRun?: boolean
 }
 
-export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing = false }: LogPanelProps) {
+export function LogPanel({
+    logs,
+    executions = [],
+    onRefresh,
+    onClearAll,
+    onClearRun,
+    isClearingAll = false,
+    isClearingRun = false,
+}: LogPanelProps) {
     const styles = useStyles()
     const isMobile = useIsMobile()
     const [showDetailed, setShowDetailed] = useState(false)
@@ -398,6 +408,11 @@ export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing
         return logsWithResolvedExecutionId
     }, [logsWithResolvedExecutionId, selectedRun])
 
+    const selectedExecutionId = useMemo(
+        () => selectedRun.startsWith('execution:') ? selectedRun.slice('execution:'.length) : null,
+        [selectedRun],
+    )
+
     const sortedVisibleLogs = useMemo(
         () => [...visibleLogs].sort((left, right) => {
             const leftTime = Date.parse(left.time)
@@ -451,12 +466,24 @@ export function LogPanel({ logs, executions = [], onRefresh, onClear, isClearing
                         appearance="subtle"
                         size="small"
                         icon={<DeleteRegular />}
-                        aria-label="Clear logs"
-                        onClick={onClear}
-                        disabled={isClearing || logs.length === 0}
+                        aria-label="Clear all logs"
+                        onClick={onClearAll}
+                        disabled={isClearingAll || logs.length === 0}
                     >
-                        Clear
+                        Clear All
                     </Button>
+                    {selectedExecutionId && onClearRun && (
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<DeleteRegular />}
+                            aria-label="Clear logs for this run"
+                            onClick={() => onClearRun(selectedExecutionId)}
+                            disabled={isClearingRun || sortedVisibleLogs.length === 0}
+                        >
+                            Clear Run
+                        </Button>
+                    )}
                     <Button appearance="subtle" size="small" icon={<ArrowClockwiseRegular />} aria-label="Refresh logs" onClick={onRefresh} />
                 </div>
             </div>

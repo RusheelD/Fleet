@@ -13,6 +13,10 @@ export function clearLogs(projectId: string): Promise<{ deletedCount: number }> 
   return del<{ deletedCount: number }>(`/api/projects/${projectId}/agents/logs`)
 }
 
+export function clearExecutionLogs(projectId: string, executionId: string): Promise<{ executionId: string; deletedCount: number }> {
+  return del<{ executionId: string; deletedCount: number }>(`/api/projects/${projectId}/agents/executions/${executionId}/logs`)
+}
+
 export interface StartExecutionRequest {
   workItemNumber: number
   targetBranch?: string
@@ -50,6 +54,10 @@ export function steerExecution(projectId: string, executionId: string, note: str
 
 export function retryExecution(projectId: string, executionId: string): Promise<{ executionId: string }> {
   return post<{ executionId: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/retry`, {})
+}
+
+export function deleteExecution(projectId: string, executionId: string): Promise<{ executionId: string; deletedLogCount: number }> {
+  return del<{ executionId: string; deletedLogCount: number }>(`/api/projects/${projectId}/agents/executions/${executionId}`)
 }
 
 export interface ExecutionDocumentation {

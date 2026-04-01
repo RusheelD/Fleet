@@ -24,6 +24,7 @@ namespace Fleet.Server.Agents;
 /// </summary>
 public class AgentOrchestrationService(
     FleetDbContext db,
+    IAgentTaskRepository agentTaskRepository,
     IConnectionService connectionService,
     IWorkItemRepository workItemRepository,
     IServiceScopeFactory serviceScopeFactory,
@@ -37,6 +38,7 @@ public class AgentOrchestrationService(
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private const int MaxAgentRetries = 2;
+    private const int MaxAutomaticReviewLoops = 2;
     private static readonly HashSet<string> InPrOrBeyondStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "In-PR",
@@ -56,6 +58,11 @@ public class AgentOrchestrationService(
     /// Queues operator steering notes to inject into the next phase prompt.
     /// </summary>
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<string>> SteeringNotes = new();
+
+    /// <summary>
+    /// Suppresses any further pipeline persistence once an execution has been explicitly deleted.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, byte> DeletedExecutions = new();
 
     private sealed record RetryExecutionPlan(
         string SourceExecutionId,
@@ -612,6 +619,39 @@ public class AgentOrchestrationService(
         return await StopExecutionAsync(executionId, "paused");
     }
 
+    public async Task<AgentExecutionDeletionResult?> DeleteExecutionAsync(
+        string projectId,
+        string executionId,
+        CancellationToken cancellationToken = default)
+    {
+        var execution = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(e => e.ProjectId == projectId && e.Id == executionId)
+            .Select(e => new { e.Id, e.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (execution is null)
+            return null;
+
+        if (!CanDeleteExecutionStatus(execution.Status))
+            throw new InvalidOperationException("Completed runs cannot be deleted.");
+
+        DeletedExecutions[executionId] = 0;
+        SteeringNotes.TryRemove(executionId, out _);
+
+        if (ActiveExecutions.TryGetValue(executionId, out var activeExecution) &&
+            !activeExecution.Cts.IsCancellationRequested)
+        {
+            activeExecution.Cts.Cancel();
+        }
+
+        var deletionResult = await agentTaskRepository.DeleteExecutionAsync(projectId, executionId);
+
+        if (!ActiveExecutions.ContainsKey(executionId))
+            DeletedExecutions.TryRemove(executionId, out _);
+
+        return deletionResult;
+    }
+
     public async Task<bool> SteerExecutionAsync(string projectId, string executionId, string note)
     {
         if (string.IsNullOrWhiteSpace(note))
@@ -849,12 +889,17 @@ public class AgentOrchestrationService(
             {
                 workItemContext = $"{workItemContext}\n\n{retryPlan.RetryContextMarkdown}";
             }
-            var phaseOutputs = BuildCarryForwardPhaseOutputs(pipeline, retryPlan?.CarryForwardOutputs);
-            var carriedRoles = retryPlan?.CarryForwardOutputs.Keys.ToHashSet() ?? [];
 
             var totalRoles = pipeline.SelectMany(g => g).Count();
-            var completedRoles = 0;
             var phaseOrder = 0;
+            var reviewLoopCount = 0;
+            var currentWorkItemContext = workItemContext;
+            var latestCycleReviewDecision = default(ReviewTriageDecision);
+            var pendingReviewDecision = default(ReviewTriageDecision);
+            var currentCyclePipeline = pipeline;
+            var currentCycleCarryForwardOutputs = retryPlan?.CarryForwardOutputs is null
+                ? new Dictionary<AgentRole, string>()
+                : retryPlan.CarryForwardOutputs.ToDictionary(entry => entry.Key, entry => entry.Value);
             using var dbLock = new SemaphoreSlim(1, 1);
 
             async Task WithDbLockAsync(Func<Task> action)
@@ -862,6 +907,7 @@ public class AgentOrchestrationService(
                 await dbLock.WaitAsync(externalCancellation);
                 try
                 {
+                    ThrowIfExecutionDeleted(executionId);
                     await action();
                 }
                 finally
@@ -895,108 +941,172 @@ public class AgentOrchestrationService(
             await PublishWorkItemsUpdatedAsync();
             await PublishProjectsUpdatedAsync();
 
-            if (carriedRoles.Count > 0)
+            while (true)
             {
-                await WriteLogEntryAsync(
-                    scopedDb,
-                    projectId,
-                    "System",
-                    "info",
-                    $"Carrying forward completed phases from retry context: {string.Join(", ", pipeline.SelectMany(g => g).Where(carriedRoles.Contains))}",
-                    executionId: executionId);
-                await PublishLogsUpdatedAsync();
-            }
-
-            foreach (var group in pipeline)
-            {
-                externalCancellation.ThrowIfCancellationRequested();
-
-                var rolesInGroup = group.ToArray();
-                if (rolesInGroup.Length == 0)
-                    continue;
-
-                var currentPhase = rolesInGroup.Length == 1
-                    ? rolesInGroup[0].ToString()
-                    : $"Parallel: {string.Join(", ", rolesInGroup.Select(r => r.ToString()))}";
-
-                await WithDbLockAsync(async () =>
+                latestCycleReviewDecision = null;
+                currentWorkItemContext = workItemContext;
+                if (pendingReviewDecision is not null)
                 {
-                    await UpdateExecutionAsync(scopedDb, executionId, currentPhase,
-                        (double)completedRoles / totalRoles);
-                });
-                await PublishAgentsUpdatedAsync();
-
-                var notes = new List<string>();
-                if (SteeringNotes.TryGetValue(executionId, out var queue))
-                {
-                    while (queue.TryDequeue(out var queuedNote))
-                    {
-                        notes.Add(queuedNote);
-                    }
+                    var queuedRerunRoles = currentCyclePipeline.SelectMany(group => group).ToArray();
+                    currentWorkItemContext = $"{workItemContext}\n\n{ReviewFeedbackLoopPlanner.BuildAutomaticReviewFeedbackContext(pendingReviewDecision, queuedRerunRoles, reviewLoopCount)}";
                 }
 
-                var steeringBlock = BuildSteeringBlock(notes);
-                if (notes.Count > 0)
+                var currentOutputsByRole = new Dictionary<AgentRole, string>(currentCycleCarryForwardOutputs);
+                var carriedRoles = currentOutputsByRole.Keys.ToHashSet();
+                var completedRoles = CountCarryForwardRoles(pipeline, currentOutputsByRole);
+
+                if (carriedRoles.Count > 0)
                 {
-                    await WithDbLockAsync(async () =>
-                    {
-                        await WriteLogEntryAsync(
-                            scopedDb,
-                            projectId,
-                            "System",
-                            "info",
-                            $"Applied {notes.Count} steering note(s) before phase group {currentPhase}",
-                            executionId: executionId);
-                    });
+                    var carriedRoleLabel = reviewLoopCount == 0
+                        ? "retry context"
+                        : $"review remediation cycle {reviewLoopCount}";
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "info",
+                        $"Carrying forward completed phases from {carriedRoleLabel}: {string.Join(", ", pipeline.SelectMany(g => g).Where(carriedRoles.Contains))}",
+                        executionId: executionId);
                     await PublishLogsUpdatedAsync();
                 }
 
-                var priorOutputs = phaseOutputs.ToList();
-                var groupCompletedBase = completedRoles;
-                var pendingRoleEntries = rolesInGroup
-                    .Select((role, index) => (Role: role, Index: index))
-                    .Where(entry => !carriedRoles.Contains(entry.Role))
-                    .ToArray();
-
-                if (pendingRoleEntries.Length == 0)
+                foreach (var group in currentCyclePipeline)
                 {
-                    completedRoles += rolesInGroup.Length;
-                    continue;
-                }
+                    externalCancellation.ThrowIfCancellationRequested();
 
-                var executionOrderResults = new List<RolePhaseExecutionResult>(rolesInGroup.Length);
-                var maxParallel = Math.Max(1, maxConcurrentAgentsPerTask);
+                    var rolesInGroup = group.ToArray();
+                    if (rolesInGroup.Length == 0)
+                        continue;
 
-                for (var batchStart = 0; batchStart < pendingRoleEntries.Length; batchStart += maxParallel)
-                {
-                    var batchRoles = pendingRoleEntries.Skip(batchStart).Take(maxParallel).ToArray();
-                    var batchTasks = batchRoles
-                        .Select(entry => RunRoleAsync(
-                            entry.Role,
-                            entry.Index,
-                            priorOutputs,
-                            steeringBlock,
-                            groupCompletedBase))
+                    var groupCompletedBase = completedRoles;
+                    var currentPhase = rolesInGroup.Length == 1
+                        ? rolesInGroup[0].ToString()
+                        : $"Parallel: {string.Join(", ", rolesInGroup.Select(r => r.ToString()))}";
+
+                    await WithDbLockAsync(async () =>
+                    {
+                        await UpdateExecutionAsync(
+                            scopedDb,
+                            executionId,
+                            currentPhase,
+                            totalRoles == 0 ? 0 : (double)groupCompletedBase / totalRoles);
+                    });
+                    await PublishAgentsUpdatedAsync();
+
+                    var notes = new List<string>();
+                    if (SteeringNotes.TryGetValue(executionId, out var queue))
+                    {
+                        while (queue.TryDequeue(out var queuedNote))
+                        {
+                            notes.Add(queuedNote);
+                        }
+                    }
+
+                    var steeringBlock = BuildSteeringBlock(notes);
+                    if (notes.Count > 0)
+                    {
+                        await WithDbLockAsync(async () =>
+                        {
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                "System",
+                                "info",
+                                $"Applied {notes.Count} steering note(s) before phase group {currentPhase}",
+                                executionId: executionId);
+                        });
+                        await PublishLogsUpdatedAsync();
+                    }
+
+                    var priorOutputs = BuildCarryForwardPhaseOutputs(pipeline, currentOutputsByRole);
+                    var pendingRoleEntries = rolesInGroup
+                        .Select((role, index) => (Role: role, Index: index))
+                        .Where(entry => !carriedRoles.Contains(entry.Role))
                         .ToArray();
 
-                    var batchResults = await Task.WhenAll(batchTasks);
-                    executionOrderResults.AddRange(batchResults);
-
-                    var failedRole = batchResults.FirstOrDefault(r => !r.Success);
-                    if (failedRole is not null)
+                    if (pendingRoleEntries.Length == 0)
                     {
-                        throw new InvalidOperationException(
-                            $"Agent {failedRole.Role} failed after {failedRole.AttemptsUsed} attempt(s): {failedRole.Error ?? "Unknown error"}");
+                        continue;
                     }
+
+                    var executionOrderResults = new List<RolePhaseExecutionResult>(rolesInGroup.Length);
+                    var maxParallel = Math.Max(1, maxConcurrentAgentsPerTask);
+
+                    for (var batchStart = 0; batchStart < pendingRoleEntries.Length; batchStart += maxParallel)
+                    {
+                        var batchRoles = pendingRoleEntries.Skip(batchStart).Take(maxParallel).ToArray();
+                        var batchTasks = batchRoles
+                            .Select(entry => RunRoleAsync(
+                                entry.Role,
+                                entry.Index,
+                                priorOutputs,
+                                steeringBlock,
+                                groupCompletedBase))
+                            .ToArray();
+
+                        var batchResults = await Task.WhenAll(batchTasks);
+                        executionOrderResults.AddRange(batchResults);
+
+                        var failedRole = batchResults.FirstOrDefault(r => !r.Success);
+                        if (failedRole is not null)
+                        {
+                            throw new InvalidOperationException(
+                                $"Agent {failedRole.Role} failed after {failedRole.AttemptsUsed} attempt(s): {failedRole.Error ?? "Unknown error"}");
+                        }
+                    }
+
+                    foreach (var role in rolesInGroup.Where(role => !carriedRoles.Contains(role)))
+                    {
+                        var roleResult = executionOrderResults.First(r => r.Role == role);
+                        currentOutputsByRole[role] = roleResult.SummarizedOutput;
+                    }
+
+                    carriedRoles = currentOutputsByRole.Keys.ToHashSet();
+                    completedRoles = CountCarryForwardRoles(pipeline, currentOutputsByRole);
                 }
 
-                foreach (var role in rolesInGroup.Where(role => !carriedRoles.Contains(role)))
+                if (latestCycleReviewDecision is null || !latestCycleReviewDecision.RequiresAutomaticLoop)
+                    break;
+
+                reviewLoopCount++;
+                if (reviewLoopCount > MaxAutomaticReviewLoops)
                 {
-                    var roleResult = executionOrderResults.First(r => r.Role == role);
-                    phaseOutputs.Add((role, roleResult.SummarizedOutput));
+                    throw new InvalidOperationException(
+                        $"Review requested {latestCycleReviewDecision.RecommendationLabel} again after {MaxAutomaticReviewLoops} automatic remediation cycle(s). " +
+                        $"{latestCycleReviewDecision.Summary}".Trim());
                 }
 
-                completedRoles += rolesInGroup.Length;
+                var rerunRoles = ReviewFeedbackLoopPlanner.DetermineRolesToRerun(pipeline, latestCycleReviewDecision);
+                if (rerunRoles.Count == 0)
+                    throw new InvalidOperationException("Review requested another remediation loop, but Fleet could not determine which phases to rerun.");
+
+                currentCyclePipeline = ReviewFeedbackLoopPlanner.BuildPipelineSubset(pipeline, rerunRoles);
+                currentCycleCarryForwardOutputs = currentOutputsByRole
+                    .Where(entry => !rerunRoles.Contains(entry.Key))
+                    .ToDictionary(entry => entry.Key, entry => entry.Value);
+                pendingReviewDecision = latestCycleReviewDecision;
+
+                await WithDbLockAsync(async () =>
+                {
+                    await PrepareExecutionForAutomaticReviewLoopAsync(
+                        scopedDb,
+                        executionId,
+                        pipeline,
+                        rerunRoles,
+                        currentCycleCarryForwardOutputs,
+                        latestCycleReviewDecision,
+                        reviewLoopCount);
+
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "warn",
+                        BuildAutomaticReviewLoopLogMessage(latestCycleReviewDecision, rerunRoles, reviewLoopCount),
+                        executionId: executionId);
+                });
+                await PublishAgentsUpdatedAsync();
+                await PublishLogsUpdatedAsync();
             }
 
             async Task<RolePhaseExecutionResult> RunRoleAsync(
@@ -1007,7 +1117,7 @@ public class AgentOrchestrationService(
                 int groupCompletedBase)
             {
                 var maxAttempts = MaxAgentRetries + 1;
-                var baseUserMessage = BuildPhaseMessage(role, workItemContext, priorOutputs);
+                var baseUserMessage = BuildPhaseMessage(role, currentWorkItemContext, priorOutputs);
                 if (!string.IsNullOrWhiteSpace(steeringBlock))
                     baseUserMessage += steeringBlock;
 
@@ -1159,6 +1269,7 @@ public class AgentOrchestrationService(
 
                     await WithDbLockAsync(async () =>
                     {
+                        ThrowIfExecutionDeleted(executionId);
                         var phaseResultEntity = new AgentPhaseResult
                         {
                             Role = role.ToString(),
@@ -1223,6 +1334,9 @@ public class AgentOrchestrationService(
 
                     if (result.Success)
                     {
+                        if (role == AgentRole.Review)
+                            latestCycleReviewDecision = ReviewFeedbackLoopPlanner.ParseDecision(result.Output);
+
                         var summarized = await SummarizePhaseOutputAsync(role, result.Output, externalCancellation);
                         return new RolePhaseExecutionResult(
                             role,
@@ -1306,6 +1420,9 @@ public class AgentOrchestrationService(
                 ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation)
                 : null;
 
+            if (IsExecutionDeleted(executionId))
+                return;
+
             await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
             await PublishAgentsUpdatedAsync();
             await scopedNotificationService.PublishAsync(
@@ -1357,6 +1474,10 @@ public class AgentOrchestrationService(
 
             logger.LogInformation("Execution {ExecutionId}: pipeline completed successfully", executionId);
         }
+        catch (OperationCanceledException) when (IsExecutionDeleted(executionId))
+        {
+            logger.LogInformation("Execution {ExecutionId}: pipeline stopped after deletion", executionId);
+        }
         catch (OperationCanceledException)
         {
             // Execution was stopped or paused externally via CancelExecutionAsync / PauseExecutionAsync.
@@ -1390,6 +1511,10 @@ public class AgentOrchestrationService(
             {
                 logger.LogError(dbEx, "Execution {ExecutionId}: failed to persist {Status} status to DB", executionId, finalStatus);
             }
+        }
+        catch (Exception ex) when (IsExecutionDeleted(executionId))
+        {
+            logger.LogInformation(ex, "Execution {ExecutionId}: pipeline error ignored after deletion", executionId);
         }
         catch (Exception ex)
         {
@@ -1439,6 +1564,7 @@ public class AgentOrchestrationService(
                 removed.Cts.Dispose();
 
             SteeringNotes.TryRemove(executionId, out _);
+            DeletedExecutions.TryRemove(executionId, out _);
 
             if (sandbox is not null)
                 await sandbox.DisposeAsync();
@@ -1647,6 +1773,57 @@ public class AgentOrchestrationService(
         IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs) =>
         BuildCarryForwardPhaseOutputs(pipeline, carryForwardOutputs).Count;
 
+    private static async Task PrepareExecutionForAutomaticReviewLoopAsync(
+        FleetDbContext scopedDb,
+        string executionId,
+        AgentRole[][] pipeline,
+        IReadOnlyCollection<AgentRole> rerunRoles,
+        IReadOnlyDictionary<AgentRole, string> carryForwardOutputs,
+        ReviewTriageDecision reviewDecision,
+        int cycleNumber)
+    {
+        if (IsExecutionDeleted(executionId))
+            return;
+
+        var execution = await scopedDb.AgentExecutions.FindAsync(executionId);
+        if (execution is null)
+            return;
+
+        var rerunSet = rerunRoles.ToHashSet();
+        var preservedRoleCount = CountCarryForwardRoles(pipeline, carryForwardOutputs);
+        var totalRoleCount = pipeline.SelectMany(group => group).Count();
+
+        execution.CurrentPhase = $"Auto-remediation: {reviewDecision.RecommendationLabel} (cycle {cycleNumber})";
+        execution.Progress = totalRoleCount == 0
+            ? execution.Progress
+            : Math.Clamp((double)preservedRoleCount / totalRoleCount, 0, 0.99);
+
+        foreach (var agent in execution.Agents)
+        {
+            if (!Enum.TryParse<AgentRole>(agent.Role, ignoreCase: true, out var role))
+                continue;
+
+            if (rerunSet.Contains(role))
+            {
+                agent.Status = "idle";
+                agent.CurrentTask = $"Queued from review {reviewDecision.RecommendationLabel}";
+                agent.Progress = 0;
+                continue;
+            }
+
+            if (carryForwardOutputs.ContainsKey(role))
+            {
+                agent.Status = "completed";
+                agent.CurrentTask = cycleNumber == 1
+                    ? "Preserved from previous pass"
+                    : $"Preserved through review loop {cycleNumber}";
+                agent.Progress = 1.0;
+            }
+        }
+
+        await scopedDb.SaveChangesAsync();
+    }
+
     internal static List<AgentInfo> BuildAgentInfoList(
         AgentRole[][] pipeline,
         IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs = null)
@@ -1786,6 +1963,23 @@ public class AgentOrchestrationService(
             : $"Failed at {estimatedCompletionPercent}%: {summary}";
     }
 
+    private static string BuildAutomaticReviewLoopLogMessage(
+        ReviewTriageDecision reviewDecision,
+        IReadOnlyCollection<AgentRole> rerunRoles,
+        int cycleNumber)
+    {
+        var rerunRoleText = rerunRoles.Count == 0
+            ? "no phases selected"
+            : string.Join(", ", rerunRoles);
+
+        var summaryText = string.IsNullOrWhiteSpace(reviewDecision.Summary)
+            ? string.Empty
+            : $" Summary: {reviewDecision.Summary}";
+
+        return $"Automatic review remediation cycle {cycleNumber} started after {reviewDecision.RecommendationLabel}. " +
+               $"Rerunning: {rerunRoleText}.{summaryText}";
+    }
+
     private static string NormalizeAgentFailureMessage(string? rawError)
     {
         if (string.IsNullOrWhiteSpace(rawError))
@@ -1868,6 +2062,9 @@ public class AgentOrchestrationService(
     private static async Task UpdateExecutionAsync(
         FleetDbContext scopedDb, string executionId, string currentPhase, double progress)
     {
+        if (IsExecutionDeleted(executionId))
+            return;
+
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
 
@@ -1885,6 +2082,9 @@ public class AgentOrchestrationService(
         double preservedProgress = 0,
         string? taskOverride = null)
     {
+        if (IsExecutionDeleted(executionId))
+            return;
+
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
 
@@ -1917,6 +2117,9 @@ public class AgentOrchestrationService(
         string taskDescription,
         double preservedProgress = 0)
     {
+        if (IsExecutionDeleted(executionId))
+            return;
+
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
 
@@ -1943,6 +2146,9 @@ public class AgentOrchestrationService(
         bool isDetailed = false,
         string? executionId = null)
     {
+        if (!string.IsNullOrWhiteSpace(executionId) && IsExecutionDeleted(executionId))
+            return;
+
         scopedDb.LogEntries.Add(new LogEntry
         {
             Time = DateTime.UtcNow.ToString("o"),
@@ -2093,6 +2299,9 @@ public class AgentOrchestrationService(
         FleetDbContext scopedDb, string executionId, string status,
         string? prUrl = null, string? errorMessage = null)
     {
+        if (IsExecutionDeleted(executionId))
+            return;
+
         var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
         if (exec is null) return;
 
@@ -2133,6 +2342,18 @@ public class AgentOrchestrationService(
         }
 
         await scopedDb.SaveChangesAsync();
+    }
+
+    private static bool CanDeleteExecutionStatus(string? status)
+        => !string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsExecutionDeleted(string executionId)
+        => DeletedExecutions.ContainsKey(executionId);
+
+    private static void ThrowIfExecutionDeleted(string executionId)
+    {
+        if (IsExecutionDeleted(executionId))
+            throw new OperationCanceledException($"Execution {executionId} was deleted.");
     }
 
     /// <summary>

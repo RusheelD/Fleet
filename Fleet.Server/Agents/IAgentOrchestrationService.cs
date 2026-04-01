@@ -61,6 +61,11 @@ public interface IAgentOrchestrationService
     Task<string?> RetryExecutionAsync(string projectId, string executionId, int userId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes an execution and any logs associated with it. Active executions are cancelled and suppressed before removal.
+    /// </summary>
+    Task<AgentExecutionDeletionResult?> DeleteExecutionAsync(string projectId, string executionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Builds documentation markdown for an execution from persisted phase results.
     /// </summary>
     Task<ExecutionDocumentationDto?> GetExecutionDocumentationAsync(string projectId, string executionId, CancellationToken cancellationToken = default);

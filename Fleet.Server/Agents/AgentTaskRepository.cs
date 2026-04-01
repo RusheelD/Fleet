@@ -13,11 +13,43 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
             .Where(e => e.ProjectId == projectId)
             .ToListAsync();
 
-        return entities.Select(e => new AgentExecutionDto(
-            e.Id, e.WorkItemId, e.WorkItemTitle, e.Status,
-            NormalizeAgentsForExecutionStatus(e).ToArray(),
-            e.StartedAt, ComputeDuration(e), e.Progress, e.BranchName, e.PullRequestUrl, e.CurrentPhase
-        )).ToList();
+        var executionIds = entities.Select(entity => entity.Id).ToArray();
+        var reviewPhaseResults = executionIds.Length == 0
+            ? []
+            : await context.AgentPhaseResults
+                .AsNoTracking()
+                .Where(result =>
+                    executionIds.Contains(result.ExecutionId) &&
+                    result.Success &&
+                    result.Role == AgentRole.Review.ToString())
+                .OrderBy(result => result.ExecutionId)
+                .ThenBy(result => result.PhaseOrder)
+                .ToListAsync();
+
+        var reviewSummariesByExecution = reviewPhaseResults
+            .GroupBy(result => result.ExecutionId)
+            .ToDictionary(
+                group => group.Key,
+                group => ReviewFeedbackLoopPlanner.SummarizeExecutionReviews(group));
+
+        return entities.Select(e =>
+        {
+            reviewSummariesByExecution.TryGetValue(e.Id, out var reviewSummary);
+            return new AgentExecutionDto(
+                e.Id,
+                e.WorkItemId,
+                e.WorkItemTitle,
+                e.Status,
+                NormalizeAgentsForExecutionStatus(e).ToArray(),
+                e.StartedAt,
+                ComputeDuration(e),
+                e.Progress,
+                e.BranchName,
+                e.PullRequestUrl,
+                e.CurrentPhase,
+                reviewSummary?.AutomaticLoopCount ?? 0,
+                reviewSummary?.LastRecommendation);
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<LogEntryDto>> GetLogsByProjectIdAsync(string projectId)
@@ -32,11 +64,58 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         return entities.Select(l => new LogEntryDto(l.Time, l.Agent, l.Level, l.Message, l.IsDetailed, l.ExecutionId)).ToList();
     }
 
-    public Task<int> ClearLogsByProjectIdAsync(string projectId)
+    public async Task<int> ClearLogsByProjectIdAsync(string projectId)
     {
-        return context.LogEntries
+        var logs = await context.LogEntries
             .Where(l => l.ProjectId == projectId)
-            .ExecuteDeleteAsync();
+            .ToListAsync();
+        if (logs.Count == 0)
+            return 0;
+
+        context.LogEntries.RemoveRange(logs);
+        await context.SaveChangesAsync();
+        return logs.Count;
+    }
+
+    public async Task<int> ClearLogsByExecutionIdAsync(string projectId, string executionId)
+    {
+        var logs = await context.LogEntries
+            .Where(l => l.ProjectId == projectId && l.ExecutionId == executionId)
+            .ToListAsync();
+        if (logs.Count == 0)
+            return 0;
+
+        context.LogEntries.RemoveRange(logs);
+        await context.SaveChangesAsync();
+        return logs.Count;
+    }
+
+    public async Task<AgentExecutionDeletionResult?> DeleteExecutionAsync(string projectId, string executionId)
+    {
+        var execution = await context.AgentExecutions
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == executionId);
+        if (execution is null)
+            return null;
+
+        var logs = await context.LogEntries
+            .Where(l => l.ProjectId == projectId && l.ExecutionId == executionId)
+            .ToListAsync();
+        var deletedLogCount = logs.Count;
+
+        var phaseResults = await context.AgentPhaseResults
+            .Where(result => result.ExecutionId == executionId)
+            .ToListAsync();
+
+        if (phaseResults.Count > 0)
+            context.AgentPhaseResults.RemoveRange(phaseResults);
+
+        if (deletedLogCount > 0)
+            context.LogEntries.RemoveRange(logs);
+
+        context.AgentExecutions.Remove(execution);
+        await context.SaveChangesAsync();
+
+        return new AgentExecutionDeletionResult(executionId, deletedLogCount);
     }
 
     public async Task<IReadOnlyList<DashboardAgentDto>> GetDashboardAgentsByProjectIdAsync(string projectId)

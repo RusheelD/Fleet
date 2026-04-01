@@ -4,7 +4,7 @@ import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
   getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs, clearLogs, startExecution, cancelExecution, pauseExecution, retryExecution, getExecutionDocumentation,
+  getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, retryExecution, deleteExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
   search,
@@ -219,6 +219,38 @@ export function useClearLogs(projectId: string | undefined) {
   })
 }
 
+export function useClearExecutionLogs(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => clearExecutionLogs(projectId!, executionId),
+    onMutate: async (executionId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['logs'] })
+
+      const previousLogs = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
+
+      queryClient.setQueriesData<LogEntry[]>(
+        { queryKey: ['logs'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return current.filter((log) => log.executionId !== executionId)
+        },
+      )
+
+      return { previousLogs }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['logs'] })
+    },
+    onError: (_error, _executionId, context) => {
+      if (context?.previousLogs) {
+        for (const [queryKey, snapshot] of context.previousLogs) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+    },
+  })
+}
+
 export function useStartExecution(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -358,6 +390,8 @@ export function useRetryExecution(projectId: string | undefined) {
         branchName: sourceExecution?.branchName ?? null,
         pullRequestUrl: sourceExecution?.pullRequestUrl ?? null,
         currentPhase: 'Retry queued',
+        reviewLoopCount: 0,
+        lastReviewRecommendation: null,
       }
 
       queryClient.setQueriesData<AgentExecution[]>(
@@ -442,6 +476,58 @@ export function useRetryExecution(projectId: string | undefined) {
           queryClient.setQueryData(queryKey, snapshot)
         }
       }
+      if (context?.previousLogs) {
+        for (const [queryKey, snapshot] of context.previousLogs) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+    },
+  })
+}
+
+export function useDeleteExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => deleteExecution(projectId!, executionId),
+    onMutate: async (executionId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['executions'] })
+      await queryClient.cancelQueries({ queryKey: ['logs'] })
+
+      const previousExecutions = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+      const previousLogs = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
+
+      queryClient.setQueriesData<AgentExecution[]>(
+        { queryKey: ['executions'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return current.filter((execution) => execution.id !== executionId)
+        },
+      )
+
+      queryClient.setQueriesData<LogEntry[]>(
+        { queryKey: ['logs'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return current.filter((log) => log.executionId !== executionId)
+        },
+      )
+
+      return { previousExecutions, previousLogs }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['logs'] })
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: (_error, _executionId, context) => {
+      if (context?.previousExecutions) {
+        for (const [queryKey, snapshot] of context.previousExecutions) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+
       if (context?.previousLogs) {
         for (const [queryKey, snapshot] of context.previousLogs) {
           queryClient.setQueryData(queryKey, snapshot)

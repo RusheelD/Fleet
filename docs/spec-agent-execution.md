@@ -31,6 +31,17 @@ When an agent fails mid-task (LLM error, GitHub rate limit, code that doesn't co
 - The manager has full context on the task state and can make informed decisions
 - All failures are logged for user visibility in the log stream
 
+### Automatic Review Feedback Loop
+
+Fleet should take a work item to completion inside a single execution whenever possible. That means review findings are not only user-visible; they are also actionable orchestration signals.
+
+- If the **Review** agent recommends **STOP**, Fleet finalizes the execution and readies the PR.
+- If the **Review** agent recommends **PATCH**, Fleet automatically re-runs the targeted fixing agents, then re-runs downstream validation/review phases in the same execution.
+- If the **Review** agent recommends **RESTART**, Fleet automatically re-enters the pipeline from the specified earlier phase and continues toward completion in the same execution.
+- This loop stays on the same execution record, branch, and draft PR; it is **not** a user-triggered retry.
+- The monitor UX should clearly show when Fleet is in an automatic review remediation cycle, and completed runs should indicate that they self-corrected before finishing.
+- To keep the loop machine-actionable, the Review agent must end with a structured decision block containing recommendation, severity, target roles, and restart phase.
+
 ## LLM Providers
 
 **Multi-provider** is the long-term goal — users select models based on their plan tier.

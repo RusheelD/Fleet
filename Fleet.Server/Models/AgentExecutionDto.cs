@@ -11,5 +11,7 @@ public record AgentExecutionDto(
     double Progress,
     string? BranchName = null,
     string? PullRequestUrl = null,
-    string? CurrentPhase = null
+    string? CurrentPhase = null,
+    int ReviewLoopCount = 0,
+    string? LastReviewRecommendation = null
 );

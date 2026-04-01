@@ -107,6 +107,37 @@ For each sub-task from the plan:
 - **If PATCH:** Which specific findings to fix and which agent should fix them
 - **If RESTART:** Which phase to re-enter and what went wrong
 
+### E. Machine-Readable Decision Block
+
+End your response with a fenced JSON block that Fleet can parse automatically:
+
+```json
+{
+  "recommendation": "PATCH",
+  "highest_severity": "P1",
+  "summary": "Localized backend validation bug remains.",
+  "rationale": "The feature is close, but one functional issue still blocks completion.",
+  "target_roles": ["Backend", "Testing"],
+  "restart_from": null,
+  "findings": [
+    {
+      "severity": "P1",
+      "role": "Backend",
+      "description": "Validation is missing for empty branch names.",
+      "suggestion": "Reject empty branch names in the API and add regression coverage."
+    }
+  ]
+}
+```
+
+Rules for this block:
+
+- Always include it, even for STOP.
+- Use only Fleet role names in `target_roles` / `restart_from`.
+- For PATCH, set `target_roles` to the specific agents that should fix the findings.
+- For RESTART, set `restart_from` to the earliest phase that must be re-entered.
+- Keep `summary` and `rationale` short and concrete.
+
 ## Review Principles
 
 1. **Be constructive** — Every finding must include a suggestion for how to fix it.

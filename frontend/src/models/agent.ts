@@ -10,6 +10,8 @@ export interface AgentExecution {
   branchName?: string | null
   pullRequestUrl?: string | null
   currentPhase?: string | null
+  reviewLoopCount?: number
+  lastReviewRecommendation?: string | null
 }
 
 export interface AgentInfo {
