@@ -114,6 +114,27 @@ const useStyles = makeStyles({
         marginBottom: '0.5rem',
         paddingBottom: '0.25rem',
     },
+    monitorTab: {
+        borderRadius: appTokens.radius.md,
+        transitionProperty: 'background-color, color, box-shadow',
+        transitionDuration: appTokens.motion.fast,
+        [`& .fui-Tab__icon`]: {
+            color: appTokens.color.textTertiary,
+        },
+        [`&[aria-selected="true"]`]: {
+            backgroundColor: appTokens.color.surfaceAlt,
+            boxShadow: appTokens.border.activeInset,
+        },
+        [`&[aria-selected="true"] .fui-Tab__icon`]: {
+            color: appTokens.color.brand,
+        },
+        [`&[aria-selected="true"] .fui-Tab__content`]: {
+            color: appTokens.color.textPrimary,
+        },
+        [`&[aria-selected="true"]:hover .fui-Tab__icon`]: {
+            color: appTokens.color.brandHover,
+        },
+    },
     mainContent: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
@@ -521,12 +542,12 @@ export function AgentMonitorPage() {
                 className={mergeClasses(styles.tabListSpacing, isDense && styles.tabListSpacingCompact)}
                 size={isDense ? 'small' : 'medium'}
             >
-                <Tab value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
-                <Tab value="paused" icon={<PauseRegular />}>Paused ({paused.length})</Tab>
-                <Tab value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
-                <Tab value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>
-                <Tab value="cancelled" icon={<DismissCircleRegular />}>Cancelled ({cancelled.length})</Tab>
-                <Tab value="all">All ({allExecutions.length})</Tab>
+                <Tab className={styles.monitorTab} value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
+                <Tab className={styles.monitorTab} value="paused" icon={<PauseRegular />}>Paused ({paused.length})</Tab>
+                <Tab className={styles.monitorTab} value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
+                <Tab className={styles.monitorTab} value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>
+                <Tab className={styles.monitorTab} value="cancelled" icon={<DismissCircleRegular />}>Cancelled ({cancelled.length})</Tab>
+                <Tab className={styles.monitorTab} value="all">All ({allExecutions.length})</Tab>
             </TabList>
 
             <div className={mergeClasses(styles.mainContent, isDense && styles.mainContentCompact)}>
