@@ -6,11 +6,11 @@ import {
     Text,
     Card,
     Divider,
-    Badge,
 } from '@fluentui/react-components'
 import { ShieldKeyholeRegular, LockClosedRegular, PersonRegular } from '@fluentui/react-icons'
 import { useIsMobile } from '../../hooks'
 import { APP_MOBILE_MEDIA_QUERY, appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const useStyles = makeStyles({
     section: {
@@ -91,7 +91,7 @@ export function SecurityTab() {
                     <Text weight="semibold">Two-Factor Authentication</Text>
                     <Caption1>Managed by your Entra ID administrator</Caption1>
                 </div>
-                <Badge appearance="tint" color="informative" className={styles.managedBadge}>Managed by Entra ID</Badge>
+                <InfoBadge appearance="tint" className={styles.managedBadge}>Managed by Entra ID</InfoBadge>
             </div>
 
             <div className={mergeClasses(styles.settingRow, isMobile && styles.settingRowMobile)}>
@@ -99,7 +99,7 @@ export function SecurityTab() {
                     <Text weight="semibold">Active Sessions</Text>
                     <Caption1>View and manage sessions via your Microsoft account</Caption1>
                 </div>
-                <Badge appearance="tint" color="informative" className={styles.managedBadge}>Managed by Entra ID</Badge>
+                <InfoBadge appearance="tint" className={styles.managedBadge}>Managed by Entra ID</InfoBadge>
             </div>
 
             <Divider />

@@ -2,7 +2,6 @@ import {
     makeStyles,
     Title3,
     Button,
-    Badge,
     mergeClasses,
     ToggleButton,
     Tab,
@@ -13,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentExecution, LogEntry } from '../../models'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
     info: 'logLevelInfo',
@@ -450,7 +450,7 @@ export function LogPanel({
             <div className={mergeClasses(styles.logHeader, isMobile && styles.logHeaderMobile)}>
                 <div className={styles.logHeaderTitleRow}>
                     <Title3 className={styles.logTitle}>Live Logs</Title3>
-                    <Badge appearance="filled" color="informative" size="small">{sortedVisibleLogs.length}</Badge>
+                    <InfoBadge appearance="filled" size="small">{sortedVisibleLogs.length}</InfoBadge>
                 </div>
                 <div className={mergeClasses(styles.logHeaderActions, isMobile && styles.logHeaderActionsMobile)}>
                     <ToggleButton

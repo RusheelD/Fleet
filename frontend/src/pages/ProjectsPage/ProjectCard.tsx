@@ -17,6 +17,7 @@ import {
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import type { ProjectData } from '../../models'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const useStyles = makeStyles({
     projectCard: {
@@ -166,9 +167,9 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
                                 {project.agents.running} agent{project.agents.running > 1 ? 's' : ''} running
                             </Badge>
                         ) : (
-                            <Badge appearance="ghost" color="informative">
+                            <InfoBadge appearance="ghost">
                                 No agents active
-                            </Badge>
+                            </InfoBadge>
                         )}
                     </div>
                     <div className={styles.activityTime}>

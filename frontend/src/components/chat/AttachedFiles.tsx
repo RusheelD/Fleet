@@ -13,6 +13,7 @@ import {
 import type { ChatAttachment } from '../../models'
 import { usePreferences } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../shared/InfoBadge'
 
 type AttachmentListItem = ChatAttachment & {
     isUploading?: boolean
@@ -100,13 +101,19 @@ export function AttachedFiles({ attachments, onDelete, deleting }: AttachedFiles
                     <Tooltip content={`${a.fileName} (${formatSize(a.contentLength)})`} relationship="description">
                         <Text size={200} className={mergeClasses(styles.fileName, isCompact && styles.fileNameCompact)}>{a.fileName}</Text>
                     </Tooltip>
-                    <Badge
-                        appearance="filled"
-                        size={isCompact ? 'tiny' : 'small'}
-                        color={a.isUploading ? 'warning' : 'informative'}
-                    >
-                        {a.isUploading ? 'Uploading...' : formatSize(a.contentLength)}
-                    </Badge>
+                    {a.isUploading ? (
+                        <Badge
+                            appearance="filled"
+                            size={isCompact ? 'tiny' : 'small'}
+                            color="warning"
+                        >
+                            Uploading...
+                        </Badge>
+                    ) : (
+                        <InfoBadge appearance="filled" size={isCompact ? 'tiny' : 'small'}>
+                            {formatSize(a.contentLength)}
+                        </InfoBadge>
+                    )}
                     <Button
                         appearance="subtle"
                         size="small"

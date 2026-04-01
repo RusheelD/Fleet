@@ -32,17 +32,16 @@ import type { AgentExecution, AgentInfo } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 type ExecutionStepStatus = AgentInfo['status'] | 'paused'
 type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
 
-const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informative' | 'subtle'> = {
+const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'subtle'> = {
     running: 'warning',
     completed: 'success',
     failed: 'danger',
     cancelled: 'danger',
-    paused: 'informative',
-    queued: 'informative',
     idle: 'subtle',
 }
 
@@ -216,7 +215,7 @@ const useStyles = makeStyles({
         color: appTokens.color.success,
     },
     stepIconPaused: {
-        color: appTokens.color.brand,
+        color: appTokens.color.info,
     },
     stepIconFailed: {
         color: appTokens.color.danger,
@@ -250,7 +249,7 @@ const useStyles = makeStyles({
         backgroundColor: appTokens.color.warning,
     },
     connectorPaused: {
-        backgroundColor: appTokens.color.brand,
+        backgroundColor: appTokens.color.info,
     },
     connectorFailed: {
         backgroundColor: appTokens.color.danger,
@@ -390,6 +389,22 @@ function AgentStepIcon({ status, isCompact }: { status: ExecutionStepStatus; isC
     }
 }
 
+function renderExecutionStatusBadge(status: AgentExecution['status']) {
+    if (status === 'paused' || status === 'queued') {
+        return (
+            <InfoBadge appearance="filled" size="small">
+                {status}
+            </InfoBadge>
+        )
+    }
+
+    return (
+        <Badge appearance="filled" color={STATUS_COLORS[status] ?? 'subtle'} size="small">
+            {status}
+        </Badge>
+    )
+}
+
 export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
@@ -505,17 +520,17 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                 <div className={mergeClasses(styles.executionTitle, isCompact && styles.executionTitleCompact)}>
                     <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
-                        <Badge appearance="filled" color={STATUS_COLORS[execution.status]} size="small">
-                            {execution.status}
-                        </Badge>
+                        {renderExecutionStatusBadge(execution.status)}
                         {reviewLoopLabel && (
-                            <Badge
-                                appearance="tint"
-                                color={isAutoRemediating ? 'warning' : 'informative'}
-                                size="small"
-                            >
-                                {reviewLoopLabel}
-                            </Badge>
+                            isAutoRemediating ? (
+                                <Badge appearance="tint" color="warning" size="small">
+                                    {reviewLoopLabel}
+                                </Badge>
+                            ) : (
+                                <InfoBadge appearance="tint" size="small">
+                                    {reviewLoopLabel}
+                                </InfoBadge>
+                            )
                         )}
                     </div>
                     <Text

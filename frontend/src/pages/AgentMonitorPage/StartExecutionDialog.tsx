@@ -23,6 +23,7 @@ import { BotRegular, RocketRegular } from '@fluentui/react-icons'
 import type { WorkItem } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 interface StartExecutionDialogProps {
     open: boolean
@@ -185,7 +186,7 @@ const useStyles = makeStyles({
     },
 })
 
-function getStateBadgeColor(state: WorkItem['state']): 'brand' | 'informative' | 'warning' | 'success' {
+function getStateBadgeTone(state: WorkItem['state']): 'brand' | 'info' | 'warning' | 'success' {
     if (state === 'Planning (AI)' || state === 'In Progress' || state === 'In Progress (AI)') {
         return 'warning'
     }
@@ -198,7 +199,7 @@ function getStateBadgeColor(state: WorkItem['state']): 'brand' | 'informative' |
         return 'brand'
     }
 
-    return 'informative'
+    return 'info'
 }
 
 function formatStateLabel(state: WorkItem['state']): string {
@@ -293,9 +294,9 @@ export function StartExecutionDialog({
                                 </Field>
                                 <div className={styles.sectionHeader}>
                                     <Text weight="semibold">Eligible Work Items</Text>
-                                    <Badge appearance="filled" color="informative" size="small">
+                                    <InfoBadge appearance="filled" size="small">
                                         {eligible.length} available
-                                    </Badge>
+                                    </InfoBadge>
                                 </div>
                                 <RadioGroup
                                     value={selected?.toString() ?? ''}
@@ -303,48 +304,60 @@ export function StartExecutionDialog({
                                 >
                                     <div className={mergeClasses(styles.workItemList, isCompact && styles.workItemListCompact)}>
                                         {eligible.map((wi) => (
-                                            <Radio
-                                                key={wi.workItemNumber}
-                                                className={mergeClasses(
-                                                    styles.workItemRadio,
-                                                    selected === wi.workItemNumber && styles.workItemRadioSelected,
-                                                    isCompact && styles.workItemRadioCompact,
-                                                )}
-                                                value={wi.workItemNumber.toString()}
-                                                label={
-                                                        <span className={styles.radioLabel}>
-                                                        <span className={mergeClasses(styles.workItemTopRow, isCompact && styles.workItemTopRowCompact, isMobile && styles.workItemTopRowMobile)}>
-                                                            <span className={mergeClasses(styles.workItemTitleWrap, isCompact && styles.workItemTitleWrapCompact)}>
-                                                                <span className={styles.workItemNumber}>
-                                                                    #{wi.workItemNumber}
+                                            (() => {
+                                                const badgeTone = getStateBadgeTone(wi.state)
+
+                                                return (
+                                                    <Radio
+                                                        key={wi.workItemNumber}
+                                                        className={mergeClasses(
+                                                            styles.workItemRadio,
+                                                            selected === wi.workItemNumber && styles.workItemRadioSelected,
+                                                            isCompact && styles.workItemRadioCompact,
+                                                        )}
+                                                        value={wi.workItemNumber.toString()}
+                                                        label={
+                                                            <span className={styles.radioLabel}>
+                                                                <span className={mergeClasses(styles.workItemTopRow, isCompact && styles.workItemTopRowCompact, isMobile && styles.workItemTopRowMobile)}>
+                                                                    <span className={mergeClasses(styles.workItemTitleWrap, isCompact && styles.workItemTitleWrapCompact)}>
+                                                                        <span className={styles.workItemNumber}>
+                                                                            #{wi.workItemNumber}
+                                                                        </span>
+                                                                        <Text weight="semibold" className={mergeClasses(styles.workItemTitle, isMobile && styles.workItemTitleMobile)}>
+                                                                            {wi.title}
+                                                                        </Text>
+                                                                    </span>
+                                                                    {badgeTone === 'info' ? (
+                                                                        <InfoBadge appearance="filled" size="small">
+                                                                            {formatStateLabel(wi.state)}
+                                                                        </InfoBadge>
+                                                                    ) : (
+                                                                        <Badge appearance="filled" size="small" color={badgeTone}>
+                                                                            {formatStateLabel(wi.state)}
+                                                                        </Badge>
+                                                                    )}
                                                                 </span>
-                                                                <Text weight="semibold" className={mergeClasses(styles.workItemTitle, isMobile && styles.workItemTitleMobile)}>
-                                                                    {wi.title}
-                                                                </Text>
+                                                                <span className={styles.workItemMeta}>
+                                                                    <Caption1>Priority P{wi.priority}</Caption1>
+                                                                    <span className={styles.dot}>|</span>
+                                                                    <Caption1>Difficulty D{wi.difficulty}</Caption1>
+                                                                    {wi.assignedAgentCount ? (
+                                                                        <>
+                                                                            <span className={styles.dot}>|</span>
+                                                                            <Caption1>{wi.assignedAgentCount} agents</Caption1>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className={styles.dot}>|</span>
+                                                                            <Caption1>Auto agents</Caption1>
+                                                                        </>
+                                                                    )}
+                                                                </span>
                                                             </span>
-                                                            <Badge appearance="filled" size="small" color={getStateBadgeColor(wi.state)}>
-                                                                {formatStateLabel(wi.state)}
-                                                            </Badge>
-                                                        </span>
-                                                        <span className={styles.workItemMeta}>
-                                                            <Caption1>Priority P{wi.priority}</Caption1>
-                                                            <span className={styles.dot}>|</span>
-                                                            <Caption1>Difficulty D{wi.difficulty}</Caption1>
-                                                            {wi.assignedAgentCount ? (
-                                                                <>
-                                                                    <span className={styles.dot}>|</span>
-                                                                    <Caption1>{wi.assignedAgentCount} agents</Caption1>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <span className={styles.dot}>|</span>
-                                                                    <Caption1>Auto agents</Caption1>
-                                                                </>
-                                                            )}
-                                                        </span>
-                                                    </span>
-                                                }
-                                            />
+                                                        }
+                                                    />
+                                                )
+                                            })()
                                         ))}
                                     </div>
                                 </RadioGroup>

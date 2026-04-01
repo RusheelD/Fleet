@@ -68,16 +68,18 @@ export function PreferencesProvider({ children }: PreferencesProviderProps) {
         }
     }, [isAuthenticated, queryClient])
 
-    // Apply a global density marker so compact mode can affect all pages consistently.
+    // Apply global density and theme markers so the app shell tokens can respond consistently.
     useEffect(() => {
         const root = document.documentElement
         root.dataset.density = local.compactMode ? 'compact' : 'comfortable'
+        root.dataset.theme = local.darkMode ? 'dark' : 'light'
         root.classList.toggle('fleet-compact-mode', local.compactMode)
         return () => {
             root.classList.remove('fleet-compact-mode')
             delete root.dataset.density
+            delete root.dataset.theme
         }
-    }, [local.compactMode])
+    }, [local.compactMode, local.darkMode])
 
     const updatePreference = useCallback(
         (key: keyof UserPreferences, value: boolean) => {

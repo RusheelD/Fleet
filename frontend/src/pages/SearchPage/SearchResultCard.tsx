@@ -18,6 +18,7 @@ import type { ReactNode } from 'react'
 import type { SearchResult } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const ICON_MAP: Record<string, ReactNode> = {
     project: <FolderRegular />,
@@ -26,9 +27,9 @@ const ICON_MAP: Record<string, ReactNode> = {
     agent: <BotRegular />,
 }
 
-const BADGE_MAP: Record<string, 'brand' | 'success' | 'warning' | 'informative'> = {
+const BADGE_MAP: Record<string, 'brand' | 'success' | 'warning' | 'info'> = {
     project: 'brand',
-    workitem: 'informative',
+    workitem: 'info',
     chat: 'success',
     agent: 'warning',
 }
@@ -137,6 +138,7 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const navigate = useNavigate()
+    const badgeTone = BADGE_MAP[result.type]
 
     const handleClick = () => {
         const slug = result.projectSlug
@@ -178,9 +180,15 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
                     </div>
                 </div>
             </div>
-            <Badge appearance="outline" color={BADGE_MAP[result.type]} size="small" className={mergeClasses(isMobile && styles.resultBadgeMobile)}>
-                {result.type}
-            </Badge>
+            {badgeTone === 'info' ? (
+                <InfoBadge appearance="outline" size="small" className={mergeClasses(isMobile && styles.resultBadgeMobile)}>
+                    {result.type}
+                </InfoBadge>
+            ) : (
+                <Badge appearance="outline" color={badgeTone} size="small" className={mergeClasses(isMobile && styles.resultBadgeMobile)}>
+                    {result.type}
+                </Badge>
+            )}
         </Card>
     )
 }

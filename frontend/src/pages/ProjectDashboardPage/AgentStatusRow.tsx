@@ -9,6 +9,7 @@ import {
 import { BotRegular } from '@fluentui/react-icons'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const useStyles = makeStyles({
     agentRow: {
@@ -60,13 +61,15 @@ export function AgentStatusRow({ name, status, task, progress }: AgentStatusRowP
             <div className={styles.agentInfo}>
                 <div className={styles.agentNameRow}>
                     <Text weight="semibold">{name}</Text>
-                    <Badge
-                        appearance="filled"
-                        color={status === 'running' ? 'success' : 'informative'}
-                        size="small"
-                    >
-                        {status}
-                    </Badge>
+                    {status === 'running' ? (
+                        <Badge appearance="filled" color="success" size="small">
+                            {status}
+                        </Badge>
+                    ) : (
+                        <InfoBadge appearance="filled" size="small">
+                            {status}
+                        </InfoBadge>
+                    )}
                 </div>
                 <Caption1 className={styles.taskText}>{task}</Caption1>
                 {progress > 0 && (

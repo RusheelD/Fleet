@@ -3,7 +3,6 @@ import {
     makeStyles,
     Caption1,
     Text,
-    Badge,
     Input,
     Checkbox,
     mergeClasses,
@@ -24,6 +23,7 @@ import {
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 /* ── Sortable columns ─────────────────────────────────────── */
 type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
@@ -635,15 +635,14 @@ export function BacklogList({
                         {isColumnVisible('tags') && (
                             <div className={styles.tagsCell}>
                                 {item.tags.slice(0, 3).map((tag) => (
-                                    <Badge
+                                    <InfoBadge
                                         key={tag}
                                         appearance="tint"
                                         size="small"
-                                        color="informative"
                                         className={styles.tagBadge}
                                     >
                                         {tag}
-                                    </Badge>
+                                    </InfoBadge>
                                 ))}
                             </div>
                         )}

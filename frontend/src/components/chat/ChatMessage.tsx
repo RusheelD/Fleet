@@ -2,7 +2,6 @@ import {
     makeStyles,
     mergeClasses,
     Avatar,
-    Badge,
     Text,
     Link,
     Tooltip,
@@ -14,6 +13,7 @@ import type { ChatMessageData } from '../../models'
 import { formatInitials } from './initials'
 import { usePreferences } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../shared/InfoBadge'
 
 const useStyles = makeStyles({
     messageRow: {
@@ -143,6 +143,10 @@ const useStyles = makeStyles({
         maxWidth: '9rem',
         fontSize: appTokens.fontSize.xs,
         lineHeight: appTokens.lineHeight.tight,
+    },
+    assistantAvatar: {
+        backgroundColor: appTokens.color.brand,
+        color: appTokens.color.textOnBrand,
     },
     // Markdown content styles
     markdown: {
@@ -309,7 +313,8 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                     name={message.role === 'user' ? userIdentity : 'Fleet AI'}
                     initials={message.role === 'user' ? formatInitials(userIdentity, 'Me') : 'FA'}
                     icon={message.role === 'user' ? <PersonRegular /> : <BotRegular />}
-                    color={message.role === 'user' ? 'neutral' : 'brand'}
+                    color="neutral"
+                    className={message.role === 'assistant' ? styles.assistantAvatar : undefined}
                     size={isCompact ? 24 : 28}
                 />
             </div>
@@ -379,9 +384,9 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                                         {attachment.fileName}
                                     </Text>
                                 </Tooltip>
-                                <Badge appearance="filled" size={isCompact ? 'tiny' : 'small'} color="informative">
+                                <InfoBadge appearance="filled" size={isCompact ? 'tiny' : 'small'}>
                                     {formatSize(attachment.contentLength)}
-                                </Badge>
+                                </InfoBadge>
                             </div>
                         ))}
                     </div>

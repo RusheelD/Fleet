@@ -3,7 +3,6 @@ import {
     makeStyles,
     Caption1,
     Text,
-    Badge,
     Button,
     Input,
     Checkbox,
@@ -26,6 +25,7 @@ import {
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
 import { appTokens } from '../../styles/appTokens'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 
 /* ── Drop zone enum ────────────────────────────────────────── */
 type DropZone = 'above' | 'on' | 'below' | null
@@ -948,15 +948,14 @@ export function BacklogTreeTable({
                         {isColumnVisible('tags') && (
                             <div className={styles.tagsCell}>
                                 {item.tags.slice(0, 3).map((tag) => (
-                                    <Badge
+                                    <InfoBadge
                                         key={tag}
                                         appearance="tint"
                                         size="small"
-                                        color="informative"
                                         className={styles.tagBadge}
                                     >
                                         {tag}
-                                    </Badge>
+                                    </InfoBadge>
                                 ))}
                             </div>
                         )}
