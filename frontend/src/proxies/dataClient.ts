@@ -4,7 +4,7 @@ import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
   getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
-  getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, retryExecution, deleteExecution, getExecutionDocumentation,
+  getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
   search,
@@ -286,6 +286,77 @@ export function usePauseExecution(projectId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ['executions'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+    },
+  })
+}
+
+export function useResumeExecution(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (executionId: string) => resumeExecution(projectId!, executionId),
+    onMutate: async (executionId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['executions'] })
+      await queryClient.cancelQueries({ queryKey: ['logs'] })
+
+      const previousExecutions = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+      const previousLogs = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
+      const nowIso = new Date().toISOString()
+
+      queryClient.setQueriesData<AgentExecution[]>(
+        { queryKey: ['executions'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return current.map((execution) =>
+            execution.id === executionId
+              ? {
+                ...execution,
+                status: 'running',
+                currentPhase: 'Resuming paused execution',
+              }
+              : execution,
+          )
+        },
+      )
+
+      queryClient.setQueriesData<LogEntry[]>(
+        { queryKey: ['logs'] },
+        (current) => {
+          if (!Array.isArray(current)) return current
+          return [
+            ...current,
+            {
+              time: nowIso,
+              agent: 'System',
+              level: 'info',
+              message: `Resume requested for execution ${executionId}`,
+              isDetailed: false,
+              executionId,
+            },
+          ]
+        },
+      )
+
+      return { previousExecutions, previousLogs }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['logs'] })
+      void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: (_error, _executionId, context) => {
+      if (context?.previousExecutions) {
+        for (const [queryKey, snapshot] of context.previousExecutions) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+      if (context?.previousLogs) {
+        for (const [queryKey, snapshot] of context.previousLogs) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
     },
   })
 }

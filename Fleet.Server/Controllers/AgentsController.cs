@@ -131,6 +131,49 @@ public class AgentsController(
     }
 
     /// <summary>
+    /// Resumes a paused execution in place.
+    /// </summary>
+    [HttpPost("executions/{executionId}/resume")]
+    public async Task<IActionResult> ResumeExecution(string projectId, string executionId)
+    {
+        var status = await orchestrationService.GetExecutionStatusAsync(projectId, executionId);
+        if (status is null)
+            return NotFound();
+
+        if (!string.Equals(status.Status, "paused", StringComparison.OrdinalIgnoreCase))
+            return Conflict("Only paused executions can be resumed.");
+
+        try
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            var resumed = await orchestrationService.ResumeExecutionAsync(projectId, executionId, userId);
+            if (!resumed)
+                return NotFound();
+
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.AgentsUpdated,
+                new { projectId, executionId, status = "running" });
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId });
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId });
+
+            return Accepted(new { executionId, status = "running" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Adds steering guidance for an active execution.
     /// </summary>
     [HttpPost("executions/{executionId}/steer")]
@@ -162,6 +205,9 @@ public class AgentsController(
 
         if (string.Equals(status.Status, "running", StringComparison.OrdinalIgnoreCase))
             return Conflict("Execution is still running and cannot be retried.");
+
+        if (string.Equals(status.Status, "paused", StringComparison.OrdinalIgnoreCase))
+            return Conflict("Paused executions must be resumed instead of retried.");
 
         var userId = await authService.GetCurrentUserIdAsync();
         var newExecutionId = await orchestrationService.RetryExecutionAsync(projectId, executionId, userId);

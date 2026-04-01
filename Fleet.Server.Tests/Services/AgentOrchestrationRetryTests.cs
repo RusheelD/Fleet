@@ -74,4 +74,50 @@ public class AgentOrchestrationRetryTests
             new[] { AgentRole.Manager, AgentRole.Backend },
             outputs.Select(output => output.Role).ToArray());
     }
+
+    [TestMethod]
+    public void BuildResumeCarryForwardOutputs_UsesOnlyRolesStillMarkedCompleted()
+    {
+        var priorPhaseResults = new List<AgentPhaseResult>
+        {
+            new() { Role = "Manager", Success = true, Output = "manager", PhaseOrder = 0 },
+            new() { Role = "Planner", Success = true, Output = "planner", PhaseOrder = 1 },
+            new() { Role = "Backend", Success = true, Output = "backend-before-review-loop", PhaseOrder = 2 },
+        };
+
+        var persistedAgents = new List<AgentInfo>
+        {
+            new() { Role = "Manager", Status = "completed", CurrentTask = "Done", Progress = 1.0 },
+            new() { Role = "Planner", Status = "completed", CurrentTask = "Done", Progress = 1.0 },
+            new() { Role = "Backend", Status = "idle", CurrentTask = "Queued from review PATCH", Progress = 0 },
+        };
+
+        var carryForwardOutputs = AgentOrchestrationService.BuildResumeCarryForwardOutputs(priorPhaseResults, persistedAgents);
+
+        Assert.AreEqual(2, carryForwardOutputs.Count);
+        Assert.IsTrue(carryForwardOutputs.ContainsKey(AgentRole.Manager));
+        Assert.IsTrue(carryForwardOutputs.ContainsKey(AgentRole.Planner));
+        Assert.IsFalse(carryForwardOutputs.ContainsKey(AgentRole.Backend));
+    }
+
+    [TestMethod]
+    public void BuildPipelineFromExecutionAgents_ReconstructsStructuredPipeline()
+    {
+        var persistedAgents = new List<AgentInfo>
+        {
+            new() { Role = "Manager", Status = "completed", CurrentTask = "Done", Progress = 1.0 },
+            new() { Role = "Planner", Status = "completed", CurrentTask = "Done", Progress = 1.0 },
+            new() { Role = "Backend", Status = "running", CurrentTask = "Implementing", Progress = 0.4 },
+            new() { Role = "Testing", Status = "idle", CurrentTask = "Waiting", Progress = 0 },
+            new() { Role = "Review", Status = "idle", CurrentTask = "Waiting", Progress = 0 },
+        };
+
+        var pipeline = AgentOrchestrationService.BuildPipelineFromExecutionAgents(persistedAgents);
+
+        Assert.AreEqual(4, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Testing }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[3]);
+    }
 }

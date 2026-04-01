@@ -73,13 +73,16 @@ public class AgentOrchestrationService(
         string? ReusePullRequestTitle,
         double PriorProgressEstimate,
         IReadOnlyDictionary<AgentRole, string> CarryForwardOutputs,
-        string RetryContextMarkdown)
+        string RetryContextMarkdown,
+        bool ResumeInPlace = false,
+        bool ResumeFromRemoteBranch = true)
     {
         public bool ReuseExistingBranch =>
             !string.IsNullOrWhiteSpace(ReuseBranchName);
 
         public bool ReuseExistingBranchAndPullRequest =>
             ReuseExistingBranch &&
+            ResumeFromRemoteBranch &&
             !string.IsNullOrWhiteSpace(ReusePullRequestUrl) &&
             ReusePullRequestNumber is > 0;
     }
@@ -619,6 +622,229 @@ public class AgentOrchestrationService(
         return await StopExecutionAsync(executionId, "paused");
     }
 
+    public async Task<bool> ResumeExecutionAsync(
+        string projectId,
+        string executionId,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var pausedExecution = await db.AgentExecutions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                e => e.Id == executionId && e.ProjectId == projectId,
+                cancellationToken);
+
+        if (pausedExecution is null)
+            return false;
+
+        if (!string.Equals(pausedExecution.Status, "paused", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only paused executions can be resumed.");
+
+        if (ActiveExecutions.ContainsKey(executionId))
+            throw new InvalidOperationException("Execution is still finishing its pause. Try resuming again in a moment.");
+
+        var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, pausedExecution.WorkItemId)
+            ?? throw new InvalidOperationException(
+                $"Work item #{pausedExecution.WorkItemId} for execution {executionId} could not be found.");
+
+        var childWorkItems = new List<Models.WorkItemDto>();
+        await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
+
+        var project = await db.Projects
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+
+        if (string.IsNullOrWhiteSpace(project.Repo))
+            throw new InvalidOperationException("Project has no linked repository.");
+
+        var userRole = await db.UserProfiles
+            .AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.Role)
+            .FirstOrDefaultAsync(cancellationToken);
+        var normalizedRole = UserRoles.Normalize(userRole);
+        var tierPolicy = TierPolicyCatalog.Get(normalizedRole);
+
+        var activeExecutions = await db.AgentExecutions
+            .AsNoTracking()
+            .CountAsync(
+                e => e.UserId == userId.ToString() &&
+                     e.Status == "running" &&
+                     e.Id != executionId,
+                cancellationToken);
+        if (activeExecutions >= tierPolicy.MaxActiveAgentExecutions)
+        {
+            throw new InvalidOperationException(
+                $"Active execution limit reached for the '{tierPolicy.Tier}' tier ({tierPolicy.MaxActiveAgentExecutions}).");
+        }
+
+        var repoFullName = project.Repo;
+        var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId, repoFullName, cancellationToken);
+        var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
+            accessToken,
+            repoFullName,
+            requestedBranch: null,
+            cancellationToken);
+
+        var branchName = string.IsNullOrWhiteSpace(pausedExecution.BranchName)
+            ? null
+            : pausedExecution.BranchName.Trim();
+        if (string.IsNullOrWhiteSpace(branchName))
+            throw new InvalidOperationException("Paused execution is missing its branch name and cannot be resumed.");
+
+        var pipeline = BuildPipelineFromExecutionAgents(pausedExecution.Agents);
+        if (pipeline.Length == 0)
+        {
+            var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
+            pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
+            logger.LogWarning(
+                "Execution {ExecutionId}: paused execution had no reconstructable agent pipeline; falling back to AI-selected pipeline with {PhaseCount} roles",
+                executionId,
+                pipeline.SelectMany(group => group).Count());
+        }
+
+        var priorPhaseResults = await db.AgentPhaseResults
+            .AsNoTracking()
+            .Where(result => result.ExecutionId == pausedExecution.Id)
+            .OrderBy(result => result.PhaseOrder)
+            .ToListAsync(cancellationToken);
+        var carryForwardOutputs = BuildResumeCarryForwardOutputs(priorPhaseResults, pausedExecution.Agents);
+
+        var client = httpClientFactory.CreateClient("GitHub");
+        var resumeFromRemoteBranch = await BranchExistsAsync(
+            client,
+            accessToken,
+            repoFullName,
+            branchName,
+            cancellationToken);
+
+        var retryPlan = new RetryExecutionPlan(
+            SourceExecutionId: pausedExecution.Id,
+            SourceStatus: pausedExecution.Status,
+            ReuseBranchName: branchName,
+            ReusePullRequestUrl: pausedExecution.PullRequestUrl,
+            ReusePullRequestNumber: TryParsePullRequestNumber(pausedExecution.PullRequestUrl),
+            ReusePullRequestTitle: pausedExecution.PullRequestTitle,
+            PriorProgressEstimate: Math.Clamp(pausedExecution.Progress, 0, 1),
+            CarryForwardOutputs: carryForwardOutputs,
+            RetryContextMarkdown: BuildExecutionResumeContext(pausedExecution, priorPhaseResults),
+            ResumeInPlace: true,
+            ResumeFromRemoteBranch: resumeFromRemoteBranch);
+
+        var totalRoles = pipeline.SelectMany(group => group).Count();
+        var carriedRoleCount = CountCarryForwardRoles(pipeline, carryForwardOutputs);
+        var resumedProgress = Math.Clamp(
+            Math.Max(
+                Math.Clamp(pausedExecution.Progress, 0, 1),
+                totalRoles == 0 ? 0 : (double)carriedRoleCount / totalRoles),
+            0,
+            0.99);
+
+        var trackedExecution = await db.AgentExecutions
+            .FirstOrDefaultAsync(
+                e => e.Id == executionId && e.ProjectId == projectId,
+                cancellationToken);
+        if (trackedExecution is null)
+            return false;
+
+        var cts = new CancellationTokenSource();
+        if (!ActiveExecutions.TryAdd(executionId, (cts, "cancelled")))
+        {
+            cts.Dispose();
+            throw new InvalidOperationException("Execution is already active.");
+        }
+
+        try
+        {
+            trackedExecution.Status = "running";
+            trackedExecution.CompletedAtUtc = null;
+            trackedExecution.CurrentPhase = carriedRoleCount > 0 ? "Resuming prior progress" : "Resuming paused execution";
+            trackedExecution.Progress = resumedProgress;
+            trackedExecution.Agents = BuildAgentInfoList(pipeline, carryForwardOutputs);
+            await db.SaveChangesAsync(cancellationToken);
+
+            await workItemRepository.UpdateAsync(projectId, workItem.WorkItemNumber,
+                new UpdateWorkItemRequest(
+                    Title: null, Description: null, Priority: null, Difficulty: null,
+                    State: "In Progress (AI)", AssignedTo: null, Tags: null, IsAI: null,
+                    ParentWorkItemNumber: null, LevelId: null));
+
+            await WriteLogEntryAsync(
+                db,
+                projectId,
+                "System",
+                "info",
+                $"Execution {executionId} resumed from paused state",
+                executionId: executionId);
+
+            var (commitAuthorName, commitAuthorEmail) = ResolveCommitAuthor(
+                project.CommitAuthorMode,
+                project.CommitAuthorName,
+                project.CommitAuthorEmail);
+
+            SteeringNotes.TryAdd(executionId, new ConcurrentQueue<string>());
+            _ = Task.Run(() => RunPipelineAsync(
+                executionId,
+                projectId,
+                workItem,
+                childWorkItems,
+                repoFullName,
+                branchName,
+                commitAuthorName,
+                commitAuthorEmail,
+                userId,
+                ModelKeys.Haiku,
+                pipeline,
+                tierPolicy.MaxConcurrentAgentsPerTask,
+                pullRequestTargetBranch,
+                retryPlan,
+                retryPlan.ReusePullRequestNumber ?? 0,
+                cts.Token), CancellationToken.None);
+
+            return true;
+        }
+        catch
+        {
+            if (ActiveExecutions.TryRemove(executionId, out var activeExecution))
+                activeExecution.Cts.Dispose();
+
+            SteeringNotes.TryRemove(executionId, out _);
+            try
+            {
+                var executionToRestore = await db.AgentExecutions
+                    .FirstOrDefaultAsync(
+                        e => e.Id == executionId && e.ProjectId == projectId,
+                        CancellationToken.None);
+                if (executionToRestore is not null)
+                {
+                    executionToRestore.Status = "paused";
+                    executionToRestore.CurrentPhase = pausedExecution.CurrentPhase ?? "Paused";
+                    executionToRestore.Progress = pausedExecution.Progress;
+                    executionToRestore.CompletedAtUtc = pausedExecution.CompletedAtUtc;
+                    executionToRestore.Agents = pausedExecution.Agents
+                        .Select(agent => new AgentInfo
+                        {
+                            Role = agent.Role,
+                            Status = agent.Status,
+                            CurrentTask = agent.CurrentTask,
+                            Progress = agent.Progress,
+                        })
+                        .ToList();
+                    await db.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception restoreEx)
+            {
+                logger.LogWarning(
+                    restoreEx,
+                    "Execution {ExecutionId}: failed to restore paused state after resume setup error",
+                    executionId);
+            }
+            throw;
+        }
+    }
+
     public async Task<AgentExecutionDeletionResult?> DeleteExecutionAsync(
         string projectId,
         string executionId,
@@ -706,6 +932,27 @@ public class AgentOrchestrationService(
         var reuseBranchName = string.IsNullOrWhiteSpace(priorExecution.BranchName)
             ? null
             : priorExecution.BranchName.Trim();
+        var resumeFromRemoteBranch = false;
+        if (!string.IsNullOrWhiteSpace(reuseBranchName))
+        {
+            var projectRepo = await db.Projects
+                .AsNoTracking()
+                .Where(project => project.Id == projectId)
+                .Select(project => project.Repo)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(projectRepo))
+            {
+                var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId, projectRepo, cancellationToken);
+                var client = httpClientFactory.CreateClient("GitHub");
+                resumeFromRemoteBranch = await BranchExistsAsync(
+                    client,
+                    accessToken,
+                    projectRepo,
+                    reuseBranchName,
+                    cancellationToken);
+            }
+        }
         var shouldReuseExistingPullRequest =
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
 
@@ -720,7 +967,8 @@ public class AgentOrchestrationService(
             ReusePullRequestTitle: shouldReuseExistingPullRequest ? priorExecution.PullRequestTitle : null,
             PriorProgressEstimate: priorProgress,
             CarryForwardOutputs: carryForwardOutputs,
-            RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults));
+            RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults),
+            ResumeFromRemoteBranch: resumeFromRemoteBranch);
 
         return await StartExecutionInternalAsync(
             projectId,
@@ -854,7 +1102,7 @@ public class AgentOrchestrationService(
                 branchName,
                 externalCancellation,
                 baseBranch: pullRequestTargetBranch,
-                resumeFromBranch: retryPlan?.ReuseExistingBranch == true);
+                resumeFromBranch: retryPlan?.ResumeFromRemoteBranch == true);
 
             var toolContext = new AgentToolContext(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
@@ -958,7 +1206,9 @@ public class AgentOrchestrationService(
                 if (carriedRoles.Count > 0)
                 {
                     var carriedRoleLabel = reviewLoopCount == 0
-                        ? "retry context"
+                        ? retryPlan?.ResumeInPlace == true
+                            ? "paused execution context"
+                            : "retry context"
                         : $"review remediation cycle {reviewLoopCount}";
                     await WriteLogEntryAsync(
                         scopedDb,
@@ -1751,6 +2001,64 @@ public class AgentOrchestrationService(
             .ToDictionary(entry => entry.Key, entry => entry.Value.Output);
     }
 
+    internal static IReadOnlyDictionary<AgentRole, string> BuildResumeCarryForwardOutputs(
+        IReadOnlyList<AgentPhaseResult> priorPhaseResults,
+        IReadOnlyList<AgentInfo> persistedAgents)
+    {
+        var completedRoles = persistedAgents
+            .Where(agent => string.Equals(agent.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            .Select(agent => Enum.TryParse<AgentRole>(agent.Role, ignoreCase: true, out var role) ? role : (AgentRole?)null)
+            .Where(role => role.HasValue)
+            .Select(role => role!.Value)
+            .ToHashSet();
+
+        if (completedRoles.Count == 0)
+            return new Dictionary<AgentRole, string>();
+
+        var carriedOutputs = new Dictionary<AgentRole, (int PhaseOrder, string Output)>();
+        foreach (var phase in priorPhaseResults
+                     .Where(phase => phase.Success)
+                     .OrderBy(phase => phase.PhaseOrder))
+        {
+            if (!Enum.TryParse<AgentRole>(phase.Role, ignoreCase: true, out var role))
+                continue;
+
+            if (!completedRoles.Contains(role))
+                continue;
+
+            carriedOutputs[role] = (phase.PhaseOrder, PrepareCarryForwardOutput(phase.Output));
+        }
+
+        return carriedOutputs
+            .OrderBy(entry => entry.Value.PhaseOrder)
+            .ToDictionary(entry => entry.Key, entry => entry.Value.Output);
+    }
+
+    internal static AgentRole[][] BuildPipelineFromExecutionAgents(IReadOnlyList<AgentInfo> persistedAgents)
+    {
+        var requestedRoles = persistedAgents
+            .Select(agent => Enum.TryParse<AgentRole>(agent.Role, ignoreCase: true, out var role) ? role : (AgentRole?)null)
+            .Where(role => role.HasValue)
+            .Select(role => role!.Value)
+            .ToHashSet();
+
+        if (requestedRoles.Count == 0)
+            return [];
+
+        var reconstructed = FullPipeline
+            .Select(group => group.Where(requestedRoles.Contains).ToArray())
+            .Where(group => group.Length > 0)
+            .ToArray();
+
+        return reconstructed.Length > 0
+            ? reconstructed
+            : persistedAgents
+                .Select(agent => Enum.TryParse<AgentRole>(agent.Role, ignoreCase: true, out var role) ? new[] { role } : null)
+                .Where(group => group is not null)
+                .Select(group => group!)
+                .ToArray();
+    }
+
     internal static List<(AgentRole Role, string Output)> BuildCarryForwardPhaseOutputs(
         AgentRole[][] pipeline,
         IReadOnlyDictionary<AgentRole, string>? carryForwardOutputs)
@@ -1923,6 +2231,48 @@ public class AgentOrchestrationService(
         sb.AppendLine();
         sb.AppendLine("Continue from the current repository state on the reused branch.");
         sb.AppendLine("Do not restart completed work; focus on remaining failures and unfinished parts.");
+        return sb.ToString();
+    }
+
+    internal static string BuildExecutionResumeContext(
+        AgentExecution pausedExecution,
+        IReadOnlyList<AgentPhaseResult> priorPhaseResults)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Paused Execution Context");
+        sb.AppendLine($"- Execution id: {pausedExecution.Id}");
+        sb.AppendLine($"- Last known status: {pausedExecution.Status}");
+        sb.AppendLine($"- Last recorded completion: {(int)Math.Round(Math.Clamp(pausedExecution.Progress, 0, 1) * 100)}%");
+        if (!string.IsNullOrWhiteSpace(pausedExecution.CurrentPhase))
+            sb.AppendLine($"- Paused while: {pausedExecution.CurrentPhase}");
+        if (!string.IsNullOrWhiteSpace(pausedExecution.BranchName))
+            sb.AppendLine($"- Branch: {pausedExecution.BranchName}");
+        if (!string.IsNullOrWhiteSpace(pausedExecution.PullRequestUrl))
+            sb.AppendLine($"- Existing PR: {pausedExecution.PullRequestUrl}");
+        sb.AppendLine();
+
+        if (priorPhaseResults.Count > 0)
+        {
+            sb.AppendLine("### Previously recorded phase outcomes");
+            foreach (var phase in priorPhaseResults.OrderBy(result => result.PhaseOrder))
+            {
+                var status = phase.Success ? "completed" : "failed";
+                sb.Append($"- {phase.Role}: {status}, tool calls={phase.ToolCallCount}");
+                if (!phase.Success && !string.IsNullOrWhiteSpace(phase.Error))
+                    sb.Append($", error={NormalizeAgentFailureMessage(phase.Error)}");
+
+                sb.AppendLine();
+            }
+        }
+        else
+        {
+            sb.AppendLine("### Previously recorded phase outcomes");
+            sb.AppendLine("- No completed phase outputs were recorded before the pause.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Continue this paused execution from the current repository state.");
+        sb.AppendLine("Preserve completed work and finish only the remaining phases.");
         return sb.ToString();
     }
 

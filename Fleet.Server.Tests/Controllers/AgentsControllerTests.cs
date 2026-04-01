@@ -148,6 +148,33 @@ public class AgentsControllerTests
     }
 
     [TestMethod]
+    public async Task ResumeExecution_WhenPaused_ReturnsAccepted()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionStatus("exec-1", "paused", "Paused", 0.5, "fleet/1-test", null, null));
+        _orchestrationService
+            .Setup(s => s.ResumeExecutionAsync(ProjectId, "exec-1", UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _sut.ResumeExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+    }
+
+    [TestMethod]
+    public async Task ResumeExecution_WhenNotPaused_ReturnsConflict()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionStatus("exec-1", "failed", "Done", 1.0, null, null, null));
+
+        var result = await _sut.ResumeExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<ConflictObjectResult>(result);
+    }
+
+    [TestMethod]
     public async Task RetryExecution_WhenStopped_ReturnsAccepted()
     {
         _orchestrationService
@@ -168,6 +195,18 @@ public class AgentsControllerTests
         _orchestrationService
             .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentExecutionStatus("exec-1", "running", "Backend", 0.5, null, null, null));
+
+        var result = await _sut.RetryExecution(ProjectId, "exec-1");
+
+        Assert.IsInstanceOfType<ConflictObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task RetryExecution_WhenPaused_ReturnsConflict()
+    {
+        _orchestrationService
+            .Setup(s => s.GetExecutionStatusAsync(ProjectId, "exec-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentExecutionStatus("exec-1", "paused", "Paused", 0.5, null, null, null));
 
         var result = await _sut.RetryExecution(ProjectId, "exec-1");
 

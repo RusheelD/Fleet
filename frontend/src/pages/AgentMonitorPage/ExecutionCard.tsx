@@ -33,6 +33,9 @@ import type { AgentExecution, AgentInfo } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 
+type ExecutionStepStatus = AgentInfo['status'] | 'paused'
+type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
+
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'informative' | 'subtle'> = {
     running: 'warning',
     completed: 'success',
@@ -176,31 +179,55 @@ const useStyles = makeStyles({
     },
     agentStep: {
         display: 'grid',
-        gridTemplateColumns: '20px 1fr auto',
+        gridTemplateColumns: '28px 1fr auto',
         gap: tokens.spacingHorizontalS,
         alignItems: 'start',
         paddingTop: tokens.spacingVerticalXS,
         paddingBottom: tokens.spacingVerticalXS,
     },
     agentStepCompact: {
-        gridTemplateColumns: '16px 1fr auto',
+        gridTemplateColumns: '24px 1fr auto',
         gap: tokens.spacingHorizontalXS,
         paddingTop: '2px',
         paddingBottom: '2px',
     },
     stepGutter: {
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '0px',
         position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        alignSelf: 'stretch',
+        width: '28px',
+        minHeight: '100%',
+    },
+    stepGutterCompact: {
+        width: '24px',
+    },
+    stepIconShell: {
+        width: '24px',
+        height: '24px',
+        borderRadius: tokens.borderRadiusCircular,
+        backgroundColor: tokens.colorNeutralBackground1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        zIndex: 1,
+        boxShadow: `0 0 0 4px ${tokens.colorNeutralBackground1}`,
+    },
+    stepIconShellCompact: {
+        width: '20px',
+        height: '20px',
+        boxShadow: `0 0 0 3px ${tokens.colorNeutralBackground1}`,
     },
     stepIcon: {
         fontSize: '16px',
-        zIndex: 1,
     },
     stepIconCompleted: {
         color: tokens.colorPaletteGreenForeground1,
+    },
+    stepIconPaused: {
+        color: tokens.colorBrandForeground1,
     },
     stepIconFailed: {
         color: tokens.colorPaletteRedForeground1,
@@ -211,15 +238,33 @@ const useStyles = makeStyles({
     stepIconIdle: {
         color: tokens.colorNeutralForeground4,
     },
-    connector: {
-        width: '2px',
-        flex: 1,
-        minHeight: '8px',
+    connectorSegment: {
+        position: 'absolute',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: '3px',
+        borderRadius: tokens.borderRadiusCircular,
         backgroundColor: tokens.colorNeutralStroke2,
-        marginTop: '2px',
+    },
+    connectorTop: {
+        top: 0,
+        bottom: '50%',
+    },
+    connectorBottom: {
+        top: '50%',
+        bottom: 0,
     },
     connectorCompleted: {
-        backgroundColor: tokens.colorPaletteGreenBorder1,
+        backgroundColor: tokens.colorPaletteGreenForeground1,
+    },
+    connectorRunning: {
+        backgroundColor: tokens.colorPaletteMarigoldForeground1,
+    },
+    connectorPaused: {
+        backgroundColor: tokens.colorBrandForeground1,
+    },
+    connectorFailed: {
+        backgroundColor: tokens.colorPaletteRedForeground1,
     },
     stepBody: {
         display: 'flex',
@@ -303,29 +348,60 @@ interface ExecutionCardProps {
     execution: AgentExecution
     onPause?: (executionId: string) => void
     onCancel?: (executionId: string) => void
+    onResume?: (executionId: string) => void
     onRetry?: (executionId: string) => void
     onDelete?: (executionId: string) => void
     onViewDocs?: (executionId: string) => void
 }
 
-function AgentStepIcon({ status }: { status: AgentInfo['status'] }) {
+function AgentStepIcon({ status, isCompact }: { status: ExecutionStepStatus; isCompact: boolean }) {
     const styles = useStyles()
+    const shellClassName = mergeClasses(
+        styles.stepIconShell,
+        isCompact && styles.stepIconShellCompact,
+    )
 
     switch (status) {
         case 'completed':
-            return <CheckmarkCircleFilled className={`${styles.stepIcon} ${styles.stepIconCompleted}`} />
+            return (
+                <div className={shellClassName}>
+                    <CheckmarkCircleFilled className={mergeClasses(styles.stepIcon, styles.stepIconCompleted)} />
+                </div>
+            )
         case 'running':
-            return <Spinner size="extra-tiny" />
+            return (
+                <div className={shellClassName}>
+                    <Spinner size="extra-tiny" />
+                </div>
+            )
+        case 'paused':
+            return (
+                <div className={shellClassName}>
+                    <PauseRegular className={mergeClasses(styles.stepIcon, styles.stepIconPaused)} />
+                </div>
+            )
         case 'failed':
-            return <DismissCircleFilled className={`${styles.stepIcon} ${styles.stepIconFailed}`} />
+            return (
+                <div className={shellClassName}>
+                    <DismissCircleFilled className={mergeClasses(styles.stepIcon, styles.stepIconFailed)} />
+                </div>
+            )
         case 'cancelled':
-            return <DismissCircleFilled className={`${styles.stepIcon} ${styles.stepIconCancelled}`} />
+            return (
+                <div className={shellClassName}>
+                    <StopRegular className={mergeClasses(styles.stepIcon, styles.stepIconCancelled)} />
+                </div>
+            )
         default:
-            return <CircleRegular className={`${styles.stepIcon} ${styles.stepIconIdle}`} />
+            return (
+                <div className={shellClassName}>
+                    <CircleRegular className={mergeClasses(styles.stepIcon, styles.stepIconIdle)} />
+                </div>
+            )
     }
 }
 
-export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete, onViewDocs }: ExecutionCardProps) {
+export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -360,13 +436,22 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
         }
     }
 
-    const handleRetry = (mode: 'retry' | 'resume') => {
+    const handleResume = () => {
+        if (onResume) {
+            onResume(execution.id)
+            return
+        }
+
+        notify('Resume is unavailable for this execution', 'error')
+    }
+
+    const handleRetry = () => {
         if (onRetry) {
             onRetry(execution.id)
             return
         }
 
-        notify(`${mode === 'resume' ? 'Resume' : 'Retry'} is unavailable for this execution`, 'error')
+        notify('Retry is unavailable for this execution', 'error')
     }
 
     const reviewLoopCount = execution.reviewLoopCount ?? 0
@@ -384,16 +469,44 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
             ? `Self-corrected x${reviewLoopCount}`
             : null
 
-    const agents = (
-        execution.status === 'failed' || execution.status === 'cancelled'
-            ? execution.agents.map((agent) => ({
+    const terminalExecutionStatus = execution.status === 'failed' || execution.status === 'cancelled' || execution.status === 'paused'
+        ? execution.status
+        : null
+
+    const agents: DisplayAgentInfo[] = execution.agents.map((agent) => {
+        if (terminalExecutionStatus === null || agent.status === 'completed')
+            return { ...agent }
+
+        if (terminalExecutionStatus === 'paused') {
+            return {
                 ...agent,
-                status: execution.status,
-                currentTask: execution.status === 'failed' ? 'Failed' : 'Cancelled',
-                progress: 0,
-            }))
-            : execution.agents
-    ) as AgentInfo[]
+                status: 'paused',
+                currentTask: 'Paused',
+            }
+        }
+
+        return {
+            ...agent,
+            status: terminalExecutionStatus,
+            currentTask: terminalExecutionStatus === 'failed' ? 'Failed' : 'Cancelled',
+            progress: 0,
+        }
+    })
+
+    const getConnectorToneClass = (status: ExecutionStepStatus) => {
+        switch (status) {
+            case 'completed':
+                return styles.connectorCompleted
+            case 'running':
+                return styles.connectorRunning
+            case 'paused':
+                return styles.connectorPaused
+            case 'failed':
+                return styles.connectorFailed
+            default:
+                return undefined
+        }
+    }
 
     return (
         <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile)}>
@@ -474,17 +587,33 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
 
             <div className={styles.pipeline}>
                 {agents.map((agent, i) => {
+                    const isFirst = i === 0
                     const isLast = i === agents.length - 1
                     const isRunning = agent.status === 'running'
-                    const isCompleted = agent.status === 'completed'
+                    const previousStatus = isFirst ? null : agents[i - 1].status
 
                     return (
                         <div key={agent.role} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
-                            <div className={styles.stepGutter}>
-                                <AgentStepIcon status={agent.status} />
-                                {!isLast && (
-                                    <div className={`${styles.connector} ${isCompleted ? styles.connectorCompleted : ''}`} />
+                            <div className={mergeClasses(styles.stepGutter, isCompact && styles.stepGutterCompact)}>
+                                {!isFirst && (
+                                    <div
+                                        className={mergeClasses(
+                                            styles.connectorSegment,
+                                            styles.connectorTop,
+                                            previousStatus ? getConnectorToneClass(previousStatus) : undefined,
+                                        )}
+                                    />
                                 )}
+                                {!isLast && (
+                                    <div
+                                        className={mergeClasses(
+                                            styles.connectorSegment,
+                                            styles.connectorBottom,
+                                            getConnectorToneClass(agent.status),
+                                        )}
+                                    />
+                                )}
+                                <AgentStepIcon status={agent.status} isCompact={isCompact} />
                             </div>
 
                             <div className={styles.stepBody}>
@@ -533,7 +662,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                             appearance="primary"
                             size="small"
                             icon={<ArrowClockwiseRegular />}
-                            onClick={() => handleRetry('resume')}
+                            onClick={handleResume}
                             className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                         >
                             Resume
@@ -544,7 +673,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                             appearance="primary"
                             size="small"
                             icon={<ArrowClockwiseRegular />}
-                            onClick={() => handleRetry('retry')}
+                            onClick={handleRetry}
                             className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                         >
                             Retry

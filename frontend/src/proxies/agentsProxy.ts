@@ -48,6 +48,10 @@ export function pauseExecution(projectId: string, executionId: string): Promise<
   return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/pause`, {})
 }
 
+export function resumeExecution(projectId: string, executionId: string): Promise<{ executionId: string; status: string }> {
+  return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/resume`, {})
+}
+
 export function steerExecution(projectId: string, executionId: string, note: string): Promise<{ executionId: string; status: string }> {
   return post<{ executionId: string; status: string }>(`/api/projects/${projectId}/agents/executions/${executionId}/steer`, { note })
 }

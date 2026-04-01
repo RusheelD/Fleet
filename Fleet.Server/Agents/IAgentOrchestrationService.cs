@@ -51,6 +51,11 @@ public interface IAgentOrchestrationService
     Task<bool> PauseExecutionAsync(string projectId, string executionId);
 
     /// <summary>
+    /// Resumes a paused execution in place using the same execution id, branch, and PR when available.
+    /// </summary>
+    Task<bool> ResumeExecutionAsync(string projectId, string executionId, int userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Adds a steering note for an in-flight execution.
     /// </summary>
     Task<bool> SteerExecutionAsync(string projectId, string executionId, string note);

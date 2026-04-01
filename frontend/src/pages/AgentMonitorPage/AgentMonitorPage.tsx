@@ -28,7 +28,7 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
-import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
+import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 
@@ -165,6 +165,7 @@ export function AgentMonitorPage() {
     const startExecution = useStartExecution(projectId)
     const cancelExecution = useCancelExecution(projectId)
     const pauseExecution = usePauseExecution(projectId)
+    const resumeExecution = useResumeExecution(projectId)
     const retryExecution = useRetryExecution(projectId)
     const fetchExecutionDocumentation = useExecutionDocumentation(projectId)
     const clearLogs = useClearLogs(projectId)
@@ -263,14 +264,31 @@ export function AgentMonitorPage() {
         })
     }
 
-    const handleRetry = (executionId: string) => {
-        const execution = allExecutions.find((item) => item.id === executionId)
-        const action = execution?.status === 'paused' ? 'resume' : 'retry'
+    const handleResume = (executionId: string) => {
+        resumeExecution.mutate(executionId, {
+            onSuccess: () => {
+                dispatchToast(
+                    <Toast><ToastTitle>Execution resumed</ToastTitle></Toast>,
+                    { intent: 'success' },
+                )
+                setTab('active')
+                void refetchExec()
+                void refetchLogs()
+            },
+            onError: (error) => {
+                dispatchToast(
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to resume execution.')}</ToastTitle></Toast>,
+                    { intent: 'error' },
+                )
+            },
+        })
+    }
 
+    const handleRetry = (executionId: string) => {
         retryExecution.mutate(executionId, {
             onSuccess: (result) => {
                 dispatchToast(
-                    <Toast><ToastTitle>Execution {action === 'resume' ? 'resumed' : 'retried'} (new ID: {result.executionId})</ToastTitle></Toast>,
+                    <Toast><ToastTitle>Execution retried (new ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
                 void refetchExec()
@@ -278,7 +296,7 @@ export function AgentMonitorPage() {
             },
             onError: (error) => {
                 dispatchToast(
-                    <Toast><ToastTitle>{getApiErrorMessage(error, `Failed to ${action} execution.`)}</ToastTitle></Toast>,
+                    <Toast><ToastTitle>{getApiErrorMessage(error, 'Failed to retry execution.')}</ToastTitle></Toast>,
                     { intent: 'error' },
                 )
             },
@@ -508,6 +526,7 @@ export function AgentMonitorPage() {
                                 execution={execution}
                                 onPause={handlePause}
                                 onCancel={handleCancel}
+                                onResume={handleResume}
                                 onRetry={handleRetry}
                                 onDelete={handleDelete}
                                 onViewDocs={handleViewDocs}
