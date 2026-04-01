@@ -163,6 +163,7 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: tokens.spacingHorizontalXXS,
         flexShrink: 0,
+        flexWrap: 'wrap',
     },
     executionActionsMobile: {
         width: '100%',
@@ -447,33 +448,43 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                     {execution.status === 'failed' && (
                         <>
                             <Button
-                                appearance="subtle"
+                                appearance="outline"
                                 size="small"
                                 icon={<ArrowClockwiseRegular />}
                                 aria-label="Retry"
                                 onClick={() => handleRetry('retry')}
-                            />
+                            >
+                                Retry
+                            </Button>
                             {onDelete && (
-                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
+                                    Delete
+                                </Button>
                             )}
                         </>
                     )}
                     {execution.status === 'paused' && (
                         <>
                             <Button
-                                appearance="subtle"
+                                appearance="outline"
                                 size="small"
                                 icon={<ArrowClockwiseRegular />}
                                 aria-label="Resume"
                                 onClick={() => handleRetry('resume')}
-                            />
+                            >
+                                Resume
+                            </Button>
                             {onDelete && (
-                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
+                                    Delete
+                                </Button>
                             )}
                         </>
                     )}
                     {canDeleteExecution && execution.status !== 'running' && execution.status !== 'failed' && execution.status !== 'paused' && onDelete && (
-                        <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
+                        <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
+                            Delete
+                        </Button>
                     )}
                 </div>
             </div>
