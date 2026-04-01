@@ -279,6 +279,11 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalS,
         flexWrap: 'wrap',
     },
+    runActions: {
+        display: 'flex',
+        gap: tokens.spacingHorizontalS,
+        flexWrap: 'wrap',
+    },
     completedActionsCompact: {
         gap: tokens.spacingHorizontalXS,
     },
@@ -445,46 +450,8 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                             )}
                         </>
                     )}
-                    {execution.status === 'failed' && (
-                        <>
-                            <Button
-                                appearance="outline"
-                                size="small"
-                                icon={<ArrowClockwiseRegular />}
-                                aria-label="Retry"
-                                onClick={() => handleRetry('retry')}
-                            >
-                                Retry
-                            </Button>
-                            {onDelete && (
-                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
-                                    Delete
-                                </Button>
-                            )}
-                        </>
-                    )}
-                    {execution.status === 'paused' && (
-                        <>
-                            <Button
-                                appearance="outline"
-                                size="small"
-                                icon={<ArrowClockwiseRegular />}
-                                aria-label="Resume"
-                                onClick={() => handleRetry('resume')}
-                            >
-                                Resume
-                            </Button>
-                            {onDelete && (
-                                <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
-                                    Delete
-                                </Button>
-                            )}
-                        </>
-                    )}
-                    {canDeleteExecution && execution.status !== 'running' && execution.status !== 'failed' && execution.status !== 'paused' && onDelete && (
-                        <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete}>
-                            Delete
-                        </Button>
+                    {execution.status !== 'running' && execution.status !== 'failed' && execution.status !== 'paused' && canDeleteExecution && onDelete && (
+                        <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
                     )}
                 </div>
             </div>
@@ -558,6 +525,44 @@ export function ExecutionCard({ execution, onPause, onCancel, onRetry, onDelete,
                     )
                 })}
             </div>
+
+            {(execution.status === 'paused' || execution.status === 'failed') && (
+                <div className={mergeClasses(styles.runActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
+                    {execution.status === 'paused' && (
+                        <Button
+                            appearance="primary"
+                            size="small"
+                            icon={<ArrowClockwiseRegular />}
+                            onClick={() => handleRetry('resume')}
+                            className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
+                        >
+                            Resume
+                        </Button>
+                    )}
+                    {execution.status === 'failed' && (
+                        <Button
+                            appearance="primary"
+                            size="small"
+                            icon={<ArrowClockwiseRegular />}
+                            onClick={() => handleRetry('retry')}
+                            className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
+                        >
+                            Retry
+                        </Button>
+                    )}
+                    {onDelete && (
+                        <Button
+                            appearance="outline"
+                            size="small"
+                            icon={<DeleteRegular />}
+                            onClick={handleDelete}
+                            className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
+                        >
+                            Delete
+                        </Button>
+                    )}
+                </div>
+            )}
 
             {execution.status === 'completed' && (
                 <div className={mergeClasses(styles.completedActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
