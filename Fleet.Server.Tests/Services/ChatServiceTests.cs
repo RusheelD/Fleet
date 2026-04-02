@@ -5,6 +5,7 @@ using Fleet.Server.LLM;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -48,6 +49,7 @@ public class ChatServiceTests
             TimeoutSeconds = 30,
             GenerateTimeoutSeconds = 60,
             GenerateMaxToolLoops = 10,
+            GenerateMaxToolCallsTotal = 20,
             MaxToolOutputLength = 8000
         });
 
@@ -463,6 +465,58 @@ public class ChatServiceTests
         _usageLedgerService.Verify(s => s.RefundRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateModeContinuesAfterRequestCancellation_WhenBackgroundExecutionEnabled()
+    {
+        var backgroundSut = CreateBackgroundCapableChatService();
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Generated work items", "now");
+        var assistantPersisted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items"))
+            .ReturnsAsync(assistantMsg)
+            .Callback(() => assistantPersisted.TrySetResult());
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Backlog draft", null),
+            new LLMResponse("Generated work items", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        using var requestCts = new CancellationTokenSource();
+        var response = await backgroundSut.SendMessageAsync(
+            ProjectId,
+            SessionId,
+            "Build auth",
+            generateWorkItems: true,
+            cancellationToken: requestCts.Token);
+
+        requestCts.Cancel();
+
+        Assert.IsTrue(response.IsDeferred);
+        Assert.IsNull(response.AssistantMessage);
+        await assistantPersisted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        _chatRepo.Verify(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items"), Times.Once);
+        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true), Times.Once);
+        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.Once);
+    }
+
     // ── Attachment methods ───────────────────────────────────
 
     [TestMethod]
@@ -640,6 +694,35 @@ public class ChatServiceTests
             ExecuteCount++;
             return Task.FromResult(result);
         }
+    }
+
+    private ChatService CreateBackgroundCapableChatService(ChatToolRegistry? toolRegistry = null)
+    {
+        var registry = toolRegistry ?? _toolRegistry;
+        var services = new ServiceCollection();
+        services.AddScoped<ChatService>();
+        services.AddScoped<IChatSessionRepository>(_ => _chatRepo.Object);
+        services.AddScoped<ILLMClient>(_ => _llmClient.Object);
+        services.AddScoped(_ => registry);
+        services.AddScoped<IAuthService>(_ => _authService.Object);
+        services.AddScoped<IOptions<LLMOptions>>(_ => _llmOptions);
+        services.AddScoped<ILogger<ChatService>>(_ => _logger.Object);
+        services.AddScoped<IUsageLedgerService>(_ => _usageLedgerService.Object);
+        services.AddScoped<IServerEventPublisher>(_ => _eventPublisher.Object);
+
+        var provider = services.BuildServiceProvider();
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+        return new ChatService(
+            _chatRepo.Object,
+            _llmClient.Object,
+            registry,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            scopeFactory);
     }
 }
 

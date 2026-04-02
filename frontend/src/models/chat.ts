@@ -29,9 +29,10 @@ export interface ToolEvent {
 
 export interface SendMessageResponse {
   sessionId: string
-  assistantMessage: ChatMessageData
+  assistantMessage: ChatMessageData | null
   toolEvents: ToolEvent[]
   error: string | null
+  isDeferred: boolean
 }
 
 export interface ChatAttachment {

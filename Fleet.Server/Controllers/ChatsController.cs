@@ -102,6 +102,11 @@ public class ChatsController(
         }
 
         var userId = await authService.GetCurrentUserIdAsync();
+        if (response.IsDeferred)
+        {
+            return Accepted(response);
+        }
+
         await eventPublisher.PublishProjectEventAsync(
             userId,
             projectId,

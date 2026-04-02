@@ -299,9 +299,11 @@ export function ChatDrawer({
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
-                setIsThinking(false)
-                setIsGenerating(false)
-                if (generateWorkItems) {
+                if (!response.isDeferred) {
+                    setIsThinking(false)
+                    setIsGenerating(false)
+                }
+                if (generateWorkItems && !response.isDeferred) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
                 }
             })

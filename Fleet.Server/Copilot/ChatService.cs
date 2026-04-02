@@ -5,6 +5,7 @@ using Fleet.Server.Logging;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Text;
@@ -19,10 +20,12 @@ public class ChatService(
     IOptions<LLMOptions> llmOptions,
     ILogger<ChatService> logger,
     IUsageLedgerService? usageLedgerService = null,
-    IServerEventPublisher? eventPublisher = null) : IChatService
+    IServerEventPublisher? eventPublisher = null,
+    IServiceScopeFactory? serviceScopeFactory = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
+    private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
 
     private static readonly Lazy<string> SystemPromptLazy = new(() =>
@@ -132,9 +135,31 @@ public class ChatService(
             throw new InvalidOperationException("Work-item generation is only available in project-scoped chat sessions.");
 
         logger.CopilotMessageSending(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging(), generateWorkItems);
+
+        if (generateWorkItems && _serviceScopeFactory is not null)
+            return await StartDeferredGenerateWorkItemsAsync(projectId, sessionId, content);
+
+        if (generateWorkItems && _serviceScopeFactory is null)
+        {
+            logger.LogWarning(
+                "No IServiceScopeFactory available for deferred work-item generation. Falling back to inline execution for session {SessionId}.",
+                sessionId.SanitizeForLogging());
+        }
+
+        return await SendMessageInlineAsync(projectId, sessionId, content, generateWorkItems, cancellationToken);
+    }
+
+    private async Task<SendMessageResponseDto> SendMessageInlineAsync(
+        string projectId,
+        string sessionId,
+        string content,
+        bool generateWorkItems = false,
+        CancellationToken cancellationToken = default)
+    {
         var config = llmOptions.Value;
         var timeoutSeconds = generateWorkItems ? config.GenerateTimeoutSeconds : config.TimeoutSeconds;
         var maxLoops = generateWorkItems ? config.GenerateMaxToolLoops : config.MaxToolLoops;
+        var maxToolCallsTotal = generateWorkItems ? config.GenerateMaxToolCallsTotal : config.MaxToolCallsTotal;
         var requestKey = BuildSessionRequestKey(projectId, sessionId);
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var sessionCts = RegisterInFlightRequest(requestKey);
@@ -147,8 +172,7 @@ public class ChatService(
         try
         {
             // 1. Persist the user message and claim any pending attachments for it.
-            var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
-            await chatSessionRepository.AssignPendingAttachmentsToMessageAsync(projectId, sessionId, userMessage.Id);
+            await PersistUserMessageAsync(projectId, sessionId, content);
 
             // 1a. Mark session as generating so the UI shows a spinner on refresh
             if (generateWorkItems)
@@ -213,7 +237,7 @@ public class ChatService(
                 }
                 catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
                 {
-                    await HandleCanceledRequestAsync(projectId, sessionId, generateWorkItems, chargedWorkItemRun, userId);
+                    await HandleCanceledRequestAsync(projectId, sessionId, generateWorkItems, chargedWorkItemRun, userId, requestKey, sessionCts);
                     throw;
                 }
                 catch (OperationCanceledException)
@@ -266,9 +290,9 @@ public class ChatService(
                         if (toolDef is null || !toolDef.IsWriteTool)
                         {
                             totalToolCalls++;
-                            if (totalToolCalls > config.MaxToolCallsTotal)
+                            if (totalToolCalls > maxToolCallsTotal)
                             {
-                                logger.CopilotMaxToolCallsExceeded(config.MaxToolCallsTotal);
+                                logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
                                 break;
                             }
                         }
@@ -289,7 +313,7 @@ public class ChatService(
                         await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
                     }
 
-                    if (totalToolCalls > config.MaxToolCallsTotal)
+                    if (totalToolCalls > maxToolCallsTotal)
                         break;
 
                     // Continue the loop so the LLM can process results
@@ -324,6 +348,300 @@ public class ChatService(
         }
     }
 
+    private async Task<SendMessageResponseDto> StartDeferredGenerateWorkItemsAsync(
+        string projectId,
+        string sessionId,
+        string content)
+    {
+        var requestKey = BuildSessionRequestKey(projectId, sessionId);
+        CancellationTokenSource? sessionCts = null;
+        var userId = 0;
+        var chargedWorkItemRun = false;
+
+        try
+        {
+            userId = await authService.GetCurrentUserIdAsync();
+            sessionCts = RegisterInFlightRequest(requestKey);
+            await PersistUserMessageAsync(projectId, sessionId, content);
+            await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, true);
+            await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
+            chargedWorkItemRun = true;
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
+
+            var backgroundSessionCts = sessionCts!;
+            _ = Task.Run(
+                () => RunGenerateWorkItemsInBackgroundAsync(
+                    projectId,
+                    sessionId,
+                    userId,
+                    requestKey,
+                    backgroundSessionCts,
+                    chargedWorkItemRun),
+                CancellationToken.None);
+
+            return new SendMessageResponseDto(sessionId, null, [], null, true);
+        }
+        catch
+        {
+            if (sessionCts is not null)
+                ReleaseInFlightRequest(requestKey, sessionCts);
+
+            await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+            if (userId != 0)
+            {
+                await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task RunGenerateWorkItemsInBackgroundAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        string requestKey,
+        CancellationTokenSource sessionCts,
+        bool chargedWorkItemRun)
+    {
+        if (_serviceScopeFactory is null)
+        {
+            ReleaseInFlightRequest(requestKey, sessionCts);
+            return;
+        }
+
+        try
+        {
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
+            await scopedChatService.ExecutePersistedGenerateWorkItemsAsync(
+                projectId,
+                sessionId,
+                userId,
+                requestKey,
+                sessionCts,
+                chargedWorkItemRun);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation was already handled by the scoped execution path.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Deferred work-item generation failed for session {SessionId}",
+                sessionId.SanitizeForLogging());
+
+            await TryHandleDeferredGenerationFailureAsync(
+                projectId,
+                sessionId,
+                userId,
+                requestKey,
+                sessionCts,
+                chargedWorkItemRun,
+                ex);
+        }
+    }
+
+    private async Task ExecutePersistedGenerateWorkItemsAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        string requestKey,
+        CancellationTokenSource sessionCts,
+        bool chargedWorkItemRun)
+    {
+        var config = llmOptions.Value;
+        var timeoutSeconds = config.GenerateTimeoutSeconds;
+        var maxLoops = config.GenerateMaxToolLoops;
+        var maxToolCallsTotal = config.GenerateMaxToolCallsTotal;
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, sessionCts.Token);
+        var requestCancellation = linkedCts.Token;
+
+        try
+        {
+            var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
+            var llmMessages = history.Select(ToLLMMessage).ToList();
+            llmMessages.Add(new LLMMessage
+            {
+                Role = "user",
+                Content = "Generate work-items based on provided context",
+            });
+
+            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
+            var toolDefs = toolRegistry.ToLLMDefinitions(
+                includeWriteTools: true,
+                bulkOnly: true,
+                includeGlobalRepoTools: IsGlobalScope(projectId));
+
+            await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation);
+
+            var toolContext = new ChatToolContext(projectId, userId.ToString());
+            var totalToolCalls = 0;
+
+            for (var loop = 0; loop < maxLoops; loop++)
+            {
+                var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, config.GenerateModel);
+                var response = await llmClient.CompleteAsync(request, requestCancellation);
+
+                logger.CopilotLlmResponseReceived(
+                    loop + 1,
+                    response.ToolCalls is { Count: > 0 },
+                    response.ToolCalls?.Count ?? 0,
+                    response.Content?.Length ?? 0);
+
+                if (response.ToolCalls is { Count: > 0 })
+                {
+                    logger.CopilotToolBatchStarting(response.ToolCalls.Count, totalToolCalls);
+                    llmMessages.Add(new LLMMessage
+                    {
+                        Role = "assistant",
+                        Content = response.Content,
+                        ToolCalls = response.ToolCalls,
+                    });
+
+                    foreach (var toolCall in response.ToolCalls)
+                    {
+                        var toolDef = toolRegistry.Get(toolCall.Name);
+                        if (toolDef is null || !toolDef.IsWriteTool)
+                        {
+                            totalToolCalls++;
+                            if (totalToolCalls > maxToolCallsTotal)
+                            {
+                                logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
+                                break;
+                            }
+                        }
+
+                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
+                        llmMessages.Add(new LLMMessage
+                        {
+                            Role = "tool",
+                            Content = toolResult,
+                            ToolCallId = toolCall.Id,
+                            ToolName = toolCall.Name,
+                        });
+
+                        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
+                    }
+
+                    if (totalToolCalls > maxToolCallsTotal)
+                        break;
+
+                    continue;
+                }
+
+                var assistantContent = response.Content ?? "I wasn't able to generate a response.";
+                await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent);
+                logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
+
+                await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                return;
+            }
+
+            logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
+            await chatSessionRepository.AddMessageAsync(
+                projectId,
+                sessionId,
+                "assistant",
+                "I used several tools but wasn't able to finish. Here's what I found so far - could you clarify what you need?");
+            await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+        }
+        catch (OperationCanceledException) when (sessionCts.IsCancellationRequested)
+        {
+            await HandleCanceledRequestAsync(projectId, sessionId, wasGenerating: true, chargedRun: chargedWorkItemRun, userId, requestKey, sessionCts);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.CopilotLlmTimeout(timeoutSeconds);
+            await chatSessionRepository.AddMessageAsync(
+                projectId,
+                sessionId,
+                "assistant",
+                "I'm sorry, the request took too long. Please try again.");
+            await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+        }
+        catch (Exception ex)
+        {
+            logger.CopilotLlmFailed(ex);
+            var assistantError = BuildAssistantErrorMessage(ex);
+            await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+            await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+        }
+        finally
+        {
+            ReleaseInFlightRequest(requestKey, sessionCts);
+        }
+    }
+
+    private async Task TryHandleDeferredGenerationFailureAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        string requestKey,
+        CancellationTokenSource sessionCts,
+        bool chargedWorkItemRun,
+        Exception exception)
+    {
+        try
+        {
+            if (_serviceScopeFactory is null)
+                return;
+
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
+            await scopedChatService.HandleDeferredGenerationFailureAsync(
+                projectId,
+                sessionId,
+                userId,
+                chargedWorkItemRun,
+                exception);
+        }
+        catch (Exception cleanupEx)
+        {
+            logger.LogWarning(
+                cleanupEx,
+                "Failed to clean up deferred work-item generation failure for session {SessionId}",
+                sessionId.SanitizeForLogging());
+        }
+        finally
+        {
+            ReleaseInFlightRequest(requestKey, sessionCts);
+        }
+    }
+
+    private async Task PersistUserMessageAsync(string projectId, string sessionId, string content)
+    {
+        var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
+        await chatSessionRepository.AssignPendingAttachmentsToMessageAsync(projectId, sessionId, userMessage.Id);
+    }
+
+    private async Task HandleDeferredGenerationFailureAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        bool chargedWorkItemRun,
+        Exception exception)
+    {
+        var assistantError = BuildAssistantErrorMessage(exception);
+        await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+        await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+        await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+    }
+
     // ── Helpers ───────────────────────────────────────────────
 
     /// <summary>
@@ -348,9 +666,17 @@ public class ChatService(
         string sessionId,
         bool wasGenerating,
         bool chargedRun,
-        int userId)
+        int userId,
+        string requestKey,
+        CancellationTokenSource sessionCts)
     {
-        await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating);
+        if (!wasGenerating ||
+            !ActiveSessionRequests.TryGetValue(requestKey, out var currentRequest) ||
+            ReferenceEquals(currentRequest, sessionCts))
+        {
+            await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating);
+        }
+
         await RefundIfNeededAsync(wasGenerating, chargedRun, userId);
         await PublishChatUpdatedAsync(userId, projectId, sessionId);
     }
@@ -681,7 +1007,17 @@ public class ChatService(
         if (!isGenerateRequest || !chargedRun)
             return;
 
-        await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.WorkItem);
+        try
+        {
+            await _usageLedgerService.RefundRunAsync(userId, MonthlyRunType.WorkItem);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to refund work-item generation usage for user {UserId}",
+                userId);
+        }
     }
 
     public Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string sessionId)

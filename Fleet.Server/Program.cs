@@ -257,8 +257,10 @@ builder.Services.Configure<ModelCatalogOptions>(builder.Configuration
 builder.Services.AddSingleton<IModelCatalog, ModelCatalog>();
 
 var configuredLlmTimeoutSeconds = builder.Configuration.GetValue<int?>("LLM:TimeoutSeconds") ?? 1800;
-var llmRequestTimeout = TimeSpan.FromSeconds(Math.Max(600, configuredLlmTimeoutSeconds));
-var llmAttemptTimeout = TimeSpan.FromSeconds(Math.Clamp(configuredLlmTimeoutSeconds / 3, 300, 1800));
+var configuredGenerateLlmTimeoutSeconds = builder.Configuration.GetValue<int?>("LLM:GenerateTimeoutSeconds") ?? configuredLlmTimeoutSeconds;
+var configuredMaxLlmTimeoutSeconds = Math.Max(configuredLlmTimeoutSeconds, configuredGenerateLlmTimeoutSeconds);
+var llmRequestTimeout = TimeSpan.FromSeconds(Math.Max(600, configuredMaxLlmTimeoutSeconds));
+var llmAttemptTimeout = TimeSpan.FromSeconds(Math.Clamp(configuredMaxLlmTimeoutSeconds / 3, 300, 1800));
 var llmCircuitBreakerSamplingDuration = TimeSpan.FromSeconds(Math.Max(300, (int)Math.Ceiling(llmAttemptTimeout.TotalSeconds * 2)));
 
 builder.Services.PostConfigureAll<Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions>(options =>
@@ -347,7 +349,8 @@ builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportServi
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 builder.Services.AddScoped<IWorkItemLevelService, WorkItemLevelService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
-builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<IChatService>(serviceProvider => serviceProvider.GetRequiredService<ChatService>());
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IUsageLedgerService, UsageLedgerService>();

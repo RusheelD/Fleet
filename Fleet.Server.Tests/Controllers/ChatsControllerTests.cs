@@ -140,6 +140,19 @@ public class ChatsControllerTests
         Assert.AreSame(response, ok.Value);
     }
 
+    [TestMethod]
+    public async Task SendMessage_GenerateModeStarted_ReturnsAccepted()
+    {
+        var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", true)).ReturnsAsync(response);
+
+        var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello", true));
+
+        var accepted = result as AcceptedResult;
+        Assert.IsNotNull(accepted);
+        Assert.AreSame(response, accepted.Value);
+    }
+
     // ── GetAttachments ───────────────────────────────────
 
     [TestMethod]
