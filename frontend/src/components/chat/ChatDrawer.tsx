@@ -14,6 +14,7 @@ import { useChatGenerating, useAuth, usePreferences, useIsMobile } from '../../h
 import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatMessageData, SendMessageResponse } from '../../models'
 import { resolveChatUserIdentity } from './initials'
+import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
 
 const useStyles = makeStyles({
     drawer: {
@@ -93,10 +94,6 @@ function buildAttachmentsQueryKey(projectId: string | undefined, sessionId: stri
     return ['chat-attachments', JSON.stringify([sessionId, projectId])]
 }
 
-function normalizeMessageContent(value: string): string {
-    return value.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
 export function ChatDrawer({
     projectId,
     onClose,
@@ -115,6 +112,7 @@ export function ChatDrawer({
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const hasConstrainedPaneWidth = !isMobile && typeof chatWidth === 'number' && chatWidth <= 520
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -183,23 +181,19 @@ export function ChatDrawer({
         }
     }, [serverMessages, isThinking]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Only show optimistic messages that haven't yet appeared in server data
-    const displayMessages = useMemo(() => {
-        const serverIds = new Set(serverMessages.map(m => m.id))
-        const pending = optimisticMessages.filter(m => !serverIds.has(m.id))
-        // Also deduplicate by content - if the server already has the user message, skip
-        const serverUserContents = new Set(
-            serverMessages
-                .filter(m => m.role === 'user')
-                .map(m => normalizeMessageContent(m.content))
-        )
-        const unique = pending.filter(
-            m => m.role !== 'user' || !serverUserContents.has(normalizeMessageContent(m.content)),
-        )
-        return [...serverMessages, ...unique]
-    }, [serverMessages, optimisticMessages])
+    const displayMessages = useMemo(
+        () => reconcileDisplayMessages(serverMessages, optimisticMessages),
+        [serverMessages, optimisticMessages],
+    )
     const currentUserIdentity = resolveChatUserIdentity(user?.displayName, user?.email)
     const allowGenerateWorkItems = Boolean(projectId)
+
+    useEffect(() => {
+        setOptimisticMessages((current) => {
+            const next = filterPendingOptimisticMessages(current, serverMessages)
+            return next.length === current.length ? current : next
+        })
+    }, [serverMessages])
 
     // Auto-select/reset active session when scope/session list changes.
     useEffect(() => {
@@ -302,14 +296,11 @@ export function ChatDrawer({
         sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
             .then(async (response: SendMessageResponse) => {
                 setLastSendResponse(response)
-                // Wait for server data to be fresh BEFORE clearing optimistic state
-                // so the user message never flashes away
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
                 setIsThinking(false)
                 setIsGenerating(false)
-                setOptimisticMessages([])
                 if (generateWorkItems) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
                 }
@@ -512,6 +503,7 @@ export function ChatDrawer({
                 onGenerate={allowGenerateWorkItems ? () => handleSend(true) : undefined}
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
+                forceStackedLayout={hasConstrainedPaneWidth}
                 disabled={isThinking || createSessionMutation.isPending || hasUploadingAttachments}
                 uploading={uploadMutation.isPending}
             />

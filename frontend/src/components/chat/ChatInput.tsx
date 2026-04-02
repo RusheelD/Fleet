@@ -43,6 +43,8 @@ const useStyles = makeStyles({
         display: 'flex',
         gap: '0.5rem',
         alignItems: 'flex-end',
+        minWidth: 0,
+        width: '100%',
     },
     inputRowCompact: {
         gap: '0.375rem',
@@ -53,6 +55,8 @@ const useStyles = makeStyles({
     },
     inputTextarea: {
         flex: 1,
+        minWidth: 0,
+        width: '100%',
         fontFamily: 'inherit',
         fontSize: '13px',
         lineHeight: '18px',
@@ -102,6 +106,7 @@ const useStyles = makeStyles({
     sendGroup: {
         display: 'flex',
         alignSelf: 'flex-end',
+        flexShrink: 0,
     },
     sendGroupMobile: {
         width: '100%',
@@ -110,6 +115,9 @@ const useStyles = makeStyles({
     sendButton: {
         borderTopRightRadius: 0,
         borderBottomRightRadius: 0,
+    },
+    sendButtonFlexible: {
+        flex: 1,
     },
     menuButton: {
         borderTopLeftRadius: 0,
@@ -124,6 +132,7 @@ const useStyles = makeStyles({
         justifyContent: 'space-between',
         alignItems: 'center',
         gap: '0.5rem',
+        minWidth: 0,
     },
     inputActionsMobile: {
         flexDirection: 'column',
@@ -132,6 +141,7 @@ const useStyles = makeStyles({
     inputButtons: {
         display: 'flex',
         gap: '0.25rem',
+        flexWrap: 'wrap',
     },
     inputButtonsMobile: {
         width: '100%',
@@ -163,13 +173,15 @@ interface ChatInputProps {
     onFileSelect?: (file: File) => void
     disabled?: boolean
     uploading?: boolean
+    forceStackedLayout?: boolean
 }
 
-export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate = true, onFileSelect, disabled, uploading }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate = true, onFileSelect, disabled, uploading, forceStackedLayout = false }: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const shouldStackLayout = isMobile || forceStackedLayout
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -202,7 +214,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
 
     return (
         <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact, isMobile && styles.inputAreaMobile)}>
-            <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact, isMobile && styles.inputRowMobile)}>
+            <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact, shouldStackLayout && styles.inputRowMobile)}>
                 <textarea
                     ref={textareaRef}
                     placeholder="Describe what you want to build..."
@@ -218,14 +230,14 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                         }
                     }}
                 />
-                <div className={mergeClasses(styles.sendGroup, isMobile && styles.sendGroupMobile)}>
+                <div className={mergeClasses(styles.sendGroup, shouldStackLayout && styles.sendGroupMobile)}>
                     {canGenerate ? (
                         <>
                             <Button
                                 appearance="primary"
                                 icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
                                 disabled={disabled}
-                                className={styles.sendButton}
+                                className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
                                 size={isCompact ? 'small' : 'medium'}
                                 onClick={hasText ? onSend : onGenerate}
                             >
@@ -273,8 +285,8 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                     )}
                 </div>
             </div>
-            <div className={mergeClasses(styles.inputActions, isMobile && styles.inputActionsMobile)}>
-                <div className={mergeClasses(styles.inputButtons, isMobile && styles.inputButtonsMobile)}>
+            <div className={mergeClasses(styles.inputActions, shouldStackLayout && styles.inputActionsMobile)}>
+                <div className={mergeClasses(styles.inputButtons, shouldStackLayout && styles.inputButtonsMobile)}>
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -292,7 +304,7 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                         {uploading ? 'Uploading...' : 'Attach .md'}
                     </Button>
                 </div>
-                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, isMobile && styles.inputHintMobile)}>
+                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, shouldStackLayout && styles.inputHintMobile)}>
                     Attach .md files for AI context
                 </Caption1>
             </div>

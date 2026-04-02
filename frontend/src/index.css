@@ -227,6 +227,63 @@ html[data-density='compact'] .fui-Tab {
   min-height: 30px;
 }
 
+.fui-Tab[aria-selected='true'] {
+  background-color: var(--app-surface-brand);
+  box-shadow: inset 0 0 0 1px var(--app-border-brand);
+  border-radius: 10px;
+}
+
+.fui-Tab[aria-selected='true']:hover,
+.fui-Tab[aria-selected='true']:active,
+.fui-Tab[aria-selected='true']:focus-visible {
+  background-color: var(--app-surface-brand-hover);
+}
+
+.fui-Tab[aria-selected='true'] .fui-Tab__icon {
+  color: var(--app-brand);
+}
+
+.fui-Tab[aria-selected='true']:hover .fui-Tab__icon,
+.fui-Tab[aria-selected='true']:active .fui-Tab__icon,
+.fui-Tab[aria-selected='true']:focus-visible .fui-Tab__icon {
+  color: var(--app-brand-hover);
+}
+
+.fui-Tab[aria-selected='true'] .fui-Tab__content {
+  color: var(--app-text-primary);
+}
+
+.fui-Radio input:enabled:checked ~ .fui-Radio__indicator {
+  background-color: var(--app-surface);
+  border-color: var(--app-brand);
+  color: var(--app-brand);
+}
+
+.fui-Radio input:enabled:checked:hover ~ .fui-Radio__indicator,
+.fui-Radio input:enabled:checked:hover:active ~ .fui-Radio__indicator {
+  border-color: var(--app-brand-hover);
+  color: var(--app-brand-hover);
+}
+
+.fui-ToggleButton[aria-pressed='true'] {
+  background-color: var(--app-surface-brand);
+  border-color: var(--app-border-brand);
+  color: var(--app-brand);
+}
+
+.fui-ToggleButton[aria-pressed='true']:hover,
+.fui-ToggleButton[aria-pressed='true']:active,
+.fui-ToggleButton[aria-pressed='true']:focus-visible {
+  background-color: var(--app-surface-brand-hover);
+  border-color: var(--app-border-brand);
+  color: var(--app-brand-hover);
+}
+
+.fui-ToggleButton[aria-pressed='true'] .fui-Icon-filled,
+.fui-ToggleButton[aria-pressed='true'] .fui-Icon-regular {
+  color: currentColor;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

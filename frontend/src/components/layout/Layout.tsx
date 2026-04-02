@@ -31,9 +31,26 @@ const SIDEBAR_WIDTH_EXPANDED = appTokens.size.sidebarExpanded
 const SIDEBAR_WIDTH_COLLAPSED = appTokens.size.sidebarCollapsed
 const SIDEBAR_WIDTH_EXPANDED_COMPACT = appTokens.size.sidebarExpandedCompact
 const SIDEBAR_WIDTH_COLLAPSED_COMPACT = appTokens.size.sidebarCollapsedCompact
-const MIN_CHAT_WIDTH = Number.parseInt(appTokens.size.chatMin, 10)
-const MAX_CHAT_WIDTH = Number.parseInt(appTokens.size.chatMax, 10)
-const DEFAULT_CHAT_WIDTH = Number.parseInt(appTokens.size.chatDefault, 10)
+const MIN_PRIMARY_CONTENT_WIDTH = 320
+
+function readRootPixelVariable(variableName: string, fallback: number): number {
+    if (typeof window === 'undefined') {
+        return fallback
+    }
+
+    const rawValue = window.getComputedStyle(document.documentElement).getPropertyValue(variableName).trim()
+    const parsedValue = Number.parseFloat(rawValue)
+    return Number.isFinite(parsedValue) ? parsedValue : fallback
+}
+
+function getEffectiveChatMaxWidth(availableWidth: number, configuredMaxWidth: number, minimumChatWidth: number): number {
+    if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
+        return configuredMaxWidth
+    }
+
+    const widthAfterReservingPrimaryPane = availableWidth - MIN_PRIMARY_CONTENT_WIDTH
+    return Math.max(minimumChatWidth, Math.min(configuredMaxWidth, widthAfterReservingPrimaryPane))
+}
 
 const useStyles = makeStyles({
     root: {
@@ -248,6 +265,8 @@ export function Layout() {
 
     const { projectId, projectTitle } = useCurrentProject()
     useServerEvents(projectId)
+    const desktopContentRef = useRef<HTMLDivElement | null>(null)
+    const [desktopContentWidth, setDesktopContentWidth] = useState<number | null>(null)
 
     useEffect(() => {
         if (location.state?.openChat) {
@@ -274,19 +293,67 @@ export function Layout() {
         }
     }, [isMobile, location.pathname])
 
-    const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH)
+    useEffect(() => {
+        if (isMobile || !desktopContentRef.current) {
+            setDesktopContentWidth(null)
+            return
+        }
+
+        const contentElement = desktopContentRef.current
+        const syncWidth = () => setDesktopContentWidth(contentElement.clientWidth)
+        syncWidth()
+
+        const resizeObserver = new ResizeObserver(syncWidth)
+        resizeObserver.observe(contentElement)
+        window.addEventListener('resize', syncWidth)
+
+        return () => {
+            resizeObserver.disconnect()
+            window.removeEventListener('resize', syncWidth)
+        }
+    }, [isMobile])
+
+    const minChatWidth = readRootPixelVariable('--app-shell-chat-width-min', 340)
+    const maxChatWidth = readRootPixelVariable('--app-shell-chat-width-max', 800)
+    const defaultChatWidth = readRootPixelVariable('--app-shell-chat-width-default', 480)
+    const availableDesktopContentWidth = desktopContentWidth
+        ?? (typeof window !== 'undefined' ? window.innerWidth : defaultChatWidth + MIN_PRIMARY_CONTENT_WIDTH)
+    const effectiveMaxChatWidth = getEffectiveChatMaxWidth(availableDesktopContentWidth, maxChatWidth, minChatWidth)
+    const [chatWidth, setChatWidth] = useState(() => defaultChatWidth)
     const isResizing = useRef(false)
+    const activeResizePointerId = useRef<number | null>(null)
     const [isResizingActive, setIsResizingActive] = useState(false)
 
-    const handleResizeStart = useCallback(() => {
+    useEffect(() => {
+        setChatWidth((currentWidth) => {
+            if (!Number.isFinite(currentWidth)) {
+                return defaultChatWidth
+            }
+
+            return Math.min(effectiveMaxChatWidth, Math.max(minChatWidth, currentWidth))
+        })
+    }, [defaultChatWidth, effectiveMaxChatWidth, minChatWidth])
+
+    const stopResizing = useCallback(() => {
+        activeResizePointerId.current = null
+        isResizing.current = false
+        setIsResizingActive(false)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+    }, [])
+
+    const handleResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         if (isMobile) {
             return
         }
 
+        event.preventDefault()
+        activeResizePointerId.current = event.pointerId
         isResizing.current = true
         setIsResizingActive(true)
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
+        event.currentTarget.setPointerCapture?.(event.pointerId)
     }, [isMobile])
 
     const handleAutoExpandChat = useCallback((requestedWidth: number) => {
@@ -295,32 +362,46 @@ export function Layout() {
         }
 
         setChatWidth((currentWidth) => {
-            const nextWidth = Math.min(MAX_CHAT_WIDTH, Math.max(currentWidth, requestedWidth))
+            const nextWidth = Math.min(effectiveMaxChatWidth, Math.max(currentWidth, requestedWidth))
             return nextWidth
         })
-    }, [isMobile])
+    }, [effectiveMaxChatWidth, isMobile])
 
     useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!isResizing.current || isMobile) return
-            const newWidth = window.innerWidth - e.clientX
-            setChatWidth(Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, newWidth)))
+        const handlePointerMove = (event: PointerEvent) => {
+            if (!isResizing.current || isMobile) {
+                return
+            }
+
+            if (activeResizePointerId.current !== null && event.pointerId !== activeResizePointerId.current) {
+                return
+            }
+
+            const newWidth = window.innerWidth - event.clientX
+            setChatWidth(Math.min(effectiveMaxChatWidth, Math.max(minChatWidth, newWidth)))
         }
-        const handleMouseUp = () => {
+
+        const handlePointerStop = (event: PointerEvent) => {
+            if (activeResizePointerId.current !== null && event.pointerId !== activeResizePointerId.current) {
+                return
+            }
+
             if (isResizing.current) {
-                isResizing.current = false
-                setIsResizingActive(false)
-                document.body.style.cursor = ''
-                document.body.style.userSelect = ''
+                stopResizing()
             }
         }
-        window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('mouseup', handleMouseUp)
+
+        window.addEventListener('pointermove', handlePointerMove)
+        window.addEventListener('pointerup', handlePointerStop)
+        window.addEventListener('pointercancel', handlePointerStop)
+
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('mouseup', handleMouseUp)
+            window.removeEventListener('pointermove', handlePointerMove)
+            window.removeEventListener('pointerup', handlePointerStop)
+            window.removeEventListener('pointercancel', handlePointerStop)
+            stopResizing()
         }
-    }, [isMobile])
+    }, [effectiveMaxChatWidth, isMobile, minChatWidth, stopResizing])
 
     const isActive = useCallback(
         (path: string, exact?: boolean) => {
@@ -486,7 +567,7 @@ export function Layout() {
     )
 
     const content = (
-        <div className={styles.content}>
+        <div ref={desktopContentRef} className={styles.content}>
             <TopBar
                 breadcrumbs={breadcrumbs}
                 chatOpen={chatOpen}
@@ -513,16 +594,19 @@ export function Layout() {
                                 styles.resizeHandle,
                                 isResizingActive ? styles.resizeHandleActive : undefined,
                             )}
-                            onMouseDown={handleResizeStart}
+                            onPointerDown={handleResizeStart}
                             role="separator"
                             aria-orientation="vertical"
                             aria-label="Resize chat pane"
+                            aria-valuemin={minChatWidth}
+                            aria-valuemax={effectiveMaxChatWidth}
+                            aria-valuenow={Math.round(chatWidth)}
                         />
                         <ChatDrawer
                             projectId={projectId}
                             onClose={() => setChatOpen(false)}
                             chatWidth={chatWidth}
-                            maxChatWidth={MAX_CHAT_WIDTH}
+                            maxChatWidth={effectiveMaxChatWidth}
                             onRequestChatWidth={handleAutoExpandChat}
                         />
                     </div>

@@ -90,6 +90,24 @@ const useStyles = makeStyles({
         ':hover': {
             backgroundColor: appTokens.color.surfaceHover,
         },
+        '& .fui-Radio__indicator': {
+            backgroundColor: appTokens.color.surface,
+        },
+        '& input:checked ~ .fui-Radio__indicator': {
+            borderTopColor: appTokens.color.brand,
+            borderRightColor: appTokens.color.brand,
+            borderBottomColor: appTokens.color.brand,
+            borderLeftColor: appTokens.color.brand,
+            color: appTokens.color.brand,
+            backgroundColor: appTokens.color.surface,
+        },
+        '& input:checked:hover ~ .fui-Radio__indicator': {
+            borderTopColor: appTokens.color.brandHover,
+            borderRightColor: appTokens.color.brandHover,
+            borderBottomColor: appTokens.color.brandHover,
+            borderLeftColor: appTokens.color.brandHover,
+            color: appTokens.color.brandHover,
+        },
     },
     workItemRadioSelected: {
         backgroundColor: appTokens.color.surfaceBrand,
