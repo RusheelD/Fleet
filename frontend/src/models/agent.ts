@@ -2,6 +2,7 @@ export interface AgentExecution {
   id: string
   workItemId: number
   workItemTitle: string
+  executionMode: 'standard' | 'orchestration'
   status: 'running' | 'completed' | 'failed' | 'queued' | 'cancelled' | 'paused'
   agents: AgentInfo[]
   startedAt: string
@@ -12,6 +13,8 @@ export interface AgentExecution {
   currentPhase?: string | null
   reviewLoopCount?: number
   lastReviewRecommendation?: string | null
+  parentExecutionId?: string | null
+  subFlows?: AgentExecution[]
 }
 
 export interface AgentInfo {

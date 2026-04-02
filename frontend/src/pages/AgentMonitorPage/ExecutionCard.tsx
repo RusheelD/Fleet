@@ -86,6 +86,10 @@ const useStyles = makeStyles({
         paddingLeft: appTokens.space.md,
         paddingRight: appTokens.space.md,
     },
+    executionCardNested: {
+        backgroundColor: appTokens.color.surfaceAlt,
+        boxShadow: 'none',
+    },
     executionHeader: {
         display: 'flex',
         justifyContent: 'space-between',
@@ -330,6 +334,19 @@ const useStyles = makeStyles({
         marginTop: '2px',
         marginBottom: '2px',
     },
+    subFlowSection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+    },
+    subFlowHeader: {
+        color: appTokens.color.textSecondary,
+    },
+    subFlowList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+    },
 })
 
 interface ExecutionCardProps {
@@ -340,6 +357,7 @@ interface ExecutionCardProps {
     onRetry?: (executionId: string) => void
     onDelete?: (executionId: string) => void
     onViewDocs?: (executionId: string) => void
+    nested?: boolean
 }
 
 function AgentStepIcon({ status, isCompact }: { status: ExecutionStepStatus; isCompact: boolean }) {
@@ -405,11 +423,12 @@ function renderExecutionStatusBadge(status: AgentExecution['status']) {
     )
 }
 
-export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs }: ExecutionCardProps) {
+export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs, nested = false }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
+    const isNested = nested || Boolean(execution.parentExecutionId)
     const toasterId = useId('exec-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
@@ -461,6 +480,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
     const reviewLoopCount = execution.reviewLoopCount ?? 0
     const lastReviewRecommendation = execution.lastReviewRecommendation ?? null
     const isAutoRemediating = execution.status === 'running' && (execution.currentPhase?.startsWith('Auto-remediation:') ?? false)
+    const subFlows = execution.subFlows ?? []
     const canDeleteExecution =
         execution.status === 'running' ||
         execution.status === 'queued' ||
@@ -513,7 +533,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
     }
 
     return (
-        <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile)}>
+        <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile, isNested && styles.executionCardNested)}>
             <Toaster toasterId={toasterId} />
 
             <div className={mergeClasses(styles.executionHeader, isCompact && styles.executionHeaderCompact, isMobile && styles.executionHeaderMobile)}>
@@ -521,6 +541,11 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                     <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
                         {renderExecutionStatusBadge(execution.status)}
+                        {execution.executionMode === 'orchestration' && (
+                            <InfoBadge appearance="tint" size="small">
+                                Flow
+                            </InfoBadge>
+                        )}
                         {reviewLoopLabel && (
                             isAutoRemediating ? (
                                 <Badge appearance="tint" color="warning" size="small">
@@ -551,6 +576,11 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                             Branch: {execution.branchName}
                         </Caption1>
                     )}
+                    {execution.executionMode === 'orchestration' && subFlows.length > 0 && (
+                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
+                            Sub-flows: {subFlows.length}
+                        </Caption1>
+                    )}
                     {reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating && (
                         <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
                             Final review outcome: {lastReviewRecommendation}
@@ -558,10 +588,14 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                     )}
                 </div>
                 <div className={mergeClasses(styles.executionActions, isMobile && styles.executionActionsMobile)}>
-                    {execution.status === 'running' && (
+                    {execution.status === 'running' && (onPause || onCancel || onDelete) && (
                         <>
-                            <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={handlePause} />
-                            <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={handleCancel} />
+                            {onPause && (
+                                <Button appearance="subtle" size="small" icon={<PauseRegular />} aria-label="Pause" onClick={handlePause} />
+                            )}
+                            {onCancel && (
+                                <Button appearance="subtle" size="small" icon={<StopRegular />} aria-label="Stop" onClick={handleCancel} />
+                            )}
                             {onDelete && (
                                 <Button appearance="subtle" size="small" icon={<DeleteRegular />} aria-label="Delete run" onClick={handleDelete} />
                             )}
@@ -659,9 +693,9 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                 })}
             </div>
 
-            {(execution.status === 'paused' || execution.status === 'failed') && (
+            {(execution.status === 'paused' || execution.status === 'failed') && (onResume || onRetry || onDelete) && (
                 <div className={mergeClasses(styles.runActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
-                    {execution.status === 'paused' && (
+                    {execution.status === 'paused' && onResume && (
                         <Button
                             appearance="primary"
                             size="small"
@@ -672,7 +706,7 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                             Resume
                         </Button>
                     )}
-                    {execution.status === 'failed' && (
+                    {execution.status === 'failed' && onRetry && (
                         <Button
                             appearance="primary"
                             size="small"
@@ -737,6 +771,25 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                     >
                         Docs
                     </Button>
+                </div>
+            )}
+
+            {subFlows.length > 0 && (
+                <div className={styles.subFlowSection}>
+                    <Divider className={isCompact ? styles.compactDivider : undefined} />
+                    <Text weight="semibold" className={styles.subFlowHeader}>
+                        Sub-flows
+                    </Text>
+                    <div className={styles.subFlowList}>
+                        {subFlows.map((subFlow) => (
+                            <ExecutionCard
+                                key={subFlow.id}
+                                execution={subFlow}
+                                onViewDocs={onViewDocs}
+                                nested
+                            />
+                        ))}
+                    </div>
                 </div>
             )}
         </Card>

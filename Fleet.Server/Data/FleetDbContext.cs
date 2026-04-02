@@ -1,5 +1,6 @@
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Auth;
+using Fleet.Server.Agents;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Data;
@@ -91,6 +92,16 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .WithMany(p => p.AgentExecutions)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Property(e => e.ExecutionMode)
+                .HasDefaultValue(AgentExecutionModes.Standard);
+
+            builder.HasOne(e => e.ParentExecution)
+                .WithMany(e => e.ChildExecutions)
+                .HasForeignKey(e => e.ParentExecutionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(e => new { e.ProjectId, e.ParentExecutionId });
 
             // JSON column for nested agent collection (PostgreSQL jsonb)
             builder.OwnsMany(e => e.Agents, b => b.ToJson());

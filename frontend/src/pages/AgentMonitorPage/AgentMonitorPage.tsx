@@ -235,11 +235,14 @@ export function AgentMonitorPage() {
     const filteredExecutions = useMemo(() => {
         if (!searchQuery) return filteredByTab
         const q = searchQuery.toLowerCase()
-        return filteredByTab.filter((e) =>
-            e.workItemTitle.toLowerCase().includes(q) ||
-            e.id.toLowerCase().includes(q) ||
-            e.agents.some((a) => a.role.toLowerCase().includes(q)),
-        )
+
+        const matchesExecution = (execution: typeof filteredByTab[number]): boolean =>
+            execution.workItemTitle.toLowerCase().includes(q) ||
+            execution.id.toLowerCase().includes(q) ||
+            execution.agents.some((a) => a.role.toLowerCase().includes(q)) ||
+            (execution.subFlows ?? []).some(matchesExecution)
+
+        return filteredByTab.filter(matchesExecution)
     }, [filteredByTab, searchQuery])
 
     const handleStartExecution = (workItemNumber: number, targetBranch: string) => {

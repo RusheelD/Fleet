@@ -27,9 +27,10 @@ public class AgentServiceTests
     {
         var executions = new List<AgentExecutionDto>
         {
-            new("exec-1", 1, "Build Auth", "Running",
+            new("exec-1", 1, "Build Auth", "standard", "Running",
                 [new AgentInfoDto("Planner", "Complete", "Done", 1.0)],
-                "2024-01-01", "5 min", 0.5),
+                "2024-01-01", "5 min", 0.5,
+                SubFlows: []),
         };
         _repo.Setup(r => r.GetExecutionsByProjectIdAsync(ProjectId)).ReturnsAsync(executions);
 

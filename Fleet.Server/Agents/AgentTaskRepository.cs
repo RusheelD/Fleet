@@ -11,6 +11,7 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         var entities = await context.AgentExecutions
             .AsNoTracking()
             .Where(e => e.ProjectId == projectId)
+            .OrderByDescending(e => e.StartedAtUtc)
             .ToListAsync();
 
         var executionIds = entities.Select(entity => entity.Id).ToArray();
@@ -32,24 +33,46 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
                 group => group.Key,
                 group => ReviewFeedbackLoopPlanner.SummarizeExecutionReviews(group));
 
-        return entities.Select(e =>
+        var childrenByParentExecutionId = entities
+            .Where(entity => !string.IsNullOrWhiteSpace(entity.ParentExecutionId))
+            .GroupBy(entity => entity.ParentExecutionId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(entity => entity.StartedAtUtc)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        AgentExecutionDto BuildDto(Data.Entities.AgentExecution entity)
         {
-            reviewSummariesByExecution.TryGetValue(e.Id, out var reviewSummary);
+            reviewSummariesByExecution.TryGetValue(entity.Id, out var reviewSummary);
+            var subFlows = childrenByParentExecutionId.TryGetValue(entity.Id, out var children)
+                ? children.Select(BuildDto).ToArray()
+                : [];
+
             return new AgentExecutionDto(
-                e.Id,
-                e.WorkItemId,
-                e.WorkItemTitle,
-                e.Status,
-                NormalizeAgentsForExecutionStatus(e).ToArray(),
-                e.StartedAt,
-                ComputeDuration(e),
-                e.Progress,
-                e.BranchName,
-                e.PullRequestUrl,
-                e.CurrentPhase,
+                entity.Id,
+                entity.WorkItemId,
+                entity.WorkItemTitle,
+                string.IsNullOrWhiteSpace(entity.ExecutionMode) ? AgentExecutionModes.Standard : entity.ExecutionMode,
+                entity.Status,
+                NormalizeAgentsForExecutionStatus(entity).ToArray(),
+                entity.StartedAt,
+                ComputeDuration(entity),
+                entity.Progress,
+                entity.BranchName,
+                entity.PullRequestUrl,
+                entity.CurrentPhase,
                 reviewSummary?.AutomaticLoopCount ?? 0,
-                reviewSummary?.LastRecommendation);
-        }).ToList();
+                reviewSummary?.LastRecommendation,
+                entity.ParentExecutionId,
+                subFlows);
+        }
+
+        return entities
+            .Where(entity => string.IsNullOrWhiteSpace(entity.ParentExecutionId))
+            .Select(BuildDto)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<LogEntryDto>> GetLogsByProjectIdAsync(string projectId)
@@ -97,13 +120,19 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         if (execution is null)
             return null;
 
+        var descendantExecutionIds = await CollectDescendantExecutionIdsAsync(projectId, executionId);
+        var executionIdsToDelete = descendantExecutionIds
+            .Append(executionId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         var logs = await context.LogEntries
-            .Where(l => l.ProjectId == projectId && l.ExecutionId == executionId)
+            .Where(l => l.ProjectId == projectId && l.ExecutionId != null && executionIdsToDelete.Contains(l.ExecutionId))
             .ToListAsync();
         var deletedLogCount = logs.Count;
 
         var phaseResults = await context.AgentPhaseResults
-            .Where(result => result.ExecutionId == executionId)
+            .Where(result => executionIdsToDelete.Contains(result.ExecutionId))
             .ToListAsync();
 
         if (phaseResults.Count > 0)
@@ -112,7 +141,12 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         if (deletedLogCount > 0)
             context.LogEntries.RemoveRange(logs);
 
-        context.AgentExecutions.Remove(execution);
+        var executions = await context.AgentExecutions
+            .Where(result => result.ProjectId == projectId && executionIdsToDelete.Contains(result.Id))
+            .ToListAsync();
+        if (executions.Count > 0)
+            context.AgentExecutions.RemoveRange(executions);
+
         await context.SaveChangesAsync();
 
         return new AgentExecutionDeletionResult(executionId, deletedLogCount);
@@ -162,11 +196,11 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
     {
         var total = await context.AgentExecutions
             .AsNoTracking()
-            .CountAsync(e => e.ProjectId == projectId);
+            .CountAsync(e => e.ProjectId == projectId && e.ParentExecutionId == null);
 
         var running = await context.AgentExecutions
             .AsNoTracking()
-            .CountAsync(e => e.ProjectId == projectId && e.Status == "running");
+            .CountAsync(e => e.ProjectId == projectId && e.ParentExecutionId == null && e.Status == "running");
 
         return new AgentSummaryDto(total, running);
     }
@@ -179,8 +213,8 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
             .Select(g => new
             {
                 ProjectId = g.Key,
-                Total = g.Count(),
-                Running = g.Count(e => e.Status == "running"),
+                Total = g.Count(e => e.ParentExecutionId == null),
+                Running = g.Count(e => e.ParentExecutionId == null && e.Status == "running"),
             })
             .ToListAsync();
 
@@ -219,5 +253,32 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         var terminalTask = terminalStatus == "failed" ? "Failed" : "Cancelled";
 
         return execution.Agents.Select(a => new AgentInfoDto(a.Role, terminalStatus, terminalTask, 0));
+    }
+
+    private async Task<List<string>> CollectDescendantExecutionIdsAsync(string projectId, string parentExecutionId)
+    {
+        var descendants = new List<string>();
+        var frontier = new Queue<string>();
+        frontier.Enqueue(parentExecutionId);
+
+        while (frontier.Count > 0)
+        {
+            var currentParentId = frontier.Dequeue();
+            var childIds = await context.AgentExecutions
+                .AsNoTracking()
+                .Where(execution =>
+                    execution.ProjectId == projectId &&
+                    execution.ParentExecutionId == currentParentId)
+                .Select(execution => execution.Id)
+                .ToListAsync();
+
+            foreach (var childId in childIds)
+            {
+                descendants.Add(childId);
+                frontier.Enqueue(childId);
+            }
+        }
+
+        return descendants;
     }
 }

@@ -42,6 +42,18 @@ Fleet should take a work item to completion inside a single execution whenever p
 - The monitor UX should clearly show when Fleet is in an automatic review remediation cycle, and completed runs should indicate that they self-corrected before finishing.
 - To keep the loop machine-actionable, the Review agent must end with a structured decision block containing recommendation, severity, target roles, and restart phase.
 
+## Hierarchical Flows
+
+Fleet executions may generate and orchestrate child sub-flows when a work item is too large or cross-cutting for one pipeline.
+
+- The **Planner** can ask Fleet to split a work item into child work items using a structured sub-flow JSON block.
+- Child work items become child executions under the parent flow instead of being treated as mere context.
+- Sibling sub-flows should run in parallel only when they are independent.
+- Sequencing is represented by nesting a dependent sub-flow under the work item it depends on.
+- Parent flows are orchestration runs: they coordinate child executions, track aggregate progress, and complete when the child flow tree reaches a terminal state.
+- Leaf sub-flows still use the normal full agent pipeline, branch creation, PR flow, and documentation.
+- The monitor UX should show sub-flows nested under the parent run so complex work remains visible as one coordinated execution.
+
 ## LLM Providers
 
 **Multi-provider** is the long-term goal — users select models based on their plan tier.

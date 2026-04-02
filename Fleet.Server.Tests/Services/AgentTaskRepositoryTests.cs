@@ -92,6 +92,101 @@ public class AgentTaskRepositoryTests
         Assert.IsTrue(await db.LogEntries.AnyAsync(log => log.ExecutionId == "exec-2"));
     }
 
+    [TestMethod]
+    public async Task GetExecutionsByProjectIdAsync_ReturnsNestedSubFlows()
+    {
+        await using var db = CreateDbContext();
+        SeedProject(db);
+        db.AgentExecutions.AddRange(
+            new AgentExecution
+            {
+                Id = "root",
+                WorkItemId = 1,
+                WorkItemTitle = "Parent flow",
+                ExecutionMode = AgentExecutionModes.Orchestration,
+                Status = "running",
+                StartedAt = "2026-04-01T00:00:00Z",
+                Progress = 0.4,
+                UserId = "7",
+                ProjectId = ProjectId,
+                Agents = [],
+            },
+            new AgentExecution
+            {
+                Id = "child",
+                WorkItemId = 2,
+                WorkItemTitle = "Leaf flow",
+                ExecutionMode = AgentExecutionModes.Standard,
+                Status = "completed",
+                StartedAt = "2026-04-01T00:01:00Z",
+                Progress = 1.0,
+                ParentExecutionId = "root",
+                UserId = "7",
+                ProjectId = ProjectId,
+                Agents = [],
+            });
+        await db.SaveChangesAsync();
+
+        var sut = new AgentTaskRepository(db);
+
+        var executions = await sut.GetExecutionsByProjectIdAsync(ProjectId);
+
+        Assert.AreEqual(1, executions.Count);
+        Assert.AreEqual("root", executions[0].Id);
+        Assert.AreEqual("orchestration", executions[0].ExecutionMode);
+        Assert.IsNotNull(executions[0].SubFlows);
+        Assert.AreEqual(1, executions[0].SubFlows!.Length);
+        Assert.AreEqual("child", executions[0].SubFlows![0].Id);
+        Assert.AreEqual("standard", executions[0].SubFlows![0].ExecutionMode);
+    }
+
+    [TestMethod]
+    public async Task DeleteExecutionAsync_RemovesDescendantExecutionsAndLogs()
+    {
+        await using var db = CreateDbContext();
+        SeedProject(db);
+        db.AgentExecutions.AddRange(
+            new AgentExecution
+            {
+                Id = "root",
+                WorkItemId = 1,
+                WorkItemTitle = "Root flow",
+                Status = "failed",
+                StartedAt = "2026-04-01T00:00:00Z",
+                Progress = 0.4,
+                UserId = "7",
+                ProjectId = ProjectId,
+                Agents = [],
+            },
+            new AgentExecution
+            {
+                Id = "child",
+                WorkItemId = 2,
+                WorkItemTitle = "Child flow",
+                Status = "failed",
+                StartedAt = "2026-04-01T00:01:00Z",
+                Progress = 0.2,
+                ParentExecutionId = "root",
+                UserId = "7",
+                ProjectId = ProjectId,
+                Agents = [],
+            });
+        db.LogEntries.AddRange(
+            new LogEntry { Time = "2026-04-01T00:00:00Z", Agent = "System", Level = "info", Message = "root", ExecutionId = "root", ProjectId = ProjectId },
+            new LogEntry { Time = "2026-04-01T00:01:00Z", Agent = "System", Level = "info", Message = "child", ExecutionId = "child", ProjectId = ProjectId });
+        await db.SaveChangesAsync();
+
+        var sut = new AgentTaskRepository(db);
+
+        var result = await sut.DeleteExecutionAsync(ProjectId, "root");
+
+        Assert.IsNotNull(result);
+        Assert.IsFalse(await db.AgentExecutions.AnyAsync(execution => execution.Id == "root"));
+        Assert.IsFalse(await db.AgentExecutions.AnyAsync(execution => execution.Id == "child"));
+        Assert.IsFalse(await db.LogEntries.AnyAsync(log => log.ExecutionId == "root"));
+        Assert.IsFalse(await db.LogEntries.AnyAsync(log => log.ExecutionId == "child"));
+    }
+
     private static FleetDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<FleetDbContext>()

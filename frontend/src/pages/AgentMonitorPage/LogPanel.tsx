@@ -211,6 +211,23 @@ interface LogEntryWithExecutionId extends LogEntry {
     resolvedExecutionId: string | null
 }
 
+function flattenExecutions(executions: AgentExecution[]): AgentExecution[] {
+    const flattened: AgentExecution[] = []
+
+    const visit = (execution: AgentExecution) => {
+        flattened.push(execution)
+        for (const subFlow of execution.subFlows ?? []) {
+            visit(subFlow)
+        }
+    }
+
+    for (const execution of executions) {
+        visit(execution)
+    }
+
+    return flattened
+}
+
 function extractExecutionIdFromMessage(message: string): string | null {
     const match = /\bExecution\s+([a-z0-9]{8,32})\b/i.exec(message)
     return match?.[1]?.toLowerCase() ?? null
@@ -320,11 +337,16 @@ export function LogPanel({
         return { generalCount: unscopedCount, countByExecutionId: counts }
     }, [logsWithResolvedExecutionId])
 
+    const flattenedExecutionList = useMemo(
+        () => flattenExecutions(executions),
+        [executions],
+    )
+
     const runTabs = useMemo<RunTabDefinition[]>(() => {
         const result: RunTabDefinition[] = []
         const seen = new Set<string>()
         const duplicateCounter = new Map<string, number>()
-        const sortedExecutions = [...executions].sort(
+        const sortedExecutions = [...flattenedExecutionList].sort(
             (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt),
         )
         const logsByExecutionId = new Map<string, LogEntryWithExecutionId[]>()
@@ -356,9 +378,10 @@ export function LogPanel({
 
             seen.add(execution.id)
             const inferredTitle = inferTitleFromLogs(logsByExecutionId.get(execution.id) ?? [])
+            const baseLabel = normalizeRunTitle(execution, inferredTitle)
             result.push({
                 value: `execution:${execution.id}`,
-                label: uniqueLabel(normalizeRunTitle(execution, inferredTitle)),
+                label: uniqueLabel(execution.parentExecutionId ? `Sub-flow: ${baseLabel}` : baseLabel),
                 count,
             })
         }
@@ -380,7 +403,7 @@ export function LogPanel({
         }
 
         return result
-    }, [executions, countByExecutionId, logsWithResolvedExecutionId])
+    }, [flattenedExecutionList, countByExecutionId, logsWithResolvedExecutionId])
 
     useEffect(() => {
         const hasSelectedExecutionTab = selectedRun.startsWith('execution:') && runTabs.some((tab) => tab.value === selectedRun)

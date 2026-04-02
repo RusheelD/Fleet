@@ -31,6 +31,17 @@ public interface IAgentOrchestrationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Starts an internal child execution that belongs to a parent flow. This does not consume an additional run.
+    /// </summary>
+    Task<string> StartSubFlowExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string parentExecutionId,
+        string? targetBranch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the current status of an execution.
     /// </summary>
     Task<AgentExecutionStatus?> GetExecutionStatusAsync(string executionId, CancellationToken cancellationToken = default);

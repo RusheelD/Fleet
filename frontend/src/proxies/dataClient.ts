@@ -453,6 +453,7 @@ export function useRetryExecution(projectId: string | undefined) {
         id: optimisticId,
         workItemId: sourceExecution?.workItemId ?? 0,
         workItemTitle: sourceExecution?.workItemTitle ?? 'Retrying execution',
+        executionMode: sourceExecution?.executionMode ?? 'standard',
         status: 'queued',
         agents: optimisticAgents,
         startedAt: nowIso,
@@ -463,6 +464,8 @@ export function useRetryExecution(projectId: string | undefined) {
         currentPhase: 'Retry queued',
         reviewLoopCount: 0,
         lastReviewRecommendation: null,
+        parentExecutionId: null,
+        subFlows: [],
       }
 
       queryClient.setQueriesData<AgentExecution[]>(

@@ -1,3 +1,5 @@
+using Fleet.Server.Agents;
+
 namespace Fleet.Server.Data.Entities;
 
 public class AgentExecution
@@ -5,10 +7,14 @@ public class AgentExecution
     public string Id { get; set; } = string.Empty;
     public int WorkItemId { get; set; }
     public string WorkItemTitle { get; set; } = string.Empty;
+    public string ExecutionMode { get; set; } = AgentExecutionModes.Standard;
     public string Status { get; set; } = string.Empty;
     public string StartedAt { get; set; } = string.Empty;
     public string Duration { get; set; } = string.Empty;
     public double Progress { get; set; }
+    public string? ParentExecutionId { get; set; }
+    public AgentExecution? ParentExecution { get; set; }
+    public List<AgentExecution> ChildExecutions { get; set; } = [];
 
     /// <summary>The branch created for this execution (e.g., "fleet/42-add-auth").</summary>
     public string? BranchName { get; set; }
