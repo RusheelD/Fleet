@@ -9,6 +9,7 @@ public interface IChatService
     Task<ChatSessionDto> CreateSessionAsync(string projectId, string title);
     Task<bool> RenameSessionAsync(string projectId, string sessionId, string title);
     Task<bool> DeleteSessionAsync(string projectId, string sessionId);
+    Task<bool> CancelGenerationAsync(string projectId, string sessionId);
     Task<SendMessageResponseDto> SendMessageAsync(
         string projectId,
         string sessionId,

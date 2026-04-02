@@ -230,6 +230,82 @@ public class ChatServiceTests
     // ── SendMessageAsync ─────────────────────────────────────
 
     [TestMethod]
+    public async Task CancelGenerationAsync_MissingSession_ReturnsFalse()
+    {
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new List<ChatSessionDto>());
+
+        var result = await _sut.CancelGenerationAsync(ProjectId, SessionId);
+
+        Assert.IsFalse(result);
+    }
+
+    [TestMethod]
+    public async Task CancelGenerationAsync_ClearsStuckGeneratingFlag_WhenNoInFlightRequestExists()
+    {
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new List<ChatSessionDto>
+            {
+                new(SessionId, "Chat 1", "Generating", "2024-01-01", true, true),
+            });
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+
+        var result = await _sut.CancelGenerationAsync(ProjectId, SessionId);
+
+        Assert.IsTrue(result);
+        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task CancelGenerationAsync_CancelsActiveDeferredGeneration()
+    {
+        var backgroundSut = CreateBackgroundCapableChatService();
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new List<ChatSessionDto>
+            {
+                new(SessionId, "Chat 1", "Generating", "2024-01-01", true, true),
+            });
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<LLMRequest, CancellationToken>(async (_, cancellationToken) =>
+            {
+                requestStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new LLMResponse("unreachable", null);
+            });
+
+        var response = await backgroundSut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+        Assert.IsTrue(response.IsDeferred);
+
+        await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var canceled = await backgroundSut.CancelGenerationAsync(ProjectId, SessionId);
+
+        Assert.IsTrue(canceled);
+        await Task.Delay(100);
+
+        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.AtLeastOnce);
+        _usageLedgerService.Verify(
+            s => s.RefundRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [TestMethod]
     public async Task SendMessageAsync_SimpleResponse_ReturnsAssistantMessage()
     {
         var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "2024-01-01");

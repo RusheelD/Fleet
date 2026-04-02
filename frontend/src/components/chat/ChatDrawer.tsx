@@ -7,10 +7,10 @@ import { ToolEventMessage } from './ToolEventMessage'
 
 import {
     useChatData, useChatMessages, useCreateChatSession,
-    useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession,
+    useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession, useCancelChatGeneration,
     cancelChatSessionRequests, sendChatMessage, getApiErrorMessage,
 } from '../../proxies'
-import { useChatGenerating, useAuth, usePreferences, useIsMobile } from '../../hooks'
+import { useAuth, usePreferences, useIsMobile } from '../../hooks'
 import { CHAT_TOOL_EVENT_WINDOW_EVENT, type ChatToolEventPayload } from '../../hooks/useServerEvents'
 import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatMessageData, SendMessageResponse, ToolEvent } from '../../models'
@@ -95,6 +95,14 @@ function buildAttachmentsQueryKey(projectId: string | undefined, sessionId: stri
     return ['chat-attachments', JSON.stringify([sessionId, projectId])]
 }
 
+function addSessionId(current: string[], sessionId: string): string[] {
+    return current.includes(sessionId) ? current : [...current, sessionId]
+}
+
+function removeSessionId(current: string[], sessionId: string): string[] {
+    return current.filter((candidate) => candidate !== sessionId)
+}
+
 export function ChatDrawer({
     projectId,
     onClose,
@@ -107,8 +115,8 @@ export function ChatDrawer({
     const [message, setMessage] = useState('')
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
-    const [isThinking, setIsThinking] = useState(false)
-    const { isGenerating, setIsGenerating } = useChatGenerating()
+    const [pendingMessageSessionIds, setPendingMessageSessionIds] = useState<string[]>([])
+    const [optimisticGeneratingSessionIds, setOptimisticGeneratingSessionIds] = useState<string[]>([])
     const { user } = useAuth()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -125,6 +133,7 @@ export function ChatDrawer({
     const createSessionMutation = useCreateChatSession(projectId)
     const deleteSessionMutation = useDeleteSession(projectId)
     const renameSessionMutation = useRenameSession(projectId)
+    const cancelGenerationMutation = useCancelChatGeneration(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
@@ -142,46 +151,24 @@ export function ChatDrawer({
     )
     const hasUploadingAttachments = pendingAttachments.length > 0 || uploadMutation.isPending
 
-    // Detect if the active session has a pending generate on the server (e.g. after page refresh)
     const activeSessionData = useMemo(
         () => sessions.find(s => s.id === activeSession),
         [sessions, activeSession]
     )
-
-    // Restore thinking/generating state from the server flag on mount or session switch
-    useEffect(() => {
-        if (activeSessionData?.isGenerating && !isThinking) {
-            setIsThinking(true)
-            setIsGenerating(true)
-        }
-    }, [activeSessionData?.isGenerating, activeSession]) // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Track the message count when thinking started so we can detect *new* assistant replies
-    const messageCountAtThinkingStart = useRef(serverMessages.length)
-    useEffect(() => {
-        if (isThinking) {
-            messageCountAtThinkingStart.current = serverMessages.length
-        }
-    }, [isThinking]) // eslint-disable-line react-hooks/exhaustive-deps
-
-    // When polling picks up a NEW assistant response (added after thinking started), clear thinking
-    useEffect(() => {
-        if (!isThinking) return
-        // Only consider messages that arrived after thinking started
-        if (serverMessages.length <= messageCountAtThinkingStart.current) return
-        const lastMsg = serverMessages[serverMessages.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant') {
-            setIsThinking(false)
-            setIsGenerating(false)
-            // Don't clear optimistic here - the displayMessages dedup handles the
-            // transition seamlessly. Optimistic messages are cleaned up in doSend's
-            // .then() after queries are refreshed.
-            void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
-            if (isGenerating) {
-                void queryClient.invalidateQueries({ queryKey: ['work-items'] })
-            }
-        }
-    }, [serverMessages, isThinking]) // eslint-disable-line react-hooks/exhaustive-deps
+    const activeSessionIsSending = Boolean(activeSession && pendingMessageSessionIds.includes(activeSession))
+    const activeSessionIsGenerating = Boolean(
+        activeSession
+        && (
+            activeSessionData?.isGenerating
+            || optimisticGeneratingSessionIds.includes(activeSession)
+        )
+    )
+    const activeSessionIsBusy = activeSessionIsSending || activeSessionIsGenerating
+    const isCancelingActiveSession = Boolean(
+        activeSession
+        && cancelGenerationMutation.isPending
+        && cancelGenerationMutation.variables === activeSession
+    )
 
     const displayMessages = useMemo(
         () => reconcileDisplayMessages(serverMessages, optimisticMessages),
@@ -196,6 +183,18 @@ export function ChatDrawer({
             return next.length === current.length ? current : next
         })
     }, [serverMessages])
+
+    useEffect(() => {
+        const sessionIds = new Set(sessions.map((session) => session.id))
+        setPendingMessageSessionIds((current) => {
+            const next = current.filter((sessionId) => sessionIds.has(sessionId))
+            return next.length === current.length ? current : next
+        })
+        setOptimisticGeneratingSessionIds((current) => {
+            const next = current.filter((sessionId) => sessionIds.has(sessionId))
+            return next.length === current.length ? current : next
+        })
+    }, [sessions])
 
     useEffect(() => {
         const handleToolEvent = (event: Event) => {
@@ -243,7 +242,7 @@ export function ChatDrawer({
     // Scroll to bottom when messages change
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [displayMessages.length, isThinking])
+    }, [displayMessages.length, activeSessionIsBusy])
 
     useEffect(() => {
         if (!onRequestChatWidth || !chatWidth || !messagesContainerRef.current) {
@@ -310,8 +309,10 @@ export function ChatDrawer({
             timestamp: new Date().toISOString(),
             attachments: messageAttachments,
         }])
-        setIsThinking(true)
-        setIsGenerating(generateWorkItems)
+        setPendingMessageSessionIds((current) => addSessionId(current, sessionId))
+        if (generateWorkItems) {
+            setOptimisticGeneratingSessionIds((current) => addSessionId(current, sessionId))
+        }
         setLastSendResponse(null)
         setLiveToolEvents([])
 
@@ -332,9 +333,9 @@ export function ChatDrawer({
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
+                setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
+                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
                 if (!response.isDeferred) {
-                    setIsThinking(false)
-                    setIsGenerating(false)
                     setLiveToolEvents([])
                 }
                 if (generateWorkItems && !response.isDeferred) {
@@ -352,8 +353,8 @@ export function ChatDrawer({
                     generateWorkItems ? 'Failed to generate work items.' : 'Failed to send message.',
                 )
 
-                setIsThinking(false)
-                setIsGenerating(false)
+                setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
+                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
                 setLastSendResponse(null)
                 setOptimisticMessages((current) => [
                     ...current.filter((entry) => entry.role === 'user'),
@@ -372,7 +373,7 @@ export function ChatDrawer({
 
     const handleSend = (generateWorkItems = false) => {
         const userContent = message.trim()
-        if (isThinking || createSessionMutation.isPending) return
+        if (activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession) return
         if (hasUploadingAttachments) return
         if (generateWorkItems && !allowGenerateWorkItems) return
         if (!userContent && !generateWorkItems) return
@@ -408,12 +409,13 @@ export function ChatDrawer({
         cancelChatSessionRequests(projectId, sessionId)
 
         if (activeSession === sessionId) {
-            setIsThinking(false)
-            setIsGenerating(false)
             setLastSendResponse(null)
             setOptimisticMessages([])
             setLiveToolEvents([])
         }
+
+        setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
+        setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
 
         deleteSessionMutation.mutate(sessionId, {
             onSuccess: () => {
@@ -434,6 +436,22 @@ export function ChatDrawer({
 
     const handleRenameSession = (sessionId: string, title: string) => {
         renameSessionMutation.mutate({ sessionId, title })
+    }
+
+    const handleCancelGeneration = () => {
+        const sessionId = activeSession
+        if (!sessionId) {
+            return
+        }
+
+        cancelGenerationMutation.mutate(sessionId, {
+            onSuccess: () => {
+                setLastSendResponse(null)
+                setLiveToolEvents([])
+                setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
+                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
+            },
+        })
     }
 
     // Show tool events from last response
@@ -487,7 +505,12 @@ export function ChatDrawer({
 
     return (
         <div className={mergeClasses(styles.drawer, isCompact && styles.drawerCompact, isMobile && styles.drawerMobile)}>
-            <ChatDrawerHeader onClose={onClose} />
+            <ChatDrawerHeader
+                onClose={onClose}
+                isGenerating={activeSessionIsGenerating}
+                isCanceling={isCancelingActiveSession}
+                onCancelGeneration={activeSessionIsGenerating ? handleCancelGeneration : undefined}
+            />
 
             <ChatSessionBar
                 sessions={sessions}
@@ -529,7 +552,7 @@ export function ChatDrawer({
                     {toolEvents.length > 0 && toolEvents.map((evt, i) => (
                         <ToolEventMessage key={`tool-${i}`} event={evt} />
                     ))}
-                    {isThinking && (
+                    {activeSessionIsBusy && (
                         <div
                             className={mergeClasses(
                                 styles.thinkingRow,
@@ -539,7 +562,7 @@ export function ChatDrawer({
                         >
                             <Spinner
                                 size="tiny"
-                                label={isGenerating
+                                label={activeSessionIsGenerating
                                     ? 'Fleet AI is generating work items - this may take a while...'
                                     : 'Fleet AI is thinking...'}
                                 labelPosition="after"
@@ -563,7 +586,7 @@ export function ChatDrawer({
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
                 forceStackedLayout={hasConstrainedPaneWidth}
-                disabled={isThinking || createSessionMutation.isPending || hasUploadingAttachments}
+                disabled={activeSessionIsBusy || createSessionMutation.isPending || hasUploadingAttachments || isCancelingActiveSession}
                 uploading={uploadMutation.isPending}
             />
         </div>

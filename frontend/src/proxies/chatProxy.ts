@@ -40,6 +40,10 @@ export function buildRenameSessionPath(projectId: string | undefined, sessionId:
   return `${buildChatSessionsPath(projectId)}/${sessionId}`
 }
 
+export function buildCancelGenerationPath(projectId: string | undefined, sessionId: string): string {
+  return `${chatBase(projectId)}/sessions/${sessionId}/cancel-generation`
+}
+
 function buildSessionRequestKey(projectId: string | undefined, sessionId: string): string {
   return `${projectId?.trim() ?? '__global__'}::${sessionId}`
 }
@@ -100,6 +104,11 @@ export function deleteChatSession(projectId: string | undefined, sessionId: stri
 
 export function renameChatSession(projectId: string | undefined, sessionId: string, title: string): Promise<void> {
   return put<void>(buildRenameSessionPath(projectId, sessionId), { title })
+}
+
+export function cancelChatGeneration(projectId: string | undefined, sessionId: string): Promise<void> {
+  cancelChatSessionRequests(projectId, sessionId)
+  return post<void>(buildCancelGenerationPath(projectId, sessionId))
 }
 
 export function cancelChatSessionRequests(projectId: string | undefined, sessionId: string): void {

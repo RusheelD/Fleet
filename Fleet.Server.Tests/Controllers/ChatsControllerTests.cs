@@ -97,6 +97,26 @@ public class ChatsControllerTests
     }
 
     [TestMethod]
+    public async Task CancelGeneration_Found_ReturnsNoContent()
+    {
+        _chatService.Setup(s => s.CancelGenerationAsync(ProjectId, SessionId)).ReturnsAsync(true);
+
+        var result = await _sut.CancelGeneration(ProjectId, SessionId);
+
+        Assert.IsInstanceOfType<NoContentResult>(result);
+    }
+
+    [TestMethod]
+    public async Task CancelGeneration_NotFound_Returns404()
+    {
+        _chatService.Setup(s => s.CancelGenerationAsync(ProjectId, SessionId)).ReturnsAsync(false);
+
+        var result = await _sut.CancelGeneration(ProjectId, SessionId);
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
     public async Task RenameSession_Found_ReturnsNoContent()
     {
         _chatService.Setup(s => s.RenameSessionAsync(ProjectId, SessionId, "Renamed")).ReturnsAsync(true);

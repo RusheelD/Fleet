@@ -126,6 +126,34 @@ public class ChatService(
         return await chatSessionRepository.DeleteSessionAsync(projectId, sessionId);
     }
 
+    public async Task<bool> CancelGenerationAsync(string projectId, string sessionId)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId
+        });
+
+        var session = (await chatSessionRepository.GetSessionsByProjectIdAsync(projectId))
+            .FirstOrDefault(candidate => string.Equals(candidate.Id, sessionId, StringComparison.Ordinal));
+        if (session is null)
+            return false;
+
+        var requestKey = BuildSessionRequestKey(projectId, sessionId);
+        var hasInFlightRequest = ActiveSessionRequests.ContainsKey(requestKey);
+
+        if (hasInFlightRequest)
+        {
+            CancelInFlightRequest(projectId, sessionId);
+            return true;
+        }
+
+        if (session.IsGenerating)
+            await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, false);
+
+        return true;
+    }
+
     public async Task<SendMessageResponseDto> SendMessageAsync(
         string projectId,
         string sessionId,

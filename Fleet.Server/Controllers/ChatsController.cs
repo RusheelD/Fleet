@@ -59,6 +59,32 @@ public class ChatsController(
         return deleted ? NoContent() : NotFound();
     }
 
+    [HttpPost("sessions/{sessionId}/cancel-generation")]
+    public async Task<IActionResult> CancelGeneration(string projectId, string sessionId)
+    {
+        var canceled = await chatService.CancelGenerationAsync(projectId, sessionId);
+        if (canceled)
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId });
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.WorkItemsUpdated,
+                new { projectId, sessionId });
+            await eventPublisher.PublishUserEventAsync(
+                userId,
+                ServerEventTopics.ProjectsUpdated,
+                new { projectId });
+        }
+
+        return canceled ? NoContent() : NotFound();
+    }
+
     [HttpPut("sessions/{sessionId}")]
     public async Task<IActionResult> RenameSession(string projectId, string sessionId, [FromBody] RenameSessionRequest request)
     {

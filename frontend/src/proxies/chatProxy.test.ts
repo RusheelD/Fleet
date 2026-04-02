@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildCancelGenerationPath,
   buildChatAttachmentsPath,
   buildChatDataPath,
   buildChatMessagesPath,
@@ -38,5 +39,12 @@ describe('chat proxy scoped paths', () => {
       .toBe('/api/projects/proj-1/chat/sessions/sess-9')
     expect(buildRenameSessionPath(undefined, 'sess-9'))
       .toBe('/api/chat/sessions/sess-9')
+  })
+
+  it('builds cancel-generation endpoints for both scopes', () => {
+    expect(buildCancelGenerationPath('proj-1', 'sess-9'))
+      .toBe('/api/projects/proj-1/chat/sessions/sess-9/cancel-generation')
+    expect(buildCancelGenerationPath(undefined, 'sess-9'))
+      .toBe('/api/chat/sessions/sess-9/cancel-generation')
   })
 })

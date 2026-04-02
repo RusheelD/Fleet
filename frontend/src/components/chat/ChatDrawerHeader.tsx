@@ -8,6 +8,7 @@ import {
 import {
     BotRegular,
     DismissRegular,
+    StopRegular,
 } from '@fluentui/react-icons'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
@@ -69,9 +70,17 @@ const useStyles = makeStyles({
 
 interface ChatDrawerHeaderProps {
     onClose: () => void
+    isGenerating?: boolean
+    isCanceling?: boolean
+    onCancelGeneration?: () => void
 }
 
-export function ChatDrawerHeader({ onClose }: ChatDrawerHeaderProps) {
+export function ChatDrawerHeader({
+    onClose,
+    isGenerating = false,
+    isCanceling = false,
+    onCancelGeneration,
+}: ChatDrawerHeaderProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -87,6 +96,17 @@ export function ChatDrawerHeader({ onClose }: ChatDrawerHeaderProps) {
                 </div>
             </div>
             <div className={styles.drawerHeaderRight}>
+                {isGenerating && onCancelGeneration && (
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<StopRegular />}
+                        onClick={onCancelGeneration}
+                        disabled={isCanceling}
+                    >
+                        {isCanceling ? 'Canceling...' : 'Cancel'}
+                    </Button>
+                )}
                 <Button appearance="subtle" size="small" icon={<DismissRegular />} onClick={onClose} aria-label="Close chat" />
             </div>
         </div>

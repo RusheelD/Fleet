@@ -22,7 +22,7 @@ import {
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useCurrentProject, usePreferences, useServerEvents, ChatGeneratingProvider, useIsMobile } from '../../hooks'
+import { useCurrentProject, usePreferences, useServerEvents, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 
 import type { NavItemConfig } from '../../models'
@@ -624,26 +624,22 @@ export function Layout() {
         </div>
     )
 
-    return (
-        <ChatGeneratingProvider>
-            {isMobile ? (
-                <div className={mergeClasses(styles.root, styles.rootMobile)}>
-                    {mobileSidebarOpen && (
-                        <div className={styles.mobileSidebarBackdrop} onClick={() => setMobileSidebarOpen(false)} />
-                    )}
-                    <div className={mergeClasses(styles.mobileSidebarDrawer, mobileSidebarOpen && styles.mobileSidebarDrawerOpen)}>
-                        {sidebarNav}
-                    </div>
-                    {content}
-                </div>
-            ) : (
-                <SplitView
-                    containerClassName={styles.root}
-                    firstPaneClassName={styles.sidebarPane}
-                    first={sidebarNav}
-                    second={content}
-                />
+    return isMobile ? (
+        <div className={mergeClasses(styles.root, styles.rootMobile)}>
+            {mobileSidebarOpen && (
+                <div className={styles.mobileSidebarBackdrop} onClick={() => setMobileSidebarOpen(false)} />
             )}
-        </ChatGeneratingProvider>
+            <div className={mergeClasses(styles.mobileSidebarDrawer, mobileSidebarOpen && styles.mobileSidebarDrawerOpen)}>
+                {sidebarNav}
+            </div>
+            {content}
+        </div>
+    ) : (
+        <SplitView
+            containerClassName={styles.root}
+            firstPaneClassName={styles.sidebarPane}
+            first={sidebarNav}
+            second={content}
+        />
     )
 }

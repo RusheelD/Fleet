@@ -5,7 +5,7 @@ import {
   getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
-  getChatData, getMessages, createChatSession, sendChatMessage,
+  getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration,
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
   search,
   getSubscription,
@@ -17,7 +17,7 @@ import type {
   CreateWorkItemRequest, UpdateWorkItemRequest,
   CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest,
 } from './'
-import type { AgentExecution, AgentInfo, ChatAttachment, LogEntry, UserProfile, UserPreferences } from '../models'
+import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
@@ -793,6 +793,50 @@ export function useRenameSession(projectId: string | undefined) {
       renameChatSession(projectId, sessionId, title),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
+export function useCancelChatGeneration(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => cancelChatGeneration(projectId, sessionId),
+    onMutate: async (sessionId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['chat-data'] })
+
+      const previousChatData = queryClient.getQueriesData<ChatData>({ queryKey: ['chat-data'] })
+
+      queryClient.setQueriesData<ChatData>(
+        { queryKey: ['chat-data'] },
+        (current) => {
+          if (!current) return current
+          return {
+            ...current,
+            sessions: current.sessions.map((session) =>
+              session.id === sessionId
+                ? { ...session, isGenerating: false }
+                : session,
+            ),
+          }
+        },
+      )
+
+      return { previousChatData }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard-slug'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: (_error, _sessionId, context) => {
+      if (context?.previousChatData) {
+        for (const [queryKey, snapshot] of context.previousChatData) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
     },
   })
 }
