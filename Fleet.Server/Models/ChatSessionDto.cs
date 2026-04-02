@@ -6,5 +6,9 @@ public record ChatSessionDto(
     string LastMessage,
     string Timestamp,
     bool IsActive,
-    bool IsGenerating = false
+    bool IsGenerating = false,
+    string GenerationState = ChatGenerationStates.Idle,
+    string? GenerationStatus = null,
+    string? GenerationUpdatedAtUtc = null,
+    ChatSessionActivityDto[]? RecentActivity = null
 );

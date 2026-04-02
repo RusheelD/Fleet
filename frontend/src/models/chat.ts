@@ -1,3 +1,21 @@
+export type ChatGenerationState =
+  | 'idle'
+  | 'running'
+  | 'canceling'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+  | 'interrupted'
+
+export interface ChatSessionActivity {
+  id: string
+  kind: 'status' | 'tool' | 'error'
+  message: string
+  timestampUtc: string
+  toolName?: string | null
+  succeeded?: boolean | null
+}
+
 export interface ChatMessageData {
   id: string
   role: 'user' | 'assistant'
@@ -13,6 +31,10 @@ export interface ChatSessionData {
   timestamp: string
   isActive: boolean
   isGenerating: boolean
+  generationState: ChatGenerationState
+  generationStatus: string | null
+  generationUpdatedAtUtc: string | null
+  recentActivity: ChatSessionActivity[]
 }
 
 export interface ChatData {

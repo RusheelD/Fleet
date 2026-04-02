@@ -14,6 +14,7 @@ import {
 import {
     AddRegular,
     CheckmarkRegular,
+    CircleRegular,
     DeleteRegular,
     DismissRegular,
     EditRegular,
@@ -52,10 +53,6 @@ const useStyles = makeStyles({
         fontSize: appTokens.fontSize.sm,
         color: appTokens.color.textTertiary,
     },
-    generatingMeta: {
-        color: appTokens.color.brand,
-        fontWeight: appTokens.fontWeight.semibold,
-    },
     sessionsScroller: {
         display: 'flex',
         alignItems: 'stretch',
@@ -93,6 +90,50 @@ const useStyles = makeStyles({
         maxWidth: '240px',
         minWidth: '120px',
         justifyContent: 'flex-start',
+    },
+    sessionButtonContent: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+        width: '100%',
+    },
+    sessionStatusRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+        width: '100%',
+    },
+    sessionStatusDot: {
+        color: appTokens.color.brand,
+        fontSize: appTokens.fontSize.xxs,
+        flexShrink: 0,
+    },
+    sessionStatusDotDanger: {
+        color: appTokens.color.danger,
+    },
+    sessionStatusDotWarning: {
+        color: appTokens.color.warning,
+    },
+    sessionStatusDotInfo: {
+        color: appTokens.color.info,
+    },
+    sessionStatus: {
+        display: 'block',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        width: '100%',
+        fontSize: appTokens.fontSize.xs,
+        color: appTokens.color.textTertiary,
+    },
+    sessionStatusActive: {
+        color: appTokens.color.onBrandTextMuted,
+    },
+    sessionStatusDotActive: {
+        color: appTokens.color.textOnBrand,
     },
     sessionButtonMobile: {
         maxWidth: 'min(66vw, 220px)',
@@ -162,7 +203,6 @@ export function ChatSessionBar({
     const isCompact = preferences?.compactMode ?? false
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
     const [editTitle, setEditTitle] = useState('')
-
     useEffect(() => {
         if (!editingSessionId) return
 
@@ -199,6 +239,37 @@ export function ChatSessionBar({
         const confirmed = window.confirm(`Delete chat session "${session.title}"?`)
         if (confirmed) {
             onDeleteSession(session.id)
+        }
+    }
+
+    const getSessionStatus = (session: ChatSessionData) => {
+        if (session.isGenerating) {
+            return session.generationStatus ?? 'Generating work items'
+        }
+
+        switch (session.generationState) {
+            case 'canceling':
+                return session.generationStatus ?? 'Canceling generation...'
+            case 'failed':
+            case 'canceled':
+            case 'interrupted':
+                return session.generationStatus
+            default:
+                return null
+        }
+    }
+
+    const getSessionStatusDotClassName = (session: ChatSessionData) => {
+        switch (session.generationState) {
+            case 'failed':
+                return styles.sessionStatusDotDanger
+            case 'canceled':
+            case 'interrupted':
+                return styles.sessionStatusDotWarning
+            case 'canceling':
+                return styles.sessionStatusDotInfo
+            default:
+                return undefined
         }
     }
 
@@ -278,70 +349,72 @@ export function ChatSessionBar({
                                     onClick={() => onSelectSession(session.id)}
                                     disabled={actionsDisabled}
                                 >
-                                    <span className={styles.sessionTitle}>{session.title}</span>
+                                    <span className={styles.sessionButtonContent}>
+                                        <span className={styles.sessionTitle}>{session.title}</span>
+                                        {getSessionStatus(session) && (
+                                            <span className={styles.sessionStatusRow}>
+                                                <CircleRegular
+                                                    className={mergeClasses(
+                                                        styles.sessionStatusDot,
+                                                        session.id === activeSessionId && styles.sessionStatusDotActive,
+                                                        getSessionStatusDotClassName(session),
+                                                    )}
+                                                />
+                                                <span
+                                                    className={mergeClasses(
+                                                        styles.sessionStatus,
+                                                        session.id === activeSessionId && styles.sessionStatusActive,
+                                                    )}
+                                                >
+                                                    {getSessionStatus(session)}
+                                                </span>
+                                            </span>
+                                        )}
+                                    </span>
                                 </Button>
 
                                 <div className={styles.sessionActions}>
-                                    {session.isGenerating && (
-                                        <>
-                                            <Text className={mergeClasses(styles.sessionMeta, styles.generatingMeta)}>
-                                                {isCancelingSession?.(session.id) ? 'Canceling...' : 'Generating'}
-                                            </Text>
-                                            {onCancelGeneration && (
-                                                <Button
-                                                    appearance="outline"
-                                                    size="small"
-                                                    icon={<StopRegular />}
-                                                    onClick={() => onCancelGeneration(session.id)}
-                                                    disabled={actionsDisabled || isCancelingSession?.(session.id)}
-                                                >
-                                                    Cancel
-                                                </Button>
-                                            )}
-                                        </>
-                                    )}
-
                                     {(onRenameSession || onDeleteSession) && (
-                                    <Menu>
-                                        <MenuTrigger disableButtonEnhancement>
-                                            <Button
-                                                appearance="subtle"
-                                                size="small"
-                                                icon={<MoreHorizontalRegular />}
-                                                aria-label={`Session actions for ${session.title}`}
-                                                disabled={actionsDisabled}
-                                            />
-                                        </MenuTrigger>
-                                        <MenuPopover>
-                                            <MenuList>
-                                                {session.isGenerating && onCancelGeneration && (
-                                                    <MenuItem
-                                                        icon={<StopRegular />}
-                                                        disabled={isCancelingSession?.(session.id)}
-                                                        onClick={() => onCancelGeneration(session.id)}
-                                                    >
-                                                        {isCancelingSession?.(session.id) ? 'Canceling...' : 'Cancel generation'}
-                                                    </MenuItem>
-                                                )}
-                                                {onRenameSession && (
-                                                    <MenuItem
-                                                        icon={<EditRegular />}
-                                                        onClick={() => beginRename(session)}
-                                                    >
-                                                        Rename
-                                                    </MenuItem>
-                                                )}
-                                                {onDeleteSession && (
-                                                    <MenuItem
-                                                        icon={<DeleteRegular />}
-                                                        onClick={() => requestDelete(session)}
-                                                    >
-                                                        Delete
-                                                    </MenuItem>
-                                                )}
-                                            </MenuList>
-                                        </MenuPopover>
-                                    </Menu>
+                                        <Menu>
+                                            <MenuTrigger disableButtonEnhancement>
+                                                <Button
+                                                    appearance="subtle"
+                                                    size="small"
+                                                    icon={<MoreHorizontalRegular />}
+                                                    aria-label={`Session actions for ${session.title}`}
+                                                    disabled={actionsDisabled}
+                                                />
+                                            </MenuTrigger>
+                                            <MenuPopover>
+                                                <MenuList>
+                                                    {session.isGenerating && onCancelGeneration && (
+                                                        <MenuItem
+                                                            icon={<StopRegular />}
+                                                            disabled={isCancelingSession?.(session.id)}
+                                                            onClick={() => onCancelGeneration(session.id)}
+                                                        >
+                                                            {isCancelingSession?.(session.id) ? 'Canceling...' : 'Cancel generation'}
+                                                        </MenuItem>
+                                                    )}
+                                                    {onRenameSession && (
+                                                        <MenuItem
+                                                            icon={<EditRegular />}
+                                                            onClick={() => beginRename(session)}
+                                                        >
+                                                            Rename
+                                                        </MenuItem>
+                                                    )}
+                                                    {onDeleteSession && (
+                                                        <MenuItem
+                                                            icon={<DeleteRegular />}
+                                                            onClick={() => requestDelete(session)}
+                                                        >
+                                                            Delete
+                                                        </MenuItem>
+                                                    )}
+                                                </MenuList>
+                                            </MenuPopover>
+                                        </Menu>
                                     )}
                                 </div>
                             </>

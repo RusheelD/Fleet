@@ -23,7 +23,7 @@ const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
 const EXECUTIONS_POLL_MS = 10000
 const LOGS_POLL_MS = 10000
-const CHAT_DATA_POLL_MS = 10000
+const CHAT_DATA_POLL_MS = 4000
 const CHAT_MESSAGES_POLL_MS = 5000
 
 export type DataResult<T> = Pick<UseQueryResult<T>, 'data' | 'error' | 'isError' | 'isLoading' | 'status'>
@@ -814,7 +814,22 @@ export function useCancelChatGeneration(projectId: string | undefined) {
             ...current,
             sessions: current.sessions.map((session) =>
               session.id === sessionId
-                ? { ...session, isGenerating: false }
+                ? {
+                  ...session,
+                  isGenerating: false,
+                  generationState: 'canceled',
+                  generationStatus: 'Generation canceled.',
+                  generationUpdatedAtUtc: new Date().toISOString(),
+                  recentActivity: [
+                    ...(session.recentActivity ?? []),
+                    {
+                      id: `cancel-${sessionId}-${Date.now()}`,
+                      kind: 'status' as const,
+                      message: 'Generation canceled.',
+                      timestampUtc: new Date().toISOString(),
+                    },
+                  ].slice(-16),
+                }
                 : session,
             ),
           }

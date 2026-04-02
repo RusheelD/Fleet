@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
+import type { ChatData, ChatSessionActivity, ChatSessionData } from '../models'
 
 interface ServerEventMessage {
   eventName: string
@@ -9,6 +10,7 @@ interface ServerEventMessage {
 }
 
 export const CHAT_TOOL_EVENT_WINDOW_EVENT = 'fleet:chat-tool-event'
+export const CHAT_SESSION_EVENT_WINDOW_EVENT = 'fleet:chat-session-event'
 
 export interface ChatToolEventPayload {
   projectId?: string | null
@@ -18,6 +20,16 @@ export interface ChatToolEventPayload {
   result: string
   succeeded: boolean
   timestampUtc: string
+}
+
+export interface ChatSessionEventPayload {
+  projectId?: string | null
+  sessionId: string
+  isGenerating: boolean
+  generationState: ChatSessionData['generationState']
+  generationStatus: string | null
+  generationUpdatedAtUtc: string
+  activity?: ChatSessionActivity | null
 }
 
 function parseEventBlock(block: string): ServerEventMessage | null {
@@ -176,6 +188,64 @@ export function useServerEvents(projectId?: string) {
       }
     }
 
+    const appendRecentActivity = (
+      current: ChatSessionActivity[] | undefined,
+      nextActivity: ChatSessionActivity | null | undefined,
+    ): ChatSessionActivity[] => {
+      const existing = current ?? []
+      if (!nextActivity) {
+        return existing
+      }
+
+      const last = existing.length > 0 ? existing[existing.length - 1] : undefined
+      if (
+        last
+        && last.kind === nextActivity.kind
+        && last.message === nextActivity.message
+        && last.toolName === nextActivity.toolName
+        && last.succeeded === nextActivity.succeeded
+      ) {
+        return existing
+      }
+
+      return [...existing, nextActivity].slice(-16)
+    }
+
+    const updateChatSessionCaches = (payload: ChatSessionEventPayload) => {
+      queryClient.setQueriesData<ChatData>(
+        { queryKey: ['chat-data'] },
+        (current) => {
+          if (!current) {
+            return current
+          }
+
+          let changed = false
+          const nextSessions = current.sessions.map((session) => {
+            if (session.id !== payload.sessionId) {
+              return session
+            }
+
+            changed = true
+            return {
+              ...session,
+              isGenerating: payload.isGenerating,
+              generationState: payload.generationState,
+              generationStatus: payload.generationStatus,
+              generationUpdatedAtUtc: payload.generationUpdatedAtUtc,
+              recentActivity: appendRecentActivity(session.recentActivity, payload.activity),
+            }
+          })
+
+          return changed
+            ? {
+              ...current,
+              sessions: nextSessions,
+            }
+            : current
+        },
+      )
+    }
+
     const invalidateForTopicNow = (topic: string) => {
       if (topic === 'connected') {
         refreshMany(['executions', 'logs', 'work-items'])
@@ -257,6 +327,17 @@ export function useServerEvents(projectId?: string) {
           await streamServerEvents(
             streamPath,
             ({ eventName, data }) => {
+              if (eventName === 'chat.session-event') {
+                const detail = data as ChatSessionEventPayload
+                updateChatSessionCaches(detail)
+
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent<ChatSessionEventPayload>(CHAT_SESSION_EVENT_WINDOW_EVENT, {
+                    detail,
+                  }))
+                }
+              }
+
               if (eventName === 'chat.tool-event' && typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent<ChatToolEventPayload>(CHAT_TOOL_EVENT_WINDOW_EVENT, {
                   detail: data as ChatToolEventPayload,

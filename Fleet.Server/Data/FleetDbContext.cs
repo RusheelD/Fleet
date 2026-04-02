@@ -151,6 +151,10 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
         {
             builder.HasKey(s => s.Id);
             builder.Property(s => s.OwnerId).IsRequired();
+            builder.Property(s => s.GenerationState)
+                .HasDefaultValue(Models.ChatGenerationStates.Idle);
+            builder.Property(s => s.RecentActivityJson)
+                .HasDefaultValue("[]");
             builder.HasIndex(s => new { s.OwnerId, s.ProjectId });
 
             builder.HasOne(s => s.Project)

@@ -62,6 +62,16 @@ public class ChatServiceTests
             .Returns(Task.CompletedTask);
         _eventPublisher.Setup(s => s.PublishUserEventAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.MarkStaleGeneratingSessionsAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(0);
+        _chatRepo.Setup(r => r.UpdateSessionGenerationStateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<ChatSessionActivityDto?>()))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.AppendSessionActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ChatSessionActivityDto>()))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
 
         _sut = new ChatService(
             _chatRepo.Object,
@@ -248,13 +258,17 @@ public class ChatServiceTests
             {
                 new(SessionId, "Chat 1", "Generating", "2024-01-01", true, true),
             });
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
-            .Returns(Task.CompletedTask);
 
         var result = await _sut.CancelGenerationAsync(ProjectId, SessionId);
 
         Assert.IsTrue(result);
-        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.Once);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            ChatGenerationStates.Canceled,
+            "Generation canceled.",
+            It.IsAny<ChatSessionActivityDto?>()), Times.Once);
     }
 
     [TestMethod]
@@ -267,10 +281,6 @@ public class ChatServiceTests
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
             .ReturnsAsync(new List<ChatSessionDto>
@@ -299,7 +309,13 @@ public class ChatServiceTests
         Assert.IsTrue(canceled);
         await Task.Delay(100);
 
-        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.AtLeastOnce);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<ChatSessionActivityDto?>()), Times.AtLeastOnce);
         _usageLedgerService.Verify(
             s => s.RefundRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
@@ -542,10 +558,6 @@ public class ChatServiceTests
 
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
             .ReturnsAsync(userMsg);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
-            .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
         _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
@@ -588,12 +600,8 @@ public class ChatServiceTests
 
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
             .ReturnsAsync(userMsg);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
-            .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", It.IsAny<string>()))
             .ReturnsAsync(assistantMsg);
 
@@ -619,10 +627,6 @@ public class ChatServiceTests
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.AddMessageAsync(
                 ProjectId,
@@ -662,10 +666,6 @@ public class ChatServiceTests
             .ReturnsAsync(userMsg);
         _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
             .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
-            .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
         _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
@@ -704,8 +704,20 @@ public class ChatServiceTests
         await assistantPersisted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         _chatRepo.Verify(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items"), Times.Once);
-        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true), Times.Once);
-        _chatRepo.Verify(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false), Times.Once);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            true,
+            ChatGenerationStates.Running,
+            It.IsAny<string?>(),
+            It.IsAny<ChatSessionActivityDto?>()), Times.AtLeastOnce);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            ChatGenerationStates.Completed,
+            "Work-item generation completed.",
+            It.IsAny<ChatSessionActivityDto?>()), Times.Once);
     }
 
     // ── Attachment methods ───────────────────────────────────
@@ -816,14 +828,8 @@ public class ChatServiceTests
 
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
             .ReturnsAsync(userMsg);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
-            .Returns(Task.CompletedTask);
-        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
-            .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatMessageDto> { userMsg });
-        _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId))
-            .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done"))
             .ReturnsAsync(assistantMsg);
 

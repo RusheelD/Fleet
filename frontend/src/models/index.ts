@@ -1,7 +1,16 @@
 export type { WorkItem, WorkItemState, WorkItemLevel } from './work-item'
 export type { AgentExecution, AgentInfo, LogEntry } from './agent'
 export type { ProjectData, SlugCheckResult } from './project'
-export type { ChatMessageData, ChatSessionData, ChatData, ToolEvent, SendMessageResponse, ChatAttachment } from './chat'
+export type {
+  ChatAttachment,
+  ChatData,
+  ChatGenerationState,
+  ChatSessionActivity,
+  ChatMessageData,
+  ChatSessionData,
+  SendMessageResponse,
+  ToolEvent,
+} from './chat'
 export type { NavItemConfig } from './navigation'
 export type { PlanData } from './plan'
 export type { SearchResult } from './search'

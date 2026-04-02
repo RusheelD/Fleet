@@ -11,6 +11,10 @@ public class ChatSession
 
     /// <summary>True while a generate-work-items request is in-flight for this session.</summary>
     public bool IsGenerating { get; set; }
+    public string GenerationState { get; set; } = Models.ChatGenerationStates.Idle;
+    public string? GenerationStatus { get; set; }
+    public DateTime? GenerationUpdatedAtUtc { get; set; }
+    public string RecentActivityJson { get; set; } = "[]";
 
     // Foreign key (null for global chat sessions)
     public string? ProjectId { get; set; }

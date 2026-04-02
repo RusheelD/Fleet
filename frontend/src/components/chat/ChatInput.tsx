@@ -15,6 +15,9 @@ import {
     AttachRegular,
     ChevronDownRegular,
     TaskListAddRegular,
+    DismissCircleRegular,
+    InfoRegular,
+    WarningRegular,
 } from '@fluentui/react-icons'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
@@ -149,6 +152,23 @@ const useStyles = makeStyles({
             width: '100%',
         },
     },
+    inputButtonsCluster: {
+        display: 'flex',
+        gap: appTokens.space.xs,
+        justifyContent: 'flex-end',
+        flexWrap: 'wrap',
+        minWidth: 0,
+    },
+    inputButtonsClusterMobile: {
+        width: '100%',
+        justifyContent: 'stretch',
+        '> *': {
+            flex: 1,
+        },
+    },
+    cancelButton: {
+        flexShrink: 0,
+    },
     inputHint: {
         color: appTokens.color.textMuted,
     },
@@ -162,21 +182,69 @@ const useStyles = makeStyles({
     hiddenInput: {
         display: 'none',
     },
+    statusRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: appTokens.space.xs,
+        minWidth: 0,
+    },
+    statusText: {
+        color: appTokens.color.textSecondary,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    statusTextCompact: {
+        fontSize: appTokens.fontSize.xs,
+    },
+    statusIcon: {
+        flexShrink: 0,
+        color: appTokens.color.info,
+    },
+    statusIconBrand: {
+        color: appTokens.color.brand,
+    },
+    statusIconWarning: {
+        color: appTokens.color.warning,
+    },
+    statusIconDanger: {
+        color: appTokens.color.danger,
+    },
 })
 
 interface ChatInputProps {
     value: string
     onChange: (value: string) => void
     onSend?: () => void
-    onGenerate?: () => void
-    allowGenerate?: boolean
-    onFileSelect?: (file: File) => void
-    disabled?: boolean
-    uploading?: boolean
-    forceStackedLayout?: boolean
+  onGenerate?: () => void
+  onCancelGeneration?: () => void
+  allowGenerate?: boolean
+  onFileSelect?: (file: File) => void
+  disabled?: boolean
+  uploading?: boolean
+  forceStackedLayout?: boolean
+  isGenerating?: boolean
+  canceling?: boolean
+  statusMessage?: string | null
+  statusState?: 'idle' | 'running' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
 }
 
-export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate = true, onFileSelect, disabled, uploading, forceStackedLayout = false }: ChatInputProps) {
+export function ChatInput({
+    value,
+    onChange,
+    onSend,
+    onGenerate,
+    onCancelGeneration,
+    allowGenerate = true,
+    onFileSelect,
+    disabled,
+    uploading,
+    forceStackedLayout = false,
+    isGenerating = false,
+    canceling = false,
+    statusMessage,
+    statusState = 'idle',
+}: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -187,6 +255,36 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
 
     const hasText = value.trim().length > 0
     const canGenerate = allowGenerate && typeof onGenerate === 'function'
+    const showCancelButton = isGenerating || canceling
+    const showStatus = Boolean(statusMessage)
+
+    const statusIconClassName = (() => {
+        switch (statusState) {
+            case 'running':
+                return styles.statusIconBrand
+            case 'canceling':
+            case 'canceled':
+            case 'interrupted':
+                return styles.statusIconWarning
+            case 'failed':
+                return styles.statusIconDanger
+            default:
+                return undefined
+        }
+    })()
+
+    const statusIcon = (() => {
+        switch (statusState) {
+            case 'failed':
+                return <DismissCircleRegular className={mergeClasses(styles.statusIcon, statusIconClassName)} />
+            case 'canceling':
+            case 'canceled':
+            case 'interrupted':
+                return <WarningRegular className={mergeClasses(styles.statusIcon, statusIconClassName)} />
+            default:
+                return <InfoRegular className={mergeClasses(styles.statusIcon, statusIconClassName)} />
+        }
+    })()
 
     const autoResize = useCallback(() => {
         const el = textareaRef.current
@@ -214,6 +312,14 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
 
     return (
         <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact, isMobile && styles.inputAreaMobile)}>
+            {showStatus && (
+                <div className={styles.statusRow}>
+                    {statusIcon}
+                    <Caption1 className={mergeClasses(styles.statusText, isCompact && styles.statusTextCompact)}>
+                        {statusMessage}
+                    </Caption1>
+                </div>
+            )}
             <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact, shouldStackLayout && styles.inputRowMobile)}>
                 <textarea
                     ref={textareaRef}
@@ -231,58 +337,88 @@ export function ChatInput({ value, onChange, onSend, onGenerate, allowGenerate =
                     }}
                 />
                 <div className={mergeClasses(styles.sendGroup, shouldStackLayout && styles.sendGroupMobile)}>
-                    {canGenerate ? (
-                        <>
-                            <Button
-                                appearance="primary"
-                                icon={hasText ? <SendRegular /> : <TaskListAddRegular />}
-                                disabled={disabled}
-                                className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
-                                size={isCompact ? 'small' : 'medium'}
-                                onClick={hasText ? onSend : onGenerate}
-                            >
-                                {hasText ? 'Send' : 'Generate'}
-                            </Button>
-                            <Menu>
-                                <MenuTrigger disableButtonEnhancement>
+                    <div className={mergeClasses(styles.inputButtonsCluster, shouldStackLayout && styles.inputButtonsClusterMobile)}>
+                        {canGenerate ? (
+                            <>
+                                <div className={mergeClasses(styles.sendGroup, shouldStackLayout && styles.sendGroupMobile)}>
                                     <Button
                                         appearance="primary"
-                                        icon={<ChevronDownRegular />}
+                                        icon={isGenerating ? <TaskListAddRegular /> : hasText ? <SendRegular /> : <TaskListAddRegular />}
                                         disabled={disabled}
-                                        className={styles.menuButton}
+                                        className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
                                         size={isCompact ? 'small' : 'medium'}
-                                    />
-                                </MenuTrigger>
-                                <MenuPopover>
-                                    <MenuList>
-                                        <MenuItem
-                                            icon={<SendRegular />}
-                                            disabled={!hasText}
-                                            onClick={onSend}
-                                        >
-                                            Send
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<TaskListAddRegular />}
-                                            onClick={onGenerate}
-                                        >
-                                            {hasText ? 'Send & Generate' : 'Generate Work Items'}
-                                        </MenuItem>
-                                    </MenuList>
-                                </MenuPopover>
-                            </Menu>
-                        </>
-                    ) : (
-                        <Button
-                            appearance="primary"
-                            icon={<SendRegular />}
-                            disabled={!hasText || disabled}
-                            size={isCompact ? 'small' : 'medium'}
-                            onClick={onSend}
-                        >
-                            Send
-                        </Button>
-                    )}
+                                        onClick={hasText ? onSend : onGenerate}
+                                    >
+                                        {isGenerating ? 'Generating...' : hasText ? 'Send' : 'Generate'}
+                                    </Button>
+                                    <Menu>
+                                        <MenuTrigger disableButtonEnhancement>
+                                            <Button
+                                                appearance="primary"
+                                                icon={<ChevronDownRegular />}
+                                                disabled={disabled}
+                                                className={styles.menuButton}
+                                                size={isCompact ? 'small' : 'medium'}
+                                            />
+                                        </MenuTrigger>
+                                        <MenuPopover>
+                                            <MenuList>
+                                                <MenuItem
+                                                    icon={<SendRegular />}
+                                                    disabled={!hasText}
+                                                    onClick={onSend}
+                                                >
+                                                    Send
+                                                </MenuItem>
+                                                <MenuItem
+                                                    icon={<TaskListAddRegular />}
+                                                    onClick={onGenerate}
+                                                >
+                                                    {hasText ? 'Send & Generate' : 'Generate Work Items'}
+                                                </MenuItem>
+                                            </MenuList>
+                                        </MenuPopover>
+                                    </Menu>
+                                </div>
+                                {showCancelButton && onCancelGeneration && (
+                                    <Button
+                                        appearance="outline"
+                                        icon={<DismissCircleRegular />}
+                                        disabled={canceling}
+                                        className={styles.cancelButton}
+                                        size={isCompact ? 'small' : 'medium'}
+                                        onClick={onCancelGeneration}
+                                    >
+                                        {canceling ? 'Canceling...' : 'Cancel'}
+                                    </Button>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Button
+                                    appearance="primary"
+                                    icon={<SendRegular />}
+                                    disabled={!hasText || disabled}
+                                    size={isCompact ? 'small' : 'medium'}
+                                    onClick={onSend}
+                                >
+                                    Send
+                                </Button>
+                                {showCancelButton && onCancelGeneration && (
+                                    <Button
+                                        appearance="outline"
+                                        icon={<DismissCircleRegular />}
+                                        disabled={canceling}
+                                        className={styles.cancelButton}
+                                        size={isCompact ? 'small' : 'medium'}
+                                        onClick={onCancelGeneration}
+                                    >
+                                        {canceling ? 'Canceling...' : 'Cancel'}
+                                    </Button>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
             <div className={mergeClasses(styles.inputActions, shouldStackLayout && styles.inputActionsMobile)}>

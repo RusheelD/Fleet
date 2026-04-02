@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { makeStyles, mergeClasses, Spinner } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatInput, AttachedFiles } from './'
-import { ToolEventMessage } from './ToolEventMessage'
+import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatInput, AttachedFiles, ChatActivityFeed } from './'
 
 import {
     useChatData, useChatMessages, useCreateChatSession,
@@ -11,9 +10,8 @@ import {
     cancelChatSessionRequests, sendChatMessage, getApiErrorMessage,
 } from '../../proxies'
 import { useAuth, usePreferences, useIsMobile } from '../../hooks'
-import { CHAT_TOOL_EVENT_WINDOW_EVENT, type ChatToolEventPayload } from '../../hooks/useServerEvents'
 import { appTokens } from '../../styles/appTokens'
-import type { ChatAttachment, ChatMessageData, SendMessageResponse, ToolEvent } from '../../models'
+import type { ChatAttachment, ChatGenerationState, ChatMessageData } from '../../models'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
 
@@ -122,8 +120,6 @@ export function ChatDrawer({
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const hasConstrainedPaneWidth = !isMobile && typeof chatWidth === 'number' && chatWidth <= 520
-    const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
-    const [liveToolEvents, setLiveToolEvents] = useState<ToolEvent[]>([])
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
     const deletingSessionIdsRef = useRef<Set<string>>(new Set())
@@ -139,7 +135,41 @@ export function ChatDrawer({
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
     const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
 
-    const sessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
+    const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
+    const sessions = useMemo(
+        () => serverSessions.map((session) => {
+            const isOptimisticGenerating = optimisticGeneratingSessionIds.includes(session.id)
+            const isCancelingSession = Boolean(
+                cancelGenerationMutation.isPending
+                && cancelGenerationMutation.variables === session.id,
+            )
+
+            let generationState = session.generationState
+            let generationStatus = session.generationStatus
+            let isGenerating = session.isGenerating
+
+            if (isOptimisticGenerating && !session.isGenerating) {
+                isGenerating = true
+                generationState = 'running'
+                generationStatus = session.generationStatus ?? 'Preparing work-item generation...'
+            }
+
+            if (isCancelingSession) {
+                isGenerating = true
+                generationState = 'canceling'
+                generationStatus = 'Canceling generation...'
+            }
+
+            return {
+                ...session,
+                isGenerating,
+                generationState,
+                generationStatus,
+                recentActivity: session.recentActivity ?? [],
+            }
+        }),
+        [serverSessions, optimisticGeneratingSessionIds, cancelGenerationMutation.isPending, cancelGenerationMutation.variables],
+    )
     const serverMessages = useMemo(() => messages ?? chatData?.messages ?? [], [messages, chatData?.messages])
     const displayAttachments = useMemo(
         () => [...pendingAttachments, ...(attachments ?? [])],
@@ -156,13 +186,7 @@ export function ChatDrawer({
         [sessions, activeSession]
     )
     const activeSessionIsSending = Boolean(activeSession && pendingMessageSessionIds.includes(activeSession))
-    const activeSessionIsGenerating = Boolean(
-        activeSession
-        && (
-            activeSessionData?.isGenerating
-            || optimisticGeneratingSessionIds.includes(activeSession)
-        )
-    )
+    const activeSessionIsGenerating = Boolean(activeSession && activeSessionData?.isGenerating)
     const activeSessionIsBusy = activeSessionIsSending || activeSessionIsGenerating
     const isCancelingActiveSession = Boolean(
         activeSession
@@ -197,40 +221,27 @@ export function ChatDrawer({
     }, [sessions])
 
     useEffect(() => {
-        const handleToolEvent = (event: Event) => {
-            const detail = (event as CustomEvent<ChatToolEventPayload>).detail
-            if (!detail || !activeSession || detail.sessionId !== activeSession) {
-                return
-            }
-
-            const detailProjectId = detail.projectId ?? undefined
-            const normalizedProjectId = projectId ?? undefined
-            if (detailProjectId !== normalizedProjectId) {
-                return
-            }
-
-            setLiveToolEvents((current) => [
-                ...current,
-                {
-                    toolName: detail.toolName,
-                    argumentsJson: detail.argumentsJson,
-                    result: detail.result,
-                },
-            ])
+        if (serverSessions.length === 0) {
+            return
         }
 
-        window.addEventListener(CHAT_TOOL_EVENT_WINDOW_EVENT, handleToolEvent as EventListener)
-        return () => {
-            window.removeEventListener(CHAT_TOOL_EVENT_WINDOW_EVENT, handleToolEvent as EventListener)
-        }
-    }, [activeSession, projectId])
+        setOptimisticGeneratingSessionIds((current) => current.filter((sessionId) => {
+            const serverSession = serverSessions.find((candidate) => candidate.id === sessionId)
+            if (!serverSession) {
+                return false
+            }
+
+            return !serverSession.isGenerating
+                && serverSession.generationState === 'idle'
+                && !serverSession.generationUpdatedAtUtc
+        }))
+    }, [serverSessions])
 
     // Auto-select/reset active session when scope/session list changes.
     useEffect(() => {
         if (sessions.length === 0) {
             setActiveSession(undefined)
             setPendingAttachments([])
-            setLiveToolEvents([])
             return
         }
 
@@ -313,8 +324,6 @@ export function ChatDrawer({
         if (generateWorkItems) {
             setOptimisticGeneratingSessionIds((current) => addSessionId(current, sessionId))
         }
-        setLastSendResponse(null)
-        setLiveToolEvents([])
 
         if (messageAttachments.length > 0) {
             queryClient.setQueryData<ChatAttachment[]>(
@@ -328,15 +337,13 @@ export function ChatDrawer({
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
         sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
-            .then(async (response: SendMessageResponse) => {
-                setLastSendResponse(response)
+            .then(async (response) => {
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
                 setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
-                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
                 if (!response.isDeferred) {
-                    setLiveToolEvents([])
+                    setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
                 }
                 if (generateWorkItems && !response.isDeferred) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
@@ -355,7 +362,6 @@ export function ChatDrawer({
 
                 setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
                 setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
-                setLastSendResponse(null)
                 setOptimisticMessages((current) => [
                     ...current.filter((entry) => entry.role === 'user'),
                     {
@@ -399,7 +405,6 @@ export function ChatDrawer({
             onSuccess: (session) => {
                 setActiveSession(session.id)
                 setOptimisticMessages([])
-                setLiveToolEvents([])
             },
         })
     }
@@ -409,9 +414,7 @@ export function ChatDrawer({
         cancelChatSessionRequests(projectId, sessionId)
 
         if (activeSession === sessionId) {
-            setLastSendResponse(null)
             setOptimisticMessages([])
-            setLiveToolEvents([])
         }
 
         setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
@@ -426,7 +429,6 @@ export function ChatDrawer({
                     setActiveSession(remainingSessions.length > 0 ? remainingSessions[0].id : undefined)
                 }
                 setOptimisticMessages([])
-                setLiveToolEvents([])
             },
             onError: () => {
                 deletingSessionIdsRef.current.delete(sessionId)
@@ -446,18 +448,15 @@ export function ChatDrawer({
 
         cancelGenerationMutation.mutate(resolvedSessionId, {
             onSuccess: () => {
-                setLastSendResponse(null)
-                setLiveToolEvents([])
                 setPendingMessageSessionIds((current) => removeSessionId(current, resolvedSessionId))
                 setOptimisticGeneratingSessionIds((current) => removeSessionId(current, resolvedSessionId))
             },
         })
     }
 
-    // Show tool events from last response
-    const toolEvents = liveToolEvents.length > 0
-        ? liveToolEvents
-        : (lastSendResponse?.toolEvents ?? [])
+    const activeSessionStatusState = activeSessionData?.generationState ?? 'idle'
+    const activeSessionStatusMessage = getVisibleSessionStatus(activeSessionData)
+    const activeSessionActivity = activeSessionData?.recentActivity ?? []
 
     const handleFileSelect = (file: File) => {
         const resolvedSessionId = activeSession && sessions.some((session) => session.id === activeSession)
@@ -505,17 +504,12 @@ export function ChatDrawer({
 
     return (
         <div className={mergeClasses(styles.drawer, isCompact && styles.drawerCompact, isMobile && styles.drawerMobile)}>
-            <ChatDrawerHeader
-                onClose={onClose}
-                isGenerating={activeSessionIsGenerating}
-                isCanceling={isCancelingActiveSession}
-                onCancelGeneration={activeSessionIsGenerating ? () => handleCancelGeneration(activeSession) : undefined}
-            />
+            <ChatDrawerHeader onClose={onClose} />
 
             <ChatSessionBar
                 sessions={sessions}
                 activeSessionId={activeSession ?? ''}
-                onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]); setLiveToolEvents([]) }}
+                onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]) }}
                 onDeleteSession={handleDeleteSession}
                 onRenameSession={handleRenameSession}
                 onCancelGeneration={handleCancelGeneration}
@@ -553,9 +547,7 @@ export function ChatDrawer({
                     {displayMessages.map((msg) => (
                         <ChatMessage key={msg.id} message={msg} currentUserIdentity={currentUserIdentity} />
                     ))}
-                    {toolEvents.length > 0 && toolEvents.map((evt, i) => (
-                        <ToolEventMessage key={`tool-${i}`} event={evt} />
-                    ))}
+                    <ChatActivityFeed activities={activeSessionActivity} />
                     {activeSessionIsBusy && (
                         <div
                             className={mergeClasses(
@@ -567,7 +559,7 @@ export function ChatDrawer({
                             <Spinner
                                 size="tiny"
                                 label={activeSessionIsGenerating
-                                    ? 'Fleet AI is generating work items - this may take a while...'
+                                    ? (activeSessionStatusMessage ?? 'Fleet AI is generating work items...')
                                     : 'Fleet AI is thinking...'}
                                 labelPosition="after"
                             />
@@ -587,13 +579,45 @@ export function ChatDrawer({
                 onChange={setMessage}
                 onSend={() => handleSend(false)}
                 onGenerate={allowGenerateWorkItems ? () => handleSend(true) : undefined}
+                onCancelGeneration={activeSessionIsGenerating ? () => handleCancelGeneration(activeSession) : undefined}
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
                 forceStackedLayout={hasConstrainedPaneWidth}
                 disabled={activeSessionIsBusy || createSessionMutation.isPending || hasUploadingAttachments || isCancelingActiveSession}
                 uploading={uploadMutation.isPending}
+                isGenerating={activeSessionIsGenerating}
+                canceling={isCancelingActiveSession}
+                statusMessage={activeSessionStatusMessage}
+                statusState={activeSessionStatusState}
             />
         </div>
     )
+}
+
+function getVisibleSessionStatus(
+    session: {
+        isGenerating: boolean
+        generationState: ChatGenerationState
+        generationStatus: string | null
+    } | undefined,
+): string | null {
+    if (!session) {
+        return null
+    }
+
+    if (session.isGenerating) {
+        return session.generationStatus ?? 'Generating work items...'
+    }
+
+    switch (session.generationState) {
+        case 'canceling':
+            return session.generationStatus ?? 'Canceling generation...'
+        case 'failed':
+        case 'canceled':
+        case 'interrupted':
+            return session.generationStatus
+        default:
+            return null
+    }
 }
 

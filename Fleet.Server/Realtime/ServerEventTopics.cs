@@ -5,6 +5,7 @@ public static class ServerEventTopics
     public const string Connected = "connected";
     public const string NotificationsUpdated = "notifications.updated";
     public const string ChatUpdated = "chat.updated";
+    public const string ChatSessionEvent = "chat.session-event";
     public const string ChatToolEvent = "chat.tool-event";
     public const string AgentsUpdated = "agents.updated";
     public const string LogsUpdated = "logs.updated";

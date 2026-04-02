@@ -15,6 +15,9 @@ public interface IChatSessionRepository
     Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content);
     Task SetSessionGeneratingAsync(string sessionId, bool isGenerating);
     Task SetSessionGeneratingAsync(string projectId, string sessionId, bool isGenerating);
+    Task UpdateSessionGenerationStateAsync(string projectId, string sessionId, bool isGenerating, string generationState, string? generationStatus, ChatSessionActivityDto? activity = null);
+    Task<int> MarkStaleGeneratingSessionsAsync(string projectId, DateTime cutoffUtc, string generationState, string generationStatus);
+    Task AppendSessionActivityAsync(string projectId, string sessionId, ChatSessionActivityDto activity);
 
     // Attachments
     Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content);
