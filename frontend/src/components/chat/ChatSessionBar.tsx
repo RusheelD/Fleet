@@ -18,6 +18,7 @@ import {
     DismissRegular,
     EditRegular,
     MoreHorizontalRegular,
+    StopRegular,
 } from '@fluentui/react-icons'
 import type { ChatSessionData } from '../../models'
 import { useIsMobile, usePreferences } from '../../hooks'
@@ -51,6 +52,10 @@ const useStyles = makeStyles({
         fontSize: appTokens.fontSize.sm,
         color: appTokens.color.textTertiary,
     },
+    generatingMeta: {
+        color: appTokens.color.brand,
+        fontWeight: appTokens.fontWeight.semibold,
+    },
     sessionsScroller: {
         display: 'flex',
         alignItems: 'stretch',
@@ -70,6 +75,12 @@ const useStyles = makeStyles({
         flexShrink: 0,
         minWidth: '0',
         maxWidth: 'min(320px, 84vw)',
+    },
+    sessionActions: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: appTokens.space.xxxs,
+        flexShrink: 0,
     },
     sessionChipCompact: {
         gap: appTokens.space.xxxs,
@@ -128,6 +139,8 @@ interface ChatSessionBarProps {
     onSelectSession: (id: string) => void
     onDeleteSession?: (id: string) => void
     onRenameSession?: (id: string, title: string) => void
+    onCancelGeneration?: (id: string) => void
+    isCancelingSession?: (id: string) => boolean
     onNewSession?: () => void
     actionsDisabled?: boolean
 }
@@ -138,6 +151,8 @@ export function ChatSessionBar({
     onSelectSession,
     onDeleteSession,
     onRenameSession,
+    onCancelGeneration,
+    isCancelingSession,
     onNewSession,
     actionsDisabled = false,
 }: ChatSessionBarProps) {
@@ -266,7 +281,27 @@ export function ChatSessionBar({
                                     <span className={styles.sessionTitle}>{session.title}</span>
                                 </Button>
 
-                                {(onRenameSession || onDeleteSession) && (
+                                <div className={styles.sessionActions}>
+                                    {session.isGenerating && (
+                                        <>
+                                            <Text className={mergeClasses(styles.sessionMeta, styles.generatingMeta)}>
+                                                {isCancelingSession?.(session.id) ? 'Canceling...' : 'Generating'}
+                                            </Text>
+                                            {onCancelGeneration && (
+                                                <Button
+                                                    appearance="outline"
+                                                    size="small"
+                                                    icon={<StopRegular />}
+                                                    onClick={() => onCancelGeneration(session.id)}
+                                                    disabled={actionsDisabled || isCancelingSession?.(session.id)}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {(onRenameSession || onDeleteSession) && (
                                     <Menu>
                                         <MenuTrigger disableButtonEnhancement>
                                             <Button
@@ -279,6 +314,15 @@ export function ChatSessionBar({
                                         </MenuTrigger>
                                         <MenuPopover>
                                             <MenuList>
+                                                {session.isGenerating && onCancelGeneration && (
+                                                    <MenuItem
+                                                        icon={<StopRegular />}
+                                                        disabled={isCancelingSession?.(session.id)}
+                                                        onClick={() => onCancelGeneration(session.id)}
+                                                    >
+                                                        {isCancelingSession?.(session.id) ? 'Canceling...' : 'Cancel generation'}
+                                                    </MenuItem>
+                                                )}
                                                 {onRenameSession && (
                                                     <MenuItem
                                                         icon={<EditRegular />}
@@ -298,7 +342,8 @@ export function ChatSessionBar({
                                             </MenuList>
                                         </MenuPopover>
                                     </Menu>
-                                )}
+                                    )}
+                                </div>
                             </>
                         )}
                     </div>

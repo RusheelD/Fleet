@@ -438,18 +438,18 @@ export function ChatDrawer({
         renameSessionMutation.mutate({ sessionId, title })
     }
 
-    const handleCancelGeneration = () => {
-        const sessionId = activeSession
-        if (!sessionId) {
+    const handleCancelGeneration = (sessionId?: string) => {
+        const resolvedSessionId = sessionId ?? activeSession
+        if (!resolvedSessionId) {
             return
         }
 
-        cancelGenerationMutation.mutate(sessionId, {
+        cancelGenerationMutation.mutate(resolvedSessionId, {
             onSuccess: () => {
                 setLastSendResponse(null)
                 setLiveToolEvents([])
-                setPendingMessageSessionIds((current) => removeSessionId(current, sessionId))
-                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, sessionId))
+                setPendingMessageSessionIds((current) => removeSessionId(current, resolvedSessionId))
+                setOptimisticGeneratingSessionIds((current) => removeSessionId(current, resolvedSessionId))
             },
         })
     }
@@ -509,7 +509,7 @@ export function ChatDrawer({
                 onClose={onClose}
                 isGenerating={activeSessionIsGenerating}
                 isCanceling={isCancelingActiveSession}
-                onCancelGeneration={activeSessionIsGenerating ? handleCancelGeneration : undefined}
+                onCancelGeneration={activeSessionIsGenerating ? () => handleCancelGeneration(activeSession) : undefined}
             />
 
             <ChatSessionBar
@@ -518,6 +518,10 @@ export function ChatDrawer({
                 onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]); setLiveToolEvents([]) }}
                 onDeleteSession={handleDeleteSession}
                 onRenameSession={handleRenameSession}
+                onCancelGeneration={handleCancelGeneration}
+                isCancelingSession={(sessionId) =>
+                    cancelGenerationMutation.isPending && cancelGenerationMutation.variables === sessionId
+                }
                 onNewSession={handleNewSession}
                 actionsDisabled={
                     createSessionMutation.isPending
