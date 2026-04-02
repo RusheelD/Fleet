@@ -27,6 +27,15 @@ public class ChatService(
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
+    private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "create_work_item",
+        "update_work_item",
+        "try_update_work_item",
+        "bulk_create_work_items",
+        "bulk_update_work_items",
+        "try_bulk_update_work_items",
+    };
 
     private static readonly Lazy<string> SystemPromptLazy = new(() =>
     {
@@ -161,6 +170,9 @@ public class ChatService(
         var maxLoops = generateWorkItems ? config.GenerateMaxToolLoops : config.MaxToolLoops;
         var maxToolCallsTotal = generateWorkItems ? config.GenerateMaxToolCallsTotal : config.MaxToolCallsTotal;
         var requestKey = BuildSessionRequestKey(projectId, sessionId);
+        var toolEvents = new List<ToolEventDto>();
+        var userId = 0;
+        var chargedWorkItemRun = false;
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var sessionCts = RegisterInFlightRequest(requestKey);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -178,8 +190,7 @@ public class ChatService(
             if (generateWorkItems)
                 await chatSessionRepository.SetSessionGeneratingAsync(projectId, sessionId, true);
 
-            var userId = await authService.GetCurrentUserIdAsync();
-            var chargedWorkItemRun = false;
+            userId = await authService.GetCurrentUserIdAsync();
             if (generateWorkItems)
             {
                 await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
@@ -220,9 +231,9 @@ public class ChatService(
             }
 
             // 5. Run the tool-calling loop with safety limits
-            var toolEvents = new List<ToolEventDto>();
             var toolContext = new ChatToolContext(projectId, userId.ToString());
             var totalToolCalls = 0;
+            var performedWorkItemMutation = false;
 
             for (var loop = 0; loop < maxLoops; loop++)
             {
@@ -299,6 +310,8 @@ public class ChatService(
 
                         var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
                         toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
+                        if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+                            performedWorkItemMutation = true;
 
                         // Add tool result to context for the LLM
                         llmMessages.Add(new LLMMessage
@@ -309,6 +322,14 @@ public class ChatService(
                             ToolName = toolCall.Name,
                         });
 
+                        await PublishChatToolEventAsync(
+                            userId,
+                            projectId,
+                            sessionId,
+                            toolCall.Name,
+                            toolCall.ArgumentsJson,
+                            toolResult,
+                            DidToolResultSucceed(toolResult));
                         await PublishChatUpdatedAsync(userId, projectId, sessionId);
                         await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
                     }
@@ -321,6 +342,16 @@ public class ChatService(
                 }
 
                 // No tool calls — the model produced a final text response
+                if (generateWorkItems && !performedWorkItemMutation)
+                {
+                    llmMessages.Add(new LLMMessage
+                    {
+                        Role = "user",
+                        Content = BuildMissingWorkItemMutationInstruction(),
+                    });
+                    continue;
+                }
+
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
                 var assistantMessage = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantContent);
@@ -334,6 +365,19 @@ public class ChatService(
 
             // Exhausted tool loops — force a text response
             logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
+            if (generateWorkItems && !performedWorkItemMutation)
+            {
+                var failureMsg = await chatSessionRepository.AddMessageAsync(
+                    projectId,
+                    sessionId,
+                    "assistant",
+                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.");
+                await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
+                return new SendMessageResponseDto(sessionId, failureMsg, [.. toolEvents], "No work-item mutation was completed.");
+            }
+
             var fallbackMsg = await chatSessionRepository.AddMessageAsync(
                 projectId, sessionId, "assistant",
                 "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
@@ -341,6 +385,24 @@ public class ChatService(
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
             return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
+        }
+        catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.CopilotLlmFailed(ex);
+            var errorMessage = await PersistAssistantErrorAsync(projectId, sessionId, ex);
+
+            await ClearGeneratingFlagAsync(projectId, sessionId, generateWorkItems);
+            if (userId != 0)
+            {
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
+            }
+
+            return new SendMessageResponseDto(sessionId, errorMessage, [.. toolEvents], ex.Message);
         }
         finally
         {
@@ -381,7 +443,7 @@ public class ChatService(
 
             return new SendMessageResponseDto(sessionId, null, [], null, true);
         }
-        catch
+        catch (Exception ex)
         {
             if (sessionCts is not null)
                 ReleaseInFlightRequest(requestKey, sessionCts);
@@ -390,10 +452,13 @@ public class ChatService(
             if (userId != 0)
             {
                 await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
-                await PublishChatUpdatedAsync(userId, projectId, sessionId);
             }
 
-            throw;
+            var errorMessage = await PersistAssistantErrorAsync(projectId, sessionId, ex);
+            if (userId != 0)
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+
+            return new SendMessageResponseDto(sessionId, errorMessage, [], ex.Message);
         }
     }
 
@@ -481,6 +546,7 @@ public class ChatService(
 
             var toolContext = new ChatToolContext(projectId, userId.ToString());
             var totalToolCalls = 0;
+            var performedWorkItemMutation = false;
 
             for (var loop = 0; loop < maxLoops; loop++)
             {
@@ -517,6 +583,8 @@ public class ChatService(
                         }
 
                         var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
+                        if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+                            performedWorkItemMutation = true;
                         llmMessages.Add(new LLMMessage
                         {
                             Role = "tool",
@@ -525,6 +593,14 @@ public class ChatService(
                             ToolName = toolCall.Name,
                         });
 
+                        await PublishChatToolEventAsync(
+                            userId,
+                            projectId,
+                            sessionId,
+                            toolCall.Name,
+                            toolCall.ArgumentsJson,
+                            toolResult,
+                            DidToolResultSucceed(toolResult));
                         await PublishChatUpdatedAsync(userId, projectId, sessionId);
                         await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
                     }
@@ -532,6 +608,16 @@ public class ChatService(
                     if (totalToolCalls > maxToolCallsTotal)
                         break;
 
+                    continue;
+                }
+
+                if (!performedWorkItemMutation)
+                {
+                    llmMessages.Add(new LLMMessage
+                    {
+                        Role = "user",
+                        Content = BuildMissingWorkItemMutationInstruction(),
+                    });
                     continue;
                 }
 
@@ -545,6 +631,19 @@ public class ChatService(
             }
 
             logger.CopilotToolLoopExhausted(sessionId.SanitizeForLogging(), maxLoops);
+            if (!performedWorkItemMutation)
+            {
+                await chatSessionRepository.AddMessageAsync(
+                    projectId,
+                    sessionId,
+                    "assistant",
+                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.");
+                await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
+                await PublishChatUpdatedAsync(userId, projectId, sessionId);
+                await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
+                return;
+            }
+
             await chatSessionRepository.AddMessageAsync(
                 projectId,
                 sessionId,
@@ -635,12 +734,76 @@ public class ChatService(
         bool chargedWorkItemRun,
         Exception exception)
     {
-        var assistantError = BuildAssistantErrorMessage(exception);
-        await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+        await PersistAssistantErrorAsync(projectId, sessionId, exception);
         await ClearGeneratingFlagAsync(projectId, sessionId, wasGenerating: true);
         await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         await PublishChatUpdatedAsync(userId, projectId, sessionId);
     }
+
+    private async Task PublishChatToolEventAsync(
+        int userId,
+        string projectId,
+        string sessionId,
+        string toolName,
+        string argumentsJson,
+        string result,
+        bool succeeded)
+    {
+        if (_eventPublisher is null)
+            return;
+
+        var payload = new
+        {
+            projectId = IsGlobalScope(projectId) ? null : projectId,
+            sessionId,
+            toolName,
+            argumentsJson,
+            result,
+            succeeded,
+            timestampUtc = DateTime.UtcNow,
+        };
+
+        try
+        {
+            if (IsGlobalScope(projectId))
+            {
+                await _eventPublisher.PublishUserEventAsync(
+                    userId,
+                    ServerEventTopics.ChatToolEvent,
+                    payload);
+                return;
+            }
+
+            await _eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatToolEvent,
+                payload);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(
+                ex,
+                "Failed to publish chat tool event for session {SessionId} and tool {ToolName}",
+                sessionId.SanitizeForLogging(),
+                toolName.SanitizeForLogging());
+        }
+    }
+
+    private async Task<ChatMessageDto> PersistAssistantErrorAsync(string projectId, string sessionId, Exception exception)
+    {
+        var assistantError = BuildAssistantErrorMessage(exception);
+        return await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+    }
+
+    private static bool DidToolResultSucceed(string toolResult)
+        => !toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
+
+    private static bool DidWorkItemMutationSucceed(string toolName, string toolResult)
+        => WorkItemMutationToolNames.Contains(toolName) && DidToolResultSucceed(toolResult);
+
+    private static string BuildMissingWorkItemMutationInstruction()
+        => "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
 
     // ── Helpers ───────────────────────────────────────────────
 
@@ -966,6 +1129,15 @@ public class ChatService(
     private static string BuildAssistantErrorMessage(Exception exception)
     {
         var message = exception.Message;
+
+        if (exception is InvalidOperationException &&
+            !string.IsNullOrWhiteSpace(message) &&
+            (message.Contains("limit reached", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("only available", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("project-scoped", StringComparison.OrdinalIgnoreCase)))
+        {
+            return message;
+        }
 
         if (message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("quota", StringComparison.OrdinalIgnoreCase))

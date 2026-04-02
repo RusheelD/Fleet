@@ -46,13 +46,14 @@ public class UsageLedgerServiceTests
     }
 
     [TestMethod]
-    public async Task ChargeRunAsync_FreeWorkItemLimit_ThrowsAfterFour()
+    public async Task ChargeRunAsync_FreeTier_DoesNotCap()
     {
-        for (var i = 0; i < 4; i++)
+        for (var i = 0; i < 20; i++)
             await _sut.ChargeRunAsync(FreeUserId, MonthlyRunType.WorkItem);
 
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
-            _sut.ChargeRunAsync(FreeUserId, MonthlyRunType.WorkItem));
+        var snapshot = await _sut.GetCurrentMonthUsageAsync(FreeUserId);
+        Assert.AreEqual(20, snapshot.WorkItemRunsUsed);
+        Assert.IsNull(snapshot.WorkItemRunsRemaining);
     }
 
     [TestMethod]

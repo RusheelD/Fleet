@@ -48,7 +48,11 @@ public class SubscriptionServiceTests
         var result = await _sut.GetSubscriptionDataAsync(UserId);
 
         Assert.AreEqual("Free Tier", result.CurrentPlan.Name);
+        Assert.IsTrue(result.CurrentPlan.Description.Contains("Unlimited usage", StringComparison.OrdinalIgnoreCase));
         Assert.IsTrue(result.Usage.Length >= 2);
         Assert.IsTrue(result.Plans.Any(p => p.IsCurrent && p.Name == "Free"));
+        Assert.IsTrue(result.Plans.Any(p =>
+            p.Name == "Free" &&
+            p.Features.Any(feature => feature.Contains("Unlimited work-item runs", StringComparison.OrdinalIgnoreCase))));
     }
 }

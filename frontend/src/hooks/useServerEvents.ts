@@ -8,6 +8,18 @@ interface ServerEventMessage {
   data: unknown
 }
 
+export const CHAT_TOOL_EVENT_WINDOW_EVENT = 'fleet:chat-tool-event'
+
+export interface ChatToolEventPayload {
+  projectId?: string | null
+  sessionId: string
+  toolName: string
+  argumentsJson: string
+  result: string
+  succeeded: boolean
+  timestampUtc: string
+}
+
 function parseEventBlock(block: string): ServerEventMessage | null {
   const normalized = block.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const lines = normalized.split('\n')
@@ -244,7 +256,13 @@ export function useServerEvents(projectId?: string) {
         try {
           await streamServerEvents(
             streamPath,
-            ({ eventName }) => {
+            ({ eventName, data }) => {
+              if (eventName === 'chat.tool-event' && typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent<ChatToolEventPayload>(CHAT_TOOL_EVENT_WINDOW_EVENT, {
+                  detail: data as ChatToolEventPayload,
+                }))
+              }
+
               scheduleInvalidateForTopic(eventName)
             },
             controller.signal,

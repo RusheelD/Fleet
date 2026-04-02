@@ -11,16 +11,21 @@ public sealed record TierPolicy(
 
 public static class TierPolicyCatalog
 {
+    private static TierPolicy CreateTemporaryFullAccessPolicy(string tier) => new(
+        Tier: tier,
+        MonthlyWorkItemRuns: null,
+        MonthlyCodingRuns: null,
+        RequestsPerMinute: int.MaxValue,
+        MaxConcurrentAgentsPerTask: int.MaxValue,
+        MaxActiveAgentExecutions: int.MaxValue,
+        UnlimitedRateLimit: true);
+
     private static readonly IReadOnlyDictionary<string, TierPolicy> Policies =
         new Dictionary<string, TierPolicy>(StringComparer.OrdinalIgnoreCase)
         {
-            [UserRoles.Free] = new(
-                Tier: UserRoles.Free,
-                MonthlyWorkItemRuns: 4,
-                MonthlyCodingRuns: 2,
-                RequestsPerMinute: 120,
-                MaxConcurrentAgentsPerTask: 1,
-                MaxActiveAgentExecutions: 1),
+            // Temporary product decision: free users receive the same effective access
+            // as unlimited users while the pricing model is still in flux.
+            [UserRoles.Free] = CreateTemporaryFullAccessPolicy(UserRoles.Free),
             [UserRoles.Basic] = new(
                 Tier: UserRoles.Basic,
                 MonthlyWorkItemRuns: 100,
@@ -35,14 +40,7 @@ public static class TierPolicyCatalog
                 RequestsPerMinute: 600,
                 MaxConcurrentAgentsPerTask: 4,
                 MaxActiveAgentExecutions: 10),
-            [UserRoles.Unlimited] = new(
-                Tier: UserRoles.Unlimited,
-                MonthlyWorkItemRuns: null,
-                MonthlyCodingRuns: null,
-                RequestsPerMinute: int.MaxValue,
-                MaxConcurrentAgentsPerTask: int.MaxValue,
-                MaxActiveAgentExecutions: int.MaxValue,
-                UnlimitedRateLimit: true),
+            [UserRoles.Unlimited] = CreateTemporaryFullAccessPolicy(UserRoles.Unlimited),
         };
 
     public static TierPolicy Get(string? role)

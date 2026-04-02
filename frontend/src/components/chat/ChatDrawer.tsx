@@ -8,11 +8,12 @@ import { ToolEventMessage } from './ToolEventMessage'
 import {
     useChatData, useChatMessages, useCreateChatSession,
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession,
-    cancelChatSessionRequests, sendChatMessage,
+    cancelChatSessionRequests, sendChatMessage, getApiErrorMessage,
 } from '../../proxies'
 import { useChatGenerating, useAuth, usePreferences, useIsMobile } from '../../hooks'
+import { CHAT_TOOL_EVENT_WINDOW_EVENT, type ChatToolEventPayload } from '../../hooks/useServerEvents'
 import { appTokens } from '../../styles/appTokens'
-import type { ChatAttachment, ChatMessageData, SendMessageResponse } from '../../models'
+import type { ChatAttachment, ChatMessageData, SendMessageResponse, ToolEvent } from '../../models'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
 
@@ -114,6 +115,7 @@ export function ChatDrawer({
     const isCompact = preferences?.compactMode ?? false
     const hasConstrainedPaneWidth = !isMobile && typeof chatWidth === 'number' && chatWidth <= 520
     const [lastSendResponse, setLastSendResponse] = useState<SendMessageResponse | null>(null)
+    const [liveToolEvents, setLiveToolEvents] = useState<ToolEvent[]>([])
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
     const deletingSessionIdsRef = useRef<Set<string>>(new Set())
@@ -195,11 +197,41 @@ export function ChatDrawer({
         })
     }, [serverMessages])
 
+    useEffect(() => {
+        const handleToolEvent = (event: Event) => {
+            const detail = (event as CustomEvent<ChatToolEventPayload>).detail
+            if (!detail || !activeSession || detail.sessionId !== activeSession) {
+                return
+            }
+
+            const detailProjectId = detail.projectId ?? undefined
+            const normalizedProjectId = projectId ?? undefined
+            if (detailProjectId !== normalizedProjectId) {
+                return
+            }
+
+            setLiveToolEvents((current) => [
+                ...current,
+                {
+                    toolName: detail.toolName,
+                    argumentsJson: detail.argumentsJson,
+                    result: detail.result,
+                },
+            ])
+        }
+
+        window.addEventListener(CHAT_TOOL_EVENT_WINDOW_EVENT, handleToolEvent as EventListener)
+        return () => {
+            window.removeEventListener(CHAT_TOOL_EVENT_WINDOW_EVENT, handleToolEvent as EventListener)
+        }
+    }, [activeSession, projectId])
+
     // Auto-select/reset active session when scope/session list changes.
     useEffect(() => {
         if (sessions.length === 0) {
             setActiveSession(undefined)
             setPendingAttachments([])
+            setLiveToolEvents([])
             return
         }
 
@@ -281,6 +313,7 @@ export function ChatDrawer({
         setIsThinking(true)
         setIsGenerating(generateWorkItems)
         setLastSendResponse(null)
+        setLiveToolEvents([])
 
         if (messageAttachments.length > 0) {
             queryClient.setQueryData<ChatAttachment[]>(
@@ -302,19 +335,38 @@ export function ChatDrawer({
                 if (!response.isDeferred) {
                     setIsThinking(false)
                     setIsGenerating(false)
+                    setLiveToolEvents([])
                 }
                 if (generateWorkItems && !response.isDeferred) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
                 }
             })
-            .catch(() => {
+            .catch(async (error: unknown) => {
                 if (!deletingSessionIdsRef.current.has(sessionId)) {
                     queryClient.setQueryData<ChatAttachment[]>(attachmentsQueryKey, previousAttachments)
                     void queryClient.invalidateQueries({ queryKey: ['chat-attachments'] })
                 }
+
+                const errorMessage = getApiErrorMessage(
+                    error,
+                    generateWorkItems ? 'Failed to generate work items.' : 'Failed to send message.',
+                )
+
                 setIsThinking(false)
                 setIsGenerating(false)
-                setOptimisticMessages([])
+                setLastSendResponse(null)
+                setOptimisticMessages((current) => [
+                    ...current.filter((entry) => entry.role === 'user'),
+                    {
+                        id: `chat-error-${Date.now()}`,
+                        role: 'assistant',
+                        content: errorMessage,
+                        timestamp: new Date().toISOString(),
+                    },
+                ])
+
+                await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
+                await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
             })
     }
 
@@ -346,6 +398,7 @@ export function ChatDrawer({
             onSuccess: (session) => {
                 setActiveSession(session.id)
                 setOptimisticMessages([])
+                setLiveToolEvents([])
             },
         })
     }
@@ -359,6 +412,7 @@ export function ChatDrawer({
             setIsGenerating(false)
             setLastSendResponse(null)
             setOptimisticMessages([])
+            setLiveToolEvents([])
         }
 
         deleteSessionMutation.mutate(sessionId, {
@@ -370,6 +424,7 @@ export function ChatDrawer({
                     setActiveSession(remainingSessions.length > 0 ? remainingSessions[0].id : undefined)
                 }
                 setOptimisticMessages([])
+                setLiveToolEvents([])
             },
             onError: () => {
                 deletingSessionIdsRef.current.delete(sessionId)
@@ -382,7 +437,9 @@ export function ChatDrawer({
     }
 
     // Show tool events from last response
-    const toolEvents = lastSendResponse?.toolEvents ?? []
+    const toolEvents = liveToolEvents.length > 0
+        ? liveToolEvents
+        : (lastSendResponse?.toolEvents ?? [])
 
     const handleFileSelect = (file: File) => {
         const resolvedSessionId = activeSession && sessions.some((session) => session.id === activeSession)
@@ -435,7 +492,7 @@ export function ChatDrawer({
             <ChatSessionBar
                 sessions={sessions}
                 activeSessionId={activeSession ?? ''}
-                onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]) }}
+                onSelectSession={(id) => { setActiveSession(id); setOptimisticMessages([]); setLiveToolEvents([]) }}
                 onDeleteSession={handleDeleteSession}
                 onRenameSession={handleRenameSession}
                 onNewSession={handleNewSession}

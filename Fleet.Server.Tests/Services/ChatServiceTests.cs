@@ -441,6 +441,70 @@ public class ChatServiceTests
     }
 
     [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_DoesNotFinishBeforeMutatingWorkItems()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 101, \"Title\": \"Create auth endpoint\" }] }");
+
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Created work items", "now");
+        var requests = new List<LLMRequest>();
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Create auth endpoint\"}]}")
+        };
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Auth backlog", null),
+            new LLMResponse("Here is the backlog I would create.", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Created work items", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => requests.Add(request))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+
+        Assert.AreEqual(1, writeTool.ExecuteCount);
+        Assert.AreEqual("Created work items", result.AssistantMessage.Content);
+        Assert.IsTrue(requests.Any(request =>
+            request.Messages.Any(message =>
+                message.Content != null &&
+                message.Content.Contains("You have not actually created or updated any work items yet", StringComparison.Ordinal))));
+    }
+
+    [TestMethod]
     public async Task SendMessageAsync_GenerateModeFailure_RefundsQuota()
     {
         var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
@@ -466,9 +530,54 @@ public class ChatServiceTests
     }
 
     [TestMethod]
-    public async Task SendMessageAsync_GenerateModeContinuesAfterRequestCancellation_WhenBackgroundExecutionEnabled()
+    public async Task SendMessageAsync_DeferredGenerateStartupFailure_ReturnsAssistantError()
     {
         var backgroundSut = CreateBackgroundCapableChatService();
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto(
+            "msg-2",
+            "assistant",
+            "Monthly work-item run limit reached for the 'free' tier (4).",
+            "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, true))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.SetSessionGeneratingAsync(ProjectId, SessionId, false))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.AddMessageAsync(
+                ProjectId,
+                SessionId,
+                "assistant",
+                "Monthly work-item run limit reached for the 'free' tier (4)."))
+            .ReturnsAsync(assistantMsg);
+
+        _usageLedgerService.Setup(s => s.ChargeRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Monthly work-item run limit reached for the 'free' tier (4)."));
+
+        var result = await backgroundSut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+
+        Assert.IsFalse(result.IsDeferred);
+        Assert.IsNotNull(result.AssistantMessage);
+        Assert.AreEqual("Monthly work-item run limit reached for the 'free' tier (4).", result.AssistantMessage.Content);
+        Assert.AreEqual("Monthly work-item run limit reached for the 'free' tier (4).", result.Error);
+        _usageLedgerService.Verify(
+            s => s.RefundRunAsync(UserId, MonthlyRunType.WorkItem, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateModeContinuesAfterRequestCancellation_WhenBackgroundExecutionEnabled()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 101, \"Title\": \"Create auth endpoint\" }] }");
+        var backgroundSut = CreateBackgroundCapableChatService(new ChatToolRegistry([writeTool]));
         var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
         var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Generated work items", "now");
         var assistantPersisted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -489,9 +598,15 @@ public class ChatServiceTests
             .ReturnsAsync(assistantMsg)
             .Callback(() => assistantPersisted.TrySetResult());
 
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Create auth endpoint\"}]}")
+        };
+
         var responses = new Queue<LLMResponse>(new[]
         {
-            new LLMResponse("Backlog draft", null),
+            new LLMResponse("Auth backlog", null),
+            new LLMResponse(null, toolCalls),
             new LLMResponse("Generated work items", null),
         });
 
@@ -664,6 +779,15 @@ public class ChatServiceTests
                 UserId,
                 ProjectId,
                 ServerEventTopics.WorkItemsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+
+        _eventPublisher.Verify(
+            p => p.PublishProjectEventAsync(
+                UserId,
+                ProjectId,
+                ServerEventTopics.ChatToolEvent,
                 It.IsAny<object?>(),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
