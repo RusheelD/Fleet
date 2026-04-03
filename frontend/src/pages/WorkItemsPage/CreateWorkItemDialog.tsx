@@ -20,6 +20,11 @@ import { useCreateWorkItem } from '../../proxies'
 import { resolveLevelIcon } from '../../proxies'
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { useIsMobile } from '../../hooks'
+import {
+    AUTO_ASSIGNMENT_LABEL,
+    WORK_ITEM_ASSIGNMENT_OPTION_LABELS,
+    getWorkItemAssignmentSettings,
+} from './workItemAssignmentOptions'
 
 const PRIORITY_MAP: Record<string, number> = {
     'P1 - Critical': 1,
@@ -38,18 +43,6 @@ const DIFFICULTY_MAP: Record<string, number> = {
 
 const NONE_PARENT = '(None)'
 const NONE_LEVEL = '(None)'
-
-function getAgentSettings(label: string): { isAI: boolean; assignmentMode: 'auto' | 'manual'; assignedAgentCount: number | null } {
-    if (label === 'Manual assignment') {
-        return { isAI: false, assignmentMode: 'manual', assignedAgentCount: null }
-    }
-
-    if (label === '1 agent') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 1 }
-    if (label === '3 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 3 }
-    if (label === '5 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 5 }
-
-    return { isAI: true, assignmentMode: 'auto', assignedAgentCount: null }
-}
 
 const useStyles = makeStyles({
     dialogSurface: {
@@ -104,7 +97,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
     const [difficultyLabel, setDifficultyLabel] = useState('3 - Moderate')
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
-    const [agentLabel, setAgentLabel] = useState('Auto-detect')
+    const [agentLabel, setAgentLabel] = useState(AUTO_ASSIGNMENT_LABEL)
     const [parentLabel, setParentLabel] = useState(NONE_PARENT)
     const [levelLabel, setLevelLabel] = useState(NONE_LEVEL)
 
@@ -119,7 +112,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
         setDifficultyLabel('3 - Moderate')
         setState('New')
         setTags('')
-        setAgentLabel('Auto-detect')
+        setAgentLabel(AUTO_ASSIGNMENT_LABEL)
         setParentLabel(NONE_PARENT)
         setLevelLabel(NONE_LEVEL)
     }
@@ -129,7 +122,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
         const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
-        const agentSettings = getAgentSettings(agentLabel)
+        const agentSettings = getWorkItemAssignmentSettings(agentLabel)
 
         createMutation.mutate(
             {
@@ -138,7 +131,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                 priority: PRIORITY_MAP[priorityLabel] ?? 2,
                 difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                 state,
-                assignedTo: agentSettings.isAI ? 'Fleet AI' : 'Unassigned',
+                assignedTo: agentSettings.assignedTo,
                 tags: tags
                     .split(',')
                     .map((t) => t.trim())
@@ -276,13 +269,11 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                     value={agentLabel}
                                     onOptionSelect={(_e, data) => setAgentLabel(data.optionText ?? 'Auto-detect')}
                                 >
-                                    <Option>Auto-detect</Option>
-                                    <Option>1 agent</Option>
-                                    <Option>3 agents</Option>
-                                    <Option>5 agents</Option>
-                                    <Option>Manual assignment</Option>
-                                </Dropdown>
-                            </Field>
+                                            {WORK_ITEM_ASSIGNMENT_OPTION_LABELS.map((label) => (
+                                                <Option key={label}>{label}</Option>
+                                            ))}
+                                        </Dropdown>
+                                    </Field>
                         </div>
                     </DialogContent>
                     <DialogActions className={mergeClasses(isMobile && styles.dialogActionsMobile)}>

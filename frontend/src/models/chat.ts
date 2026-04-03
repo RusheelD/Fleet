@@ -63,3 +63,41 @@ export interface ChatAttachment {
   contentLength: number
   uploadedAt: string
 }
+
+function normalizeActivityKind(kind: unknown): ChatSessionActivity['kind'] {
+  return kind === 'tool' || kind === 'error' ? kind : 'status'
+}
+
+export function normalizeChatSessionActivity(
+  activity: unknown,
+  fallbackIndex = 0,
+): ChatSessionActivity {
+  const source = (activity && typeof activity === 'object') ? activity as Partial<ChatSessionActivity> : {}
+  const kind = normalizeActivityKind(source.kind)
+  const message = typeof source.message === 'string' && source.message.trim().length > 0
+    ? source.message
+    : 'Session update'
+  const timestampUtc = typeof source.timestampUtc === 'string' ? source.timestampUtc : ''
+  const toolName = typeof source.toolName === 'string' ? source.toolName : null
+  const succeeded = typeof source.succeeded === 'boolean' ? source.succeeded : null
+  const id = typeof source.id === 'string' && source.id.trim().length > 0
+    ? source.id
+    : `${kind}-${timestampUtc || 'unknown'}-${fallbackIndex}`
+
+  return {
+    id,
+    kind,
+    message,
+    timestampUtc,
+    toolName,
+    succeeded,
+  }
+}
+
+export function normalizeChatSessionActivities(activities: unknown): ChatSessionActivity[] {
+  if (!Array.isArray(activities)) {
+    return []
+  }
+
+  return activities.map((activity, index) => normalizeChatSessionActivity(activity, index))
+}

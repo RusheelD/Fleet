@@ -26,6 +26,26 @@ public class ChatToolRegistryTests
     }
 
     [TestMethod]
+    public void ToLLMDefinitions_NormalChat_IncludesUpdateOnlyToolsMarkedSafe()
+    {
+        var registry = new ChatToolRegistry([
+            new StubTool("read_only", isWrite: false),
+            new StubTool("bulk_update_work_items", isWrite: true, allowInNormalChat: true),
+            new StubTool("bulk_delete_work_items", isWrite: true),
+        ]);
+
+        var defs = registry.ToLLMDefinitions(
+            includeWriteTools: false,
+            bulkOnly: false,
+            includeGlobalRepoTools: true);
+        var names = defs.Select(d => d.Name).ToList();
+
+        CollectionAssert.Contains(names, "read_only");
+        CollectionAssert.Contains(names, "bulk_update_work_items");
+        CollectionAssert.DoesNotContain(names, "bulk_delete_work_items");
+    }
+
+    [TestMethod]
     public void ToLLMDefinitions_ProjectScope_ExcludesCreateProject()
     {
         var registry = new ChatToolRegistry([
@@ -43,12 +63,13 @@ public class ChatToolRegistryTests
         CollectionAssert.DoesNotContain(names, "create_project");
     }
 
-    private sealed class StubTool(string name, bool isWrite) : IChatTool
+    private sealed class StubTool(string name, bool isWrite, bool allowInNormalChat = false) : IChatTool
     {
         public string Name => name;
         public string Description => "stub";
         public string ParametersJsonSchema => "{}";
         public bool IsWriteTool => isWrite;
+        public bool AllowInNormalChat => allowInNormalChat;
 
         public Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
             => Task.FromResult("ok");

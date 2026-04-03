@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
 import type { ChatData, ChatSessionActivity, ChatSessionData } from '../models'
+import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
 
 interface ServerEventMessage {
   eventName: string
@@ -192,23 +193,25 @@ export function useServerEvents(projectId?: string) {
       current: ChatSessionActivity[] | undefined,
       nextActivity: ChatSessionActivity | null | undefined,
     ): ChatSessionActivity[] => {
-      const existing = current ?? []
+      const existing = normalizeChatSessionActivities(current)
       if (!nextActivity) {
         return existing
       }
 
+      const normalizedActivity = normalizeChatSessionActivity(nextActivity, existing.length)
+
       const last = existing.length > 0 ? existing[existing.length - 1] : undefined
       if (
         last
-        && last.kind === nextActivity.kind
-        && last.message === nextActivity.message
-        && last.toolName === nextActivity.toolName
-        && last.succeeded === nextActivity.succeeded
+        && last.kind === normalizedActivity.kind
+        && last.message === normalizedActivity.message
+        && last.toolName === normalizedActivity.toolName
+        && last.succeeded === normalizedActivity.succeeded
       ) {
         return existing
       }
 
-      return [...existing, nextActivity].slice(-16)
+      return [...existing, normalizedActivity].slice(-16)
     }
 
     const updateChatSessionCaches = (payload: ChatSessionEventPayload) => {

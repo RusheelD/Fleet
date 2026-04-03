@@ -149,6 +149,38 @@ public class ChatSessionRepositoryTests
         auth.Verify(a => a.GetCurrentUserIdAsync(), Times.Never);
     }
 
+    [TestMethod]
+    public async Task GetSessionsByProjectIdAsync_NormalizesMalformedRecentActivityEntries()
+    {
+        await using var context = CreateContext();
+        context.ChatSessions.Add(new ChatSession
+        {
+            Id = "session-5",
+            OwnerId = "42",
+            Title = "Malformed activity",
+            LastMessage = "",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            IsActive = true,
+            ProjectId = "proj-1",
+            RecentActivityJson = """[{"id":"","kind":"mystery","message":null,"timestampUtc":null}]""",
+        });
+        await context.SaveChangesAsync();
+
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
+        var sut = new ChatSessionRepository(context, auth.Object);
+
+        var sessions = await sut.GetSessionsByProjectIdAsync("proj-1");
+
+        Assert.AreEqual(1, sessions.Count);
+        Assert.IsNotNull(sessions[0].RecentActivity);
+        var activity = sessions[0].RecentActivity!.Single();
+        Assert.AreEqual("status", activity.Kind);
+        Assert.AreEqual("Session update", activity.Message);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(activity.Id));
+        Assert.AreEqual(string.Empty, activity.TimestampUtc);
+    }
+
     private static FleetDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<FleetDbContext>()

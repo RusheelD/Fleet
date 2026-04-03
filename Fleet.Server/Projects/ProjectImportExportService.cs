@@ -272,7 +272,10 @@ public class ProjectImportExportService(
             parentWorkItemNumber,
             levelName,
             NormalizeAssignmentMode(item.AssignmentMode, item.IsAI),
-            NormalizeAssignedAgentCount(item.AssignedAgentCount),
+            NormalizeAssignedAgentCount(
+                NormalizeAssignmentMode(item.AssignmentMode, item.IsAI),
+                item.IsAI,
+                item.AssignedAgentCount),
             item.AcceptanceCriteria,
             item.LinkedPullRequestUrl,
             item.LastObservedPullRequestState,
@@ -320,8 +323,11 @@ public class ProjectImportExportService(
             _ => isAi ? "auto" : "manual",
         };
 
-    private static int? NormalizeAssignedAgentCount(int? value)
+    private static int? NormalizeAssignedAgentCount(string assignmentMode, bool isAi, int? value)
     {
+        if (!isAi || !string.Equals(assignmentMode, "manual", StringComparison.OrdinalIgnoreCase))
+            return null;
+
         if (value is null || value <= 0)
             return null;
         return Math.Min(value.Value, 10);
@@ -443,6 +449,7 @@ public class ProjectImportExportService(
             var levelId = ResolveLevelId(source.LevelName, levelIdByName);
             var entity = new WorkItem
             {
+                AssignmentMode = NormalizeAssignmentMode(source.AssignmentMode, source.IsAI),
                 ProjectId = projectId,
                 WorkItemNumber = targetNumber,
                 Title = string.IsNullOrWhiteSpace(source.Title) ? $"Imported item {targetNumber}" : source.Title.Trim(),
@@ -454,8 +461,10 @@ public class ProjectImportExportService(
                 IsAI = source.IsAI,
                 Description = source.Description?.Trim() ?? string.Empty,
                 LevelId = levelId,
-                AssignmentMode = NormalizeAssignmentMode(source.AssignmentMode, source.IsAI),
-                AssignedAgentCount = NormalizeAssignedAgentCount(source.AssignedAgentCount),
+                AssignedAgentCount = NormalizeAssignedAgentCount(
+                    NormalizeAssignmentMode(source.AssignmentMode, source.IsAI),
+                    source.IsAI,
+                    source.AssignedAgentCount),
                 AcceptanceCriteria = source.AcceptanceCriteria?.Trim() ?? string.Empty,
                 LinkedPullRequestUrl = NormalizeOptional(source.LinkedPullRequestUrl),
                 LastObservedPullRequestState = NormalizeOptional(source.LastObservedPullRequestState)?.ToLowerInvariant(),

@@ -10,6 +10,8 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
 
     public bool IsWriteTool => true;
 
+    public bool AllowInNormalChat => true;
+
     public string Description =>
         "Update multiple work items in a single call. Each item needs its id (work-item number) and the fields to change. " +
         "Returns an array of results (updated items or errors). Use this instead of calling update_work_item in a loop.";

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { normalizeChatSessionActivities } from '../models/chat'
 import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
-  getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
+  getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, bulkDeleteWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration,
@@ -764,6 +765,17 @@ export function useCreateChatSession(projectId: string | undefined) {
   })
 }
 
+export function useBulkDeleteWorkItems(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workItemNumbers: number[]) => bulkDeleteWorkItems(projectId!, workItemNumbers),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+    },
+  })
+}
+
 export function useBulkUpdateWorkItems(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -821,7 +833,7 @@ export function useCancelChatGeneration(projectId: string | undefined) {
                   generationStatus: 'Generation canceled.',
                   generationUpdatedAtUtc: new Date().toISOString(),
                   recentActivity: [
-                    ...(session.recentActivity ?? []),
+                    ...normalizeChatSessionActivities(session.recentActivity),
                     {
                       id: `cancel-${sessionId}-${Date.now()}`,
                       kind: 'status' as const,

@@ -5,10 +5,10 @@ import {
     Button,
 } from '@fluentui/react-components'
 import {
-    RocketRegular,
     ChevronLeftRegular,
 } from '@fluentui/react-icons'
 import { appTokens } from '../../styles/appTokens'
+import { FleetRocketLogo } from '../shared'
 
 const useStyles = makeStyles({
     sidebarHeader: {
@@ -28,9 +28,9 @@ const useStyles = makeStyles({
         gap: 0,
     },
     brandIcon: {
-        color: appTokens.color.accentOrange,
-        fontSize: '20px',
         flexShrink: 0,
+        width: '22px',
+        height: '22px',
     },
     brandName: {
         fontWeight: 700,
@@ -57,11 +57,11 @@ export function SidebarHeader({ expanded, onToggle }: SidebarHeaderProps) {
         <div className={mergeClasses(styles.sidebarHeader, !expanded && styles.sidebarHeaderCollapsed)}>
             {expanded ? (
                 <>
-                    <RocketRegular className={styles.brandIcon} />
+                    <FleetRocketLogo className={styles.brandIcon} size={22} title="Fleet" />
                     <Text className={styles.brandName}>Fleet</Text>
                 </>
             ) : (
-                <RocketRegular className={styles.brandIcon} />
+                <FleetRocketLogo className={styles.brandIcon} size={22} title="Fleet" />
             )}
             {expanded && (
                 <Button

@@ -359,7 +359,7 @@ export function StartExecutionDialog({
                                                                     <Caption1>Priority P{wi.priority}</Caption1>
                                                                     <span className={styles.dot}>|</span>
                                                                     <Caption1>Difficulty D{wi.difficulty}</Caption1>
-                                                                    {wi.assignedAgentCount ? (
+                                                                    {wi.assignmentMode === 'manual' && wi.assignedAgentCount ? (
                                                                         <>
                                                                             <span className={styles.dot}>|</span>
                                                                             <Caption1>{wi.assignedAgentCount} agents</Caption1>

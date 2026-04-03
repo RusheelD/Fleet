@@ -224,18 +224,31 @@ const useStyles = makeStyles({
         height: '100%',
         display: 'flex',
         flexDirection: 'row',
-        backgroundColor: appTokens.color.surface,
+        backgroundColor: appTokens.color.pageBackground,
         borderLeft: appTokens.border.subtle,
         transition: `width ${appTokens.motion.fast} ease`,
     },
     chatPaneResizing: {
         transition: 'none',
     },
-    chatOverlayMobile: {
+    chatOverlayBackdropMobile: {
         position: 'fixed',
         inset: 0,
         zIndex: appTokens.zIndex.chatOverlay,
+        backgroundColor: appTokens.color.overlayBackdrop,
+    },
+    chatOverlayMobile: {
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        top: 'max(4.5rem, 10dvh)',
+        zIndex: appTokens.zIndex.chatOverlay + 1,
         backgroundColor: appTokens.color.surface,
+        borderTopLeftRadius: appTokens.radius.xl,
+        borderTopRightRadius: appTokens.radius.xl,
+        boxShadow: appTokens.shadow.overlay,
+        overflow: 'hidden',
         paddingBottom: 'env(safe-area-inset-bottom)',
     },
     resizeHandle: {
@@ -614,12 +627,15 @@ export function Layout() {
             </div>
 
             {isMobile && chatOpen && (
-                <div className={styles.chatOverlayMobile}>
-                    <ChatDrawer
-                        projectId={projectId}
-                        onClose={() => setChatOpen(false)}
-                    />
-                </div>
+                <>
+                    <div className={styles.chatOverlayBackdropMobile} onClick={() => setChatOpen(false)} />
+                    <div className={styles.chatOverlayMobile}>
+                        <ChatDrawer
+                            projectId={projectId}
+                            onClose={() => setChatOpen(false)}
+                        />
+                    </div>
+                </>
             )}
         </div>
     )

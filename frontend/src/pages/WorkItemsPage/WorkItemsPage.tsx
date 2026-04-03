@@ -29,6 +29,7 @@ import {
     DismissRegular,
     ArrowUploadRegular,
     ArrowDownloadRegular,
+    DeleteRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
@@ -37,6 +38,7 @@ import {
     useWorkItemLevels,
     useUpdateWorkItem,
     useBulkUpdateWorkItems,
+    useBulkDeleteWorkItems,
     useExportWorkItems,
     useImportWorkItems,
 } from '../../proxies'
@@ -50,6 +52,10 @@ import {
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
 import { appTokens } from '../../styles/appTokens'
+import {
+    WORK_ITEM_ASSIGNMENT_OPTION_LABELS,
+    getWorkItemAssignmentSettings,
+} from './workItemAssignmentOptions'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
 
@@ -183,13 +189,12 @@ const useStyles = makeStyles({
         minWidth: '140px',
         flex: '1 1 140px',
     },
-    bulkAssigneeInput: {
-        width: '210px',
+    bulkAssignmentDropdown: {
+        minWidth: '210px',
     },
-    bulkAssigneeInputMobile: {
-        width: '100%',
+    bulkAssignmentDropdownMobile: {
+        minWidth: '160px',
         flex: '1 1 180px',
-        minWidth: '140px',
     },
     searchInput: {
         maxWidth: '280px',
@@ -362,13 +367,15 @@ function sanitizeColumnWidths(
 interface WorkItemFilters {
     states: Set<WorkItemState>
     priorities: Set<number>
+    levelKeys: Set<string>
     aiOnly: boolean | null
 }
 
-const EMPTY_FILTERS: WorkItemFilters = { states: new Set(), priorities: new Set(), aiOnly: null }
+const NO_TYPE_FILTER_KEY = '__none__'
+const EMPTY_FILTERS: WorkItemFilters = { states: new Set(), priorities: new Set(), levelKeys: new Set(), aiOnly: null }
 
 function isFiltered(filters: WorkItemFilters): boolean {
-    return filters.states.size > 0 || filters.priorities.size > 0 || filters.aiOnly !== null
+    return filters.states.size > 0 || filters.priorities.size > 0 || filters.levelKeys.size > 0 || filters.aiOnly !== null
 }
 
 export function WorkItemsPage() {
@@ -380,7 +387,7 @@ export function WorkItemsPage() {
     const isDense = isCompact || isMobile
     const { data: workItems, isLoading } = useWorkItems(projectId)
     const { data: levels } = useWorkItemLevels(projectId)
-    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>(isMobile ? 'board' : 'backlog')
+    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
@@ -388,7 +395,7 @@ export function WorkItemsPage() {
     const [filters, setFilters] = useState<WorkItemFilters>(EMPTY_FILTERS)
     const [selectedWorkItemNumbers, setSelectedWorkItemNumbers] = useState<Set<number>>(new Set())
     const [bulkState, setBulkState] = useState<WorkItemState | ''>('')
-    const [bulkAssignee, setBulkAssignee] = useState('')
+    const [bulkAssignmentLabel, setBulkAssignmentLabel] = useState('')
     const [collapsedColumns, setCollapsedColumns] = useState<Set<WorkItemTableColumnKey>>(() => new Set())
     const [columnWidths, setColumnWidths] = useState<Record<WorkItemTableColumnKey, number>>(
         () => ({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS }),
@@ -396,6 +403,7 @@ export function WorkItemsPage() {
 
     const updateMutation = useUpdateWorkItem(projectId)
     const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
+    const bulkDeleteMutation = useBulkDeleteWorkItems(projectId)
     const exportWorkItemsMutation = useExportWorkItems(projectId)
     const importWorkItemsMutation = useImportWorkItems(projectId)
     const importFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -426,12 +434,6 @@ export function WorkItemsPage() {
             return next.size === previous.size ? previous : next
         })
     }, [workItems])
-
-    useEffect(() => {
-        if (isMobile && viewMode === 'backlog') {
-            setViewMode('board')
-        }
-    }, [isMobile, viewMode])
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -581,6 +583,10 @@ export function WorkItemsPage() {
         }
         return map
     }, [levels])
+    const sortedLevels = useMemo(
+        () => [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal || a.name.localeCompare(b.name)),
+        [levels],
+    )
 
     const items = useMemo(() => {
         let all = workItems ?? []
@@ -591,6 +597,12 @@ export function WorkItemsPage() {
         }
         if (filters.priorities.size > 0) {
             all = all.filter((wi) => filters.priorities.has(wi.priority))
+        }
+        if (filters.levelKeys.size > 0) {
+            all = all.filter((wi) => {
+                const key = wi.levelId == null ? NO_TYPE_FILTER_KEY : wi.levelId.toString()
+                return filters.levelKeys.has(key)
+            })
         }
         if (filters.aiOnly === true) {
             all = all.filter((wi) => wi.isAI)
@@ -615,7 +627,7 @@ export function WorkItemsPage() {
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
     const selectedCount = selectedWorkItemNumbers.size
-    const canApplyBulkChanges = selectedCount > 0 && (bulkState !== '' || bulkAssignee.trim().length > 0)
+    const canApplyBulkChanges = selectedCount > 0 && (bulkState !== '' || bulkAssignmentLabel !== '')
 
     const handleApplyBulkChanges = useCallback(() => {
         if (!canApplyBulkChanges) {
@@ -626,8 +638,12 @@ export function WorkItemsPage() {
         if (bulkState) {
             request.state = bulkState
         }
-        if (bulkAssignee.trim().length > 0) {
-            request.assignedTo = bulkAssignee.trim()
+        if (bulkAssignmentLabel) {
+            const assignmentSettings = getWorkItemAssignmentSettings(bulkAssignmentLabel)
+            request.assignedTo = assignmentSettings.assignedTo
+            request.isAI = assignmentSettings.isAI
+            request.assignmentMode = assignmentSettings.assignmentMode
+            request.assignedAgentCount = assignmentSettings.assignedAgentCount
         }
 
         bulkUpdateMutation.mutate(
@@ -639,18 +655,46 @@ export function WorkItemsPage() {
                 onSuccess: () => {
                     clearSelection()
                     setBulkState('')
-                    setBulkAssignee('')
+                    setBulkAssignmentLabel('')
                 },
             },
         )
     }, [
-        bulkAssignee,
+        bulkAssignmentLabel,
         bulkState,
         bulkUpdateMutation,
         canApplyBulkChanges,
         clearSelection,
         selectedWorkItemNumbers,
     ])
+
+    const handleDeleteSelected = useCallback(() => {
+        const selectedItems = Array.from(selectedWorkItemNumbers)
+        if (selectedItems.length === 0) {
+            return
+        }
+
+        const confirmed = window.confirm(
+            selectedItems.length === 1
+                ? `Delete work item #${selectedItems[0]}?`
+                : `Delete ${selectedItems.length} selected work items?`,
+        )
+
+        if (!confirmed) {
+            return
+        }
+
+        bulkDeleteMutation.mutate(selectedItems, {
+            onSuccess: () => {
+                clearSelection()
+                setBulkState('')
+                setBulkAssignmentLabel('')
+                if (selectedItem && selectedWorkItemNumbers.has(selectedItem.workItemNumber)) {
+                    setSelectedItem(null)
+                }
+            },
+        })
+    }, [bulkDeleteMutation, clearSelection, selectedItem, selectedWorkItemNumbers])
 
     if (isLoading) {
         return (
@@ -713,7 +757,7 @@ export function WorkItemsPage() {
                             onTabSelect={(_e, data) => setViewMode(data.value as 'backlog' | 'list' | 'board')}
                             size="small"
                         >
-                            {!isMobile && <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>}
+                            <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>
                             <Tab value="list" icon={<TextBulletListLtrRegular />}>List</Tab>
                             <Tab value="board" icon={<BoardRegular />}>Board</Tab>
                         </TabList>
@@ -795,6 +839,40 @@ export function WorkItemsPage() {
                                     </div>
                                     <Divider />
                                     <div className={styles.filterSection}>
+                                        <Text size={200} weight="semibold">Type</Text>
+                                        <Checkbox
+                                            label="No type"
+                                            size="medium"
+                                            checked={filters.levelKeys.has(NO_TYPE_FILTER_KEY)}
+                                            onChange={(_e, data) => {
+                                                setFilters((prev) => {
+                                                    const next = new Set(prev.levelKeys)
+                                                    if (data.checked) next.add(NO_TYPE_FILTER_KEY); else next.delete(NO_TYPE_FILTER_KEY)
+                                                    return { ...prev, levelKeys: next }
+                                                })
+                                            }}
+                                        />
+                                        {sortedLevels.map((level) => {
+                                            const key = level.id.toString()
+                                            return (
+                                                <Checkbox
+                                                    key={level.id}
+                                                    label={level.name}
+                                                    size="medium"
+                                                    checked={filters.levelKeys.has(key)}
+                                                    onChange={(_e, data) => {
+                                                        setFilters((prev) => {
+                                                            const next = new Set(prev.levelKeys)
+                                                            if (data.checked) next.add(key); else next.delete(key)
+                                                            return { ...prev, levelKeys: next }
+                                                        })
+                                                    }}
+                                                />
+                                            )
+                                        })}
+                                    </div>
+                                    <Divider />
+                                    <div className={styles.filterSection}>
                                         <Text size={200} weight="semibold">AI</Text>
                                         <Checkbox
                                             label="AI-assigned only"
@@ -870,14 +948,21 @@ export function WorkItemsPage() {
                                                 <Option key={state} value={state}>{state}</Option>
                                             ))}
                                         </Dropdown>
-                                        <Input
-                                            className={mergeClasses(styles.bulkAssigneeInput, isMobile && styles.bulkAssigneeInputMobile)}
+                                        <Dropdown
+                                            className={mergeClasses(styles.bulkAssignmentDropdown, isMobile && styles.bulkAssignmentDropdownMobile)}
                                             size="small"
-                                            appearance="outline"
-                                            placeholder="Assign to..."
-                                            value={bulkAssignee}
-                                            onChange={(_event, data) => setBulkAssignee(data.value)}
-                                        />
+                                            placeholder="Assignment"
+                                            selectedOptions={bulkAssignmentLabel ? [bulkAssignmentLabel] : []}
+                                            value={bulkAssignmentLabel}
+                                            onOptionSelect={(_event, data) => {
+                                                setBulkAssignmentLabel((data.optionValue as string | undefined) ?? '')
+                                            }}
+                                        >
+                                            <Option value="">No assignment change</Option>
+                                            {WORK_ITEM_ASSIGNMENT_OPTION_LABELS.map((label) => (
+                                                <Option key={label} value={label}>{label}</Option>
+                                            ))}
+                                        </Dropdown>
                                         <Button
                                             appearance="primary"
                                             size="small"
@@ -889,11 +974,20 @@ export function WorkItemsPage() {
                                         <Button
                                             appearance="subtle"
                                             size="small"
-                                            disabled={bulkUpdateMutation.isPending}
+                                            icon={<DeleteRegular />}
+                                            disabled={bulkDeleteMutation.isPending || bulkUpdateMutation.isPending}
+                                            onClick={handleDeleteSelected}
+                                        >
+                                            Delete Selected
+                                        </Button>
+                                        <Button
+                                            appearance="subtle"
+                                            size="small"
+                                            disabled={bulkDeleteMutation.isPending || bulkUpdateMutation.isPending}
                                             onClick={() => {
                                                 clearSelection()
                                                 setBulkState('')
-                                                setBulkAssignee('')
+                                                setBulkAssignmentLabel('')
                                             }}
                                         >
                                             Clear Selection

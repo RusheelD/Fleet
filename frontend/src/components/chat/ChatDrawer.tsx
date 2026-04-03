@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { makeStyles, mergeClasses, Spinner } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatInput, AttachedFiles, ChatActivityFeed } from './'
+import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatInput, AttachedFiles } from './'
 
 import {
     useChatData, useChatMessages, useCreateChatSession,
@@ -12,14 +12,16 @@ import {
 import { useAuth, usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatGenerationState, ChatMessageData } from '../../models'
+import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
+import { buildChatTimeline } from './chatTimeline'
 
 const useStyles = makeStyles({
     drawer: {
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: appTokens.color.surfaceAlt,
+        backgroundColor: appTokens.color.pageBackground,
         flexShrink: 0,
         height: '100%',
         overflow: 'hidden',
@@ -41,7 +43,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
-        backgroundColor: appTokens.color.surfaceAlt,
+        backgroundColor: appTokens.color.pageBackground,
     },
     messagesContainerCompact: {
         paddingTop: '0.5rem',
@@ -55,22 +57,6 @@ const useStyles = makeStyles({
         paddingBottom: '0.75rem',
         paddingLeft: '0.625rem',
         paddingRight: '0.625rem',
-    },
-    thinkingRow: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: appTokens.space.sm,
-        padding: '0.5rem 0.25rem',
-    },
-    thinkingRowCompact: {
-        paddingTop: '0.25rem',
-        paddingBottom: '0.25rem',
-        paddingLeft: '0.125rem',
-        paddingRight: '0.125rem',
-    },
-    thinkingRowMobile: {
-        paddingLeft: '0.25rem',
-        paddingRight: '0.25rem',
     },
 })
 
@@ -165,7 +151,7 @@ export function ChatDrawer({
                 isGenerating,
                 generationState,
                 generationStatus,
-                recentActivity: session.recentActivity ?? [],
+                recentActivity: normalizeChatSessionActivities(session.recentActivity),
             }
         }),
         [serverSessions, optimisticGeneratingSessionIds, cancelGenerationMutation.isPending, cancelGenerationMutation.variables],
@@ -188,6 +174,7 @@ export function ChatDrawer({
     const activeSessionIsSending = Boolean(activeSession && pendingMessageSessionIds.includes(activeSession))
     const activeSessionIsGenerating = Boolean(activeSession && activeSessionData?.isGenerating)
     const activeSessionIsBusy = activeSessionIsSending || activeSessionIsGenerating
+    const recentActivityCount = activeSessionData?.recentActivity?.length ?? 0
     const isCancelingActiveSession = Boolean(
         activeSession
         && cancelGenerationMutation.isPending
@@ -253,7 +240,7 @@ export function ChatDrawer({
     // Scroll to bottom when messages change
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [displayMessages.length, activeSessionIsBusy])
+    }, [displayMessages.length, recentActivityCount, activeSessionIsBusy])
 
     useEffect(() => {
         if (!onRequestChatWidth || !chatWidth || !messagesContainerRef.current) {
@@ -456,7 +443,16 @@ export function ChatDrawer({
 
     const activeSessionStatusState = activeSessionData?.generationState ?? 'idle'
     const activeSessionStatusMessage = getVisibleSessionStatus(activeSessionData)
-    const activeSessionActivity = activeSessionData?.recentActivity ?? []
+    const visibleActivity = useMemo(() => {
+        return activeSessionData?.recentActivity ?? []
+    }, [activeSessionData?.recentActivity])
+    const timelineItems = useMemo(
+        () => buildChatTimeline(displayMessages, visibleActivity, {
+            isBusy: activeSessionIsBusy,
+            statusMessage: activeSessionStatusMessage ?? (activeSessionIsGenerating ? 'Generating work items...' : 'Fleet AI is thinking...'),
+        }),
+        [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating],
+    )
 
     const handleFileSelect = (file: File) => {
         const resolvedSessionId = activeSession && sessions.some((session) => session.id === activeSession)
@@ -544,27 +540,18 @@ export function ChatDrawer({
                         isMobile && styles.messagesContainerMobile,
                     )}
                 >
-                    {displayMessages.map((msg) => (
-                        <ChatMessage key={msg.id} message={msg} currentUserIdentity={currentUserIdentity} />
+                    {timelineItems.map((item) => item.type === 'message' ? (
+                        <ChatMessage
+                            key={item.id}
+                            message={item.message}
+                            currentUserIdentity={currentUserIdentity}
+                        />
+                    ) : (
+                        <ChatThinkingGroup
+                            key={item.id}
+                            group={item.group}
+                        />
                     ))}
-                    <ChatActivityFeed activities={activeSessionActivity} />
-                    {activeSessionIsBusy && (
-                        <div
-                            className={mergeClasses(
-                                styles.thinkingRow,
-                                isCompact && styles.thinkingRowCompact,
-                                isMobile && styles.thinkingRowMobile,
-                            )}
-                        >
-                            <Spinner
-                                size="tiny"
-                                label={activeSessionIsGenerating
-                                    ? (activeSessionStatusMessage ?? 'Fleet AI is generating work items...')
-                                    : 'Fleet AI is thinking...'}
-                                labelPosition="after"
-                            />
-                        </div>
-                    )}
                     <div ref={messagesEndRef} />
                 </div>
             )}

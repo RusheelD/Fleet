@@ -53,6 +53,10 @@ export function bulkUpdateWorkItems(
   return Promise.all(workItemNumbers.map((workItemNumber) => updateWorkItem(projectId, workItemNumber, request)))
 }
 
+export async function bulkDeleteWorkItems(projectId: string, workItemNumbers: number[]): Promise<void> {
+  await Promise.all(workItemNumbers.map((workItemNumber) => deleteWorkItem(projectId, workItemNumber)))
+}
+
 export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {
   return del<void>(`/api/projects/${projectId}/work-items/${workItemNumber}`)
 }

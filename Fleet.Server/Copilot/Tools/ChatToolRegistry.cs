@@ -26,8 +26,9 @@ public class ChatToolRegistry
     public IReadOnlyList<LLMToolDefinition> ToLLMDefinitions(
         bool includeWriteTools = true,
         bool bulkOnly = false,
-        bool includeGlobalRepoTools = true) =>
-        All.Where(t => includeWriteTools || !t.IsWriteTool || AlwaysAvailableWriteTools.Contains(t.Name))
+        bool includeGlobalRepoTools = true,
+        bool includeNormalChatWriteTools = true) =>
+        All.Where(t => includeWriteTools || !t.IsWriteTool || AlwaysAvailableWriteTools.Contains(t.Name) || (includeNormalChatWriteTools && t.AllowInNormalChat))
            .Where(t => !bulkOnly || !SingleItemWriteTools.Contains(t.Name))
            .Where(t => includeGlobalRepoTools || !GlobalOnlyTools.Contains(t.Name))
            .Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema))

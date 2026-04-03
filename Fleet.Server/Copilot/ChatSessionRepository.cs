@@ -464,7 +464,11 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
         try
         {
-            return JsonSerializer.Deserialize<ChatSessionActivityDto[]>(recentActivityJson, RecentActivityJsonOptions) ?? [];
+            var activities = JsonSerializer.Deserialize<ChatSessionActivityDto[]>(recentActivityJson, RecentActivityJsonOptions) ?? [];
+            return activities
+                .Where(activity => activity is not null)
+                .Select((activity, index) => NormalizeRecentActivity(activity, index))
+                .ToArray();
         }
         catch
         {
@@ -479,6 +483,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         ChatSessionActivityDto[] existing,
         ChatSessionActivityDto activity)
     {
+        activity = NormalizeRecentActivity(activity, existing.Length);
         if (existing.Length > 0)
         {
             var last = existing[^1];
@@ -493,6 +498,25 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
         var next = existing.Concat([activity]).TakeLast(MaxRecentActivityEntries).ToArray();
         return next;
+    }
+
+    private static ChatSessionActivityDto NormalizeRecentActivity(ChatSessionActivityDto activity, int index)
+    {
+        var kind = activity.Kind is "tool" or "error" ? activity.Kind : "status";
+        var message = string.IsNullOrWhiteSpace(activity.Message) ? "Session update" : activity.Message;
+        var timestampUtc = activity.TimestampUtc ?? string.Empty;
+        var id = string.IsNullOrWhiteSpace(activity.Id)
+            ? $"{kind}-{timestampUtc}-{index}"
+            : activity.Id;
+        var toolName = string.IsNullOrWhiteSpace(activity.ToolName) ? null : activity.ToolName;
+
+        return new ChatSessionActivityDto(
+            id,
+            kind,
+            message,
+            timestampUtc,
+            toolName,
+            activity.Succeeded);
     }
 
     private static string? NormalizeProjectId(string projectId)

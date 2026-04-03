@@ -110,6 +110,17 @@ public class AgentOrchestrationService(
         [AgentRole.Manager],
         [AgentRole.Planner],
     ];
+    private static readonly Dictionary<AgentRole, int> LimitedPipelineRolePriority = new()
+    {
+        [AgentRole.Backend] = 1,
+        [AgentRole.Frontend] = 2,
+        [AgentRole.Contracts] = 3,
+        [AgentRole.Testing] = 4,
+        [AgentRole.Styling] = 5,
+        [AgentRole.Consolidation] = 6,
+        [AgentRole.Review] = 7,
+        [AgentRole.Documentation] = 8,
+    };
 
     private const int MaxParallelSubFlows = 3;
 
@@ -428,6 +439,7 @@ public class AgentOrchestrationService(
             var pipeline = executionMode == AgentExecutionModes.Orchestration
                 ? OrchestrationPreludePipeline
                 : await SelectPipelineAsync(workItemContext, cancellationToken);
+            pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             logger.LogInformation(
                 "Execution: AI-selected pipeline with {PhaseCount} agents, model={Model}",
                 pipeline.SelectMany(g => g).Count(), selectedModelKey);
@@ -575,7 +587,7 @@ public class AgentOrchestrationService(
             _ = Task.Run(() => RunPipelineAsync(
                 executionId, projectId, workItem, childWorkItems, repoFullName,
                 branchName, commitAuthorName, commitAuthorEmail,
-                userId, selectedModelKey, pipeline, tierPolicy.MaxConcurrentAgentsPerTask,
+                userId, selectedModelKey, pipeline, ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
                 pullRequestTargetBranch, retryPlan, reusePullRequestNumber, !skipQuotaCharge, cts.Token), CancellationToken.None);
 
             return executionId;
@@ -750,7 +762,8 @@ public class AgentOrchestrationService(
         if (pipeline.Length == 0)
         {
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
-            pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
+                pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
+                pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             logger.LogWarning(
                 "Execution {ExecutionId}: paused execution had no reconstructable agent pipeline; falling back to AI-selected pipeline with {PhaseCount} roles",
                 executionId,
@@ -849,7 +862,7 @@ public class AgentOrchestrationService(
                 userId,
                 ModelKeys.Haiku,
                 pipeline,
-                tierPolicy.MaxConcurrentAgentsPerTask,
+                    ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
                 pullRequestTargetBranch,
                 retryPlan,
                 retryPlan.ReusePullRequestNumber ?? 0,
@@ -2613,6 +2626,55 @@ public class AgentOrchestrationService(
                 .Where(group => group is not null)
                 .Select(group => group!)
                 .ToArray();
+    }
+
+    internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
+    {
+        var effectiveAssignedAgentCount = ResolveEffectiveAssignedAgentCount(assignmentMode, assignedAgentCount);
+        if (effectiveAssignedAgentCount is null)
+            return pipeline;
+
+        var workerLimit = effectiveAssignedAgentCount.Value;
+        var workerRoles = pipeline
+            .SelectMany(group => group)
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
+            .Distinct()
+            .ToList();
+
+        if (workerRoles.Count <= workerLimit)
+            return pipeline;
+
+        var retainedWorkers = workerRoles
+            .OrderBy(role => LimitedPipelineRolePriority.TryGetValue(role, out var priority) ? priority : int.MaxValue)
+            .ThenBy(role => role.ToString())
+            .Take(workerLimit)
+            .ToHashSet();
+
+        return pipeline
+            .Select(group => group.Where(role =>
+                role is AgentRole.Manager or AgentRole.Planner || retainedWorkers.Contains(role)).ToArray())
+            .Where(group => group.Length > 0)
+            .ToArray();
+    }
+
+    internal static int ResolveMaxConcurrentAgentsPerTask(int tierLimit, string? assignmentMode, int? assignedAgentCount)
+    {
+        var effectiveAssignedAgentCount = ResolveEffectiveAssignedAgentCount(assignmentMode, assignedAgentCount);
+        if (effectiveAssignedAgentCount is null)
+            return tierLimit;
+
+        return Math.Max(1, Math.Min(tierLimit, effectiveAssignedAgentCount.Value));
+    }
+
+    internal static int? ResolveEffectiveAssignedAgentCount(string? assignmentMode, int? assignedAgentCount)
+    {
+        if (!string.Equals(assignmentMode, "manual", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (assignedAgentCount is null || assignedAgentCount.Value <= 0)
+            return null;
+
+        return assignedAgentCount.Value;
     }
 
     internal static List<(AgentRole Role, string Output)> BuildCarryForwardPhaseOutputs(

@@ -73,6 +73,9 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             parentDbId = parentEntity?.Id;
         }
 
+        var assignmentMode = NormalizeAssignmentMode(request.AssignmentMode, request.IsAI);
+        var assignedAgentCount = NormalizeAssignedAgentCount(assignmentMode, request.IsAI, request.AssignedAgentCount);
+
         var entity = new WorkItem
         {
             WorkItemNumber = maxNumber + 1,
@@ -84,8 +87,8 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             AssignedTo = request.AssignedTo,
             Tags = [.. request.Tags],
             IsAI = request.IsAI,
-            AssignmentMode = NormalizeAssignmentMode(request.AssignmentMode, request.IsAI),
-            AssignedAgentCount = NormalizeAssignedAgentCount(request.AssignedAgentCount),
+            AssignmentMode = assignmentMode,
+            AssignedAgentCount = assignedAgentCount,
             AcceptanceCriteria = request.AcceptanceCriteria?.Trim() ?? string.Empty,
             ParentId = parentDbId,
             LevelId = request.LevelId,
@@ -102,7 +105,7 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
             [],
             entity.LevelId,
             entity.AssignmentMode,
-            entity.AssignedAgentCount,
+            assignedAgentCount,
             entity.AcceptanceCriteria,
             entity.LinkedPullRequestUrl
         );
@@ -116,6 +119,11 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
 
         if (entity is null) return null;
 
+        var nextIsAi = request.IsAI ?? entity.IsAI;
+        var nextAssignmentMode = request.AssignmentMode is not null
+            ? NormalizeAssignmentMode(request.AssignmentMode, nextIsAi)
+            : entity.AssignmentMode;
+
         if (request.Title is not null) entity.Title = request.Title;
         if (request.Description is not null) entity.Description = request.Description;
         if (request.State is not null) entity.State = request.State;
@@ -123,9 +131,13 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         if (request.Difficulty is not null) entity.Difficulty = request.Difficulty.Value;
         if (request.AssignedTo is not null) entity.AssignedTo = request.AssignedTo;
         if (request.Tags is not null) entity.Tags = [.. request.Tags];
-        if (request.IsAI is not null) entity.IsAI = request.IsAI.Value;
-        if (request.AssignmentMode is not null) entity.AssignmentMode = NormalizeAssignmentMode(request.AssignmentMode, entity.IsAI);
-        if (request.AssignedAgentCount is not null) entity.AssignedAgentCount = NormalizeAssignedAgentCount(request.AssignedAgentCount);
+        if (request.IsAI is not null) entity.IsAI = nextIsAi;
+        if (request.AssignmentMode is not null) entity.AssignmentMode = nextAssignmentMode;
+        if (request.AssignedAgentCount is not null || request.AssignmentMode is not null || request.IsAI is not null)
+        {
+            var requestedAgentCount = request.AssignedAgentCount ?? entity.AssignedAgentCount;
+            entity.AssignedAgentCount = NormalizeAssignedAgentCount(nextAssignmentMode, nextIsAi, requestedAgentCount);
+        }
         if (request.AcceptanceCriteria is not null) entity.AcceptanceCriteria = request.AcceptanceCriteria.Trim();
         if (request.LinkedPullRequestUrl is not null)
             entity.LinkedPullRequestUrl = string.IsNullOrWhiteSpace(request.LinkedPullRequestUrl)
@@ -177,19 +189,25 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         return true;
     }
 
-    private static WorkItemDto MapToDto(WorkItem w) => new(
-        w.WorkItemNumber, w.Title, w.State, w.Priority, w.Difficulty, w.AssignedTo,
-        [.. w.Tags], w.IsAI, w.Description,
-        w.Parent?.WorkItemNumber,
-        w.Children.Select(c => c.WorkItemNumber).ToArray(),
-        w.LevelId,
-        string.IsNullOrWhiteSpace(w.AssignmentMode) ? (w.IsAI ? "auto" : "manual") : w.AssignmentMode,
-        w.AssignedAgentCount,
-        w.AcceptanceCriteria,
-        w.LinkedPullRequestUrl,
-        w.LastObservedPullRequestState,
-        w.LastObservedPullRequestUrl
-    );
+    private static WorkItemDto MapToDto(WorkItem w)
+    {
+        var assignmentMode = NormalizeAssignmentMode(w.AssignmentMode, w.IsAI);
+        var assignedAgentCount = NormalizeAssignedAgentCount(assignmentMode, w.IsAI, w.AssignedAgentCount);
+
+        return new WorkItemDto(
+            w.WorkItemNumber, w.Title, w.State, w.Priority, w.Difficulty, w.AssignedTo,
+            [.. w.Tags], w.IsAI, w.Description,
+            w.Parent?.WorkItemNumber,
+            w.Children.Select(c => c.WorkItemNumber).ToArray(),
+            w.LevelId,
+            assignmentMode,
+            assignedAgentCount,
+            w.AcceptanceCriteria,
+            w.LinkedPullRequestUrl,
+            w.LastObservedPullRequestState,
+            w.LastObservedPullRequestUrl
+        );
+    }
 
     private static string NormalizeAssignmentMode(string? requestedMode, bool isAi) => requestedMode?.ToLowerInvariant() switch
     {
@@ -198,8 +216,11 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         _ => isAi ? "auto" : "manual",
     };
 
-    private static int? NormalizeAssignedAgentCount(int? value)
+    private static int? NormalizeAssignedAgentCount(string assignmentMode, bool isAi, int? value)
     {
+        if (!isAi || !string.Equals(assignmentMode, "manual", StringComparison.OrdinalIgnoreCase))
+            return null;
+
         if (value is null) return null;
         return value.Value <= 0 ? null : Math.Min(value.Value, 10);
     }

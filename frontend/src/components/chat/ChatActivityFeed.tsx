@@ -11,7 +11,7 @@ import {
     WrenchRegular,
 } from '@fluentui/react-icons'
 import { appTokens } from '../../styles/appTokens'
-import type { ChatSessionActivity } from '../../models'
+import { normalizeChatSessionActivity, type ChatSessionActivity } from '../../models/chat'
 import { usePreferences } from '../../hooks'
 
 const useStyles = makeStyles({
@@ -106,27 +106,30 @@ export function ChatActivityFeed({ activities }: ChatActivityFeedProps) {
 
     return (
         <div className={mergeClasses(styles.feed, isCompact && styles.feedCompact)}>
-            {activities.map((activity) => (
+            {activities.map((activity, index) => {
+                const normalizedActivity = normalizeChatSessionActivity(activity, index)
+                return (
                 <div
-                    key={activity.id}
+                    key={normalizedActivity.id}
                     className={mergeClasses(styles.item, isCompact && styles.itemCompact)}
                 >
-                    {renderActivityIcon(activity, styles)}
+                    {renderActivityIcon(normalizedActivity, styles)}
                     <div className={styles.content}>
                         <div className={styles.titleRow}>
                             <Text weight="semibold" size={200} className={styles.title}>
-                                {getActivityTitle(activity)}
+                                {getActivityTitle(normalizedActivity)}
                             </Text>
                             <Caption1 className={styles.meta}>
-                                {formatActivityTime(activity.timestampUtc)}
+                                {formatActivityTime(normalizedActivity.timestampUtc)}
                             </Caption1>
                         </div>
                         <Caption1 className={styles.message}>
-                            {activity.message}
+                            {normalizedActivity.message}
                         </Caption1>
                     </div>
                 </div>
-            ))}
+                )
+            })}
         </div>
     )
 }
@@ -135,6 +138,10 @@ function renderActivityIcon(
     activity: ChatSessionActivity,
     styles: ReturnType<typeof useStyles>,
 ) {
+    const normalizedMessage = typeof activity.message === 'string'
+        ? activity.message.toLowerCase()
+        : ''
+
     if (activity.kind === 'tool') {
         return <WrenchRegular className={mergeClasses(styles.icon, styles.iconTool)} />
     }
@@ -143,8 +150,8 @@ function renderActivityIcon(
         return <DismissCircleRegular className={mergeClasses(styles.icon, styles.iconDanger)} />
     }
 
-    if (activity.message.toLowerCase().includes('cancel')
-        || activity.message.toLowerCase().includes('interrupt')) {
+    if (normalizedMessage.includes('cancel')
+        || normalizedMessage.includes('interrupt')) {
         return <WarningRegular className={mergeClasses(styles.icon, styles.iconWarning)} />
     }
 

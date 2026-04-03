@@ -29,6 +29,13 @@ import { StateDot } from './StateDot'
 import { PriorityDot } from './PriorityDot'
 import { formatWorkItemState } from './stateLabel'
 import { appTokens } from '../../styles/appTokens'
+import {
+    AUTO_ASSIGNMENT_LABEL,
+    MANUAL_ASSIGNMENT_LABEL,
+    WORK_ITEM_ASSIGNMENT_OPTION_LABELS,
+    getWorkItemAssignmentLabel,
+    getWorkItemAssignmentSettings,
+} from './workItemAssignmentOptions'
 
 const NONE_PARENT = '(None)'
 const NONE_LEVEL = '(None)'
@@ -61,16 +68,6 @@ const DIFFICULTY_MAP: Record<string, number> = {
     'D3 - Medium': 3,
     'D4 - Hard': 4,
     'D5 - Very Hard': 5,
-}
-
-function getAgentSettings(label: string): { isAI: boolean; assignmentMode: 'auto' | 'manual'; assignedAgentCount: number | null } {
-    if (label === 'Manual assignment') {
-        return { isAI: false, assignmentMode: 'manual', assignedAgentCount: null }
-    }
-    if (label === '1 agent') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 1 }
-    if (label === '3 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 3 }
-    if (label === '5 agents') return { isAI: true, assignmentMode: 'manual', assignedAgentCount: 5 }
-    return { isAI: true, assignmentMode: 'auto', assignedAgentCount: null }
 }
 
 const useStyles = makeStyles({
@@ -361,7 +358,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const [state, setState] = useState('New')
     const [tags, setTags] = useState('')
     const [assignedTo, setAssignedTo] = useState('')
-    const [agentLabel, setAgentLabel] = useState('Auto-detect')
+    const [agentLabel, setAgentLabel] = useState(AUTO_ASSIGNMENT_LABEL)
     const [parentLabel, setParentLabel] = useState(NONE_PARENT)
     const [levelLabel, setLevelLabel] = useState(NONE_LEVEL)
 
@@ -405,8 +402,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
             setState(item.state)
             setTags(item.tags.join(', '))
             setAssignedTo(item.assignedTo)
-            // Initialize agent selector based on whether this item was AI-assigned
-            setAgentLabel(item.isAI ? 'Auto-detect' : 'Manual assignment')
+            setAgentLabel(getWorkItemAssignmentLabel(item))
             const parent = workItems?.find((wi) => wi.workItemNumber === item.parentWorkItemNumber)
             setParentLabel(parent ? `#${parent.workItemNumber} ${parent.title}` : NONE_PARENT)
             const lvl = sortedLevels.find((l) => l.id === item.levelId)
@@ -431,7 +427,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         if (!item || !title.trim()) return
         const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
         const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
-        const agentSettings = getAgentSettings(agentLabel)
+        const agentSettings = getWorkItemAssignmentSettings(agentLabel, assignedTo)
         updateMutation.mutate(
             {
                 workItemNumber: item.workItemNumber,
@@ -441,7 +437,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                     priority: PRIORITY_MAP[priorityLabel] ?? 2,
                     difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
                     state,
-                    assignedTo: agentSettings.isAI ? 'Fleet AI' : (assignedTo.trim() || 'Unassigned'),
+                    assignedTo: agentSettings.assignedTo,
                     isAI: agentSettings.isAI,
                     assignmentMode: agentSettings.assignmentMode,
                     assignedAgentCount: agentSettings.assignedAgentCount,
@@ -635,24 +631,22 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Agent Assignment</Text>
                             <div className={mergeClasses(styles.fieldValue, isMobile && styles.fieldValueMobile)}>
-                                {agentLabel !== 'Manual assignment' ? <BotRegular /> : <PersonRegular />}
+                                {agentLabel !== MANUAL_ASSIGNMENT_LABEL ? <BotRegular /> : <PersonRegular />}
                                 <Dropdown
                                     className={styles.fieldDropdown}
                                     size="small"
                                     value={agentLabel}
                                     onOptionSelect={(_e, data) => {
-                                        const label = data.optionText ?? 'Auto-detect'
+                                        const label = data.optionText ?? AUTO_ASSIGNMENT_LABEL
                                         setAgentLabel(label)
-                                        if (label !== 'Manual assignment') {
+                                        if (label !== MANUAL_ASSIGNMENT_LABEL) {
                                             setAssignedTo('Fleet AI')
                                         }
                                     }}
                                 >
-                                    <Option>Auto-detect</Option>
-                                    <Option>1 agent</Option>
-                                    <Option>3 agents</Option>
-                                    <Option>5 agents</Option>
-                                    <Option>Manual assignment</Option>
+                                    {WORK_ITEM_ASSIGNMENT_OPTION_LABELS.map((label) => (
+                                        <Option key={label}>{label}</Option>
+                                    ))}
                                 </Dropdown>
                             </div>
                         </div>
@@ -660,7 +654,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         {/* Assigned To - only editable for manual assignment */}
                         <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Assigned To</Text>
-                            {agentLabel === 'Manual assignment' ? (
+                            {agentLabel === MANUAL_ASSIGNMENT_LABEL ? (
                                 <Input
                                     size="small"
                                     appearance="underline"

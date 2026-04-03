@@ -10,6 +10,8 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
     public bool IsWriteTool => true;
 
+    public bool AllowInNormalChat => true;
+
     public string Description =>
         "Update an existing work item by its project-scoped number. Only supply fields you want to change. " +
         "Valid states: New, Active, Planning (AI), In Progress, In Progress (AI), In-PR, In-PR (AI), Resolved, Resolved (AI), Closed. Priority: 1 (critical) to 4 (low). " +

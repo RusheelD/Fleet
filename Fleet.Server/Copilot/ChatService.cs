@@ -320,7 +320,8 @@ public class ChatService(
             var toolDefs = toolRegistry.ToLLMDefinitions(
                 includeWriteTools: generateWorkItems,
                 bulkOnly: generateWorkItems,
-                includeGlobalRepoTools: IsGlobalScope(projectId));
+                includeGlobalRepoTools: IsGlobalScope(projectId),
+                includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId));
 
             // 4. Auto-name the session before generation starts (fast Haiku call)
             if (generateWorkItems)
@@ -795,7 +796,8 @@ public class ChatService(
             var toolDefs = toolRegistry.ToLLMDefinitions(
                 includeWriteTools: true,
                 bulkOnly: true,
-                includeGlobalRepoTools: IsGlobalScope(projectId));
+                includeGlobalRepoTools: IsGlobalScope(projectId),
+                includeNormalChatWriteTools: false);
 
             await UpdateGenerationProgressAsync(
                 projectId,

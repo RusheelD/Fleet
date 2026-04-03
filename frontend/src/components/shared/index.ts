@@ -1,5 +1,6 @@
 export { PageHeader } from './PageHeader'
 export { EmptyState } from './EmptyState'
+export { FleetRocketLogo } from './FleetRocketLogo'
 export { SettingRow } from './SettingRow'
 export { SplitView } from './SplitView'
 export { LevelBadge } from './LevelBadge'

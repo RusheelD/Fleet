@@ -120,4 +120,57 @@ public class AgentOrchestrationRetryTests
         CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Testing }, pipeline[2]);
         CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[3]);
     }
+
+    [TestMethod]
+    public void ApplyAssignedAgentLimit_RetainsManagerPlannerAndCapsWorkerRoles()
+    {
+        AgentRole[][] pipeline =
+        [
+            [AgentRole.Manager],
+            [AgentRole.Planner],
+            [AgentRole.Contracts],
+            [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing],
+            [AgentRole.Review],
+        ];
+
+        var limited = AgentOrchestrationService.ApplyAssignedAgentLimit(pipeline, "manual", 2);
+
+        Assert.AreEqual(3, limited.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, limited[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, limited[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Frontend }, limited[2]);
+    }
+
+    [TestMethod]
+    public void ResolveMaxConcurrentAgentsPerTask_ClampsTierLimitToAssignedAgentCount()
+    {
+        Assert.AreEqual(2, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "manual", 2));
+        Assert.AreEqual(1, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "manual", 1));
+        Assert.AreEqual(4, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "manual", null));
+    }
+
+    [TestMethod]
+    public void ApplyAssignedAgentLimit_DoesNotCapAutoAssignedWorkItems()
+    {
+        AgentRole[][] pipeline =
+        [
+            [AgentRole.Manager],
+            [AgentRole.Planner],
+            [AgentRole.Contracts],
+            [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing],
+            [AgentRole.Review],
+        ];
+
+        var unlimited = AgentOrchestrationService.ApplyAssignedAgentLimit(pipeline, "auto", 2);
+
+        Assert.AreEqual(pipeline.Length, unlimited.Length);
+        CollectionAssert.AreEqual(pipeline.SelectMany(group => group).ToArray(), unlimited.SelectMany(group => group).ToArray());
+    }
+
+    [TestMethod]
+    public void ResolveMaxConcurrentAgentsPerTask_DoesNotClampAutoAssignedWorkItems()
+    {
+        Assert.AreEqual(4, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "auto", 1));
+        Assert.AreEqual(4, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "auto", 5));
+    }
 }
