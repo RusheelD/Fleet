@@ -250,6 +250,7 @@ public class ChatService(
             sessionCts.Token,
             cancellationToken);
         var requestCancellation = linkedCts.Token;
+        CancellationTokenSource? heartbeatCts = null;
         var heartbeatTask = Task.CompletedTask;
 
         try
@@ -269,7 +270,8 @@ public class ChatService(
                     generationState: ChatGenerationStates.Running,
                     generationStatus: "Preparing work-item generation...",
                     publish: false);
-                heartbeatTask = RunGenerationHeartbeatLoopAsync(projectId, sessionId, progress, requestCancellation);
+                heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
+                heartbeatTask = RunGenerationHeartbeatLoopAsync(projectId, sessionId, progress, heartbeatCts.Token);
             }
 
             userId = await authService.GetCurrentUserIdAsync();
@@ -363,12 +365,14 @@ public class ChatService(
                 }
                 catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
                 {
+                    SetGenerationProgress(progress, false, ChatGenerationStates.Canceled, "Generation canceled.");
                     await HandleCanceledRequestAsync(projectId, sessionId, generateWorkItems, chargedWorkItemRun, userId, requestKey, sessionCts);
                     throw;
                 }
                 catch (OperationCanceledException)
                 {
                     logger.CopilotLlmTimeout(timeoutSeconds);
+                    SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "Generation timed out.");
                     var timeoutMsg = await chatSessionRepository.AddMessageAsync(
                         projectId, sessionId, "assistant", "I'm sorry, the request took too long. Please try again.");
                     await ClearGeneratingFlagAsync(
@@ -384,6 +388,7 @@ public class ChatService(
                 catch (Exception ex)
                 {
                     logger.CopilotLlmFailed(ex);
+                    SetGenerationProgress(progress, false, ChatGenerationStates.Failed, BuildAssistantErrorStatus(ex));
                     var assistantError = BuildAssistantErrorMessage(ex);
                     var errorMsg = await chatSessionRepository.AddMessageAsync(
                         projectId, sessionId, "assistant", assistantError);
@@ -525,6 +530,13 @@ public class ChatService(
 
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
+                SetGenerationProgress(
+                    progress,
+                    false,
+                    ChatGenerationStates.Completed,
+                    performedWorkItemMutation
+                        ? "Work-item generation completed."
+                        : "Response completed.");
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
@@ -546,6 +558,7 @@ public class ChatService(
                     sessionId,
                     "assistant",
                     "I wasn't able to create or update any work items yet. Please try again or simplify the request.");
+                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "No work-item mutation was completed.");
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
@@ -560,6 +573,7 @@ public class ChatService(
             var fallbackMsg = await chatSessionRepository.AddMessageAsync(
                 projectId, sessionId, "assistant",
                 "I used several tools but wasn't able to finish. Here's what I found so far — could you clarify what you need?");
+            SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "Generation stopped before a final completion.");
             await ClearGeneratingFlagAsync(
                 projectId,
                 sessionId,
@@ -577,6 +591,7 @@ public class ChatService(
         catch (Exception ex)
         {
             logger.CopilotLlmFailed(ex);
+            SetGenerationProgress(progress, false, ChatGenerationStates.Failed, BuildAssistantErrorStatus(ex));
             var errorMessage = await PersistAssistantErrorAsync(projectId, sessionId, ex);
 
             await ClearGeneratingFlagAsync(
@@ -595,7 +610,9 @@ public class ChatService(
         }
         finally
         {
+            heartbeatCts?.Cancel();
             await AwaitHeartbeatCompletionAsync(heartbeatTask);
+            heartbeatCts?.Dispose();
             ReleaseInFlightRequest(requestKey, sessionCts);
         }
     }
@@ -632,6 +649,10 @@ public class ChatService(
                 ChatGenerationStates.Running,
                 "Queued work-item generation...");
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            logger.LogInformation(
+                "Queued deferred work-item generation for session {SessionId} in project {ProjectId}",
+                sessionId.SanitizeForLogging(),
+                projectId.SanitizeForLogging());
 
             var backgroundSessionCts = sessionCts!;
             _ = Task.Run(
@@ -686,6 +707,10 @@ public class ChatService(
 
         try
         {
+            logger.LogInformation(
+                "Starting deferred work-item generation background execution for session {SessionId} in project {ProjectId}",
+                sessionId.SanitizeForLogging(),
+                projectId.SanitizeForLogging());
             await using var scope = _serviceScopeFactory.CreateAsyncScope();
             var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
             await scopedChatService.ExecutePersistedGenerateWorkItemsAsync(
@@ -726,6 +751,11 @@ public class ChatService(
         CancellationTokenSource sessionCts,
         bool chargedWorkItemRun)
     {
+        var ownerId = userId.ToString();
+        logger.LogInformation(
+            "Bootstrapping deferred work-item generation state for session {SessionId} in project {ProjectId}",
+            sessionId.SanitizeForLogging(),
+            projectId.SanitizeForLogging());
         var config = llmOptions.Value;
         var timeoutSeconds = config.GenerateTimeoutSeconds;
         var maxLoops = config.GenerateMaxToolLoops;
@@ -739,7 +769,8 @@ public class ChatService(
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, sessionCts.Token);
         var requestCancellation = linkedCts.Token;
-        var heartbeatTask = RunGenerationHeartbeatLoopAsync(projectId, sessionId, progress, requestCancellation);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
+        var heartbeatTask = RunGenerationHeartbeatLoopAsync(projectId, sessionId, progress, heartbeatCts.Token, ownerId);
 
         try
         {
@@ -750,8 +781,9 @@ public class ChatService(
                 progress,
                 isGenerating: true,
                 generationState: ChatGenerationStates.Running,
-                generationStatus: "Loading chat context...");
-            var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
+                generationStatus: "Loading chat context...",
+                ownerId: ownerId);
+            var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId, ownerId);
             var llmMessages = history.Select(ToLLMMessage).ToList();
             llmMessages.Add(new LLMMessage
             {
@@ -759,7 +791,7 @@ public class ChatService(
                 Content = "Generate work-items based on provided context",
             });
 
-            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
+            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, ownerId);
             var toolDefs = toolRegistry.ToLLMDefinitions(
                 includeWriteTools: true,
                 bulkOnly: true,
@@ -772,8 +804,9 @@ public class ChatService(
                 progress,
                 isGenerating: true,
                 generationState: ChatGenerationStates.Running,
-                generationStatus: "Naming and planning the backlog...");
-            await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation);
+                generationStatus: "Naming and planning the backlog...",
+                ownerId: ownerId);
+            await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation, ownerId);
 
             var toolContext = new ChatToolContext(projectId, userId.ToString());
             var totalToolCalls = 0;
@@ -788,7 +821,8 @@ public class ChatService(
                     progress,
                     isGenerating: true,
                     generationState: ChatGenerationStates.Running,
-                    generationStatus: "Thinking through the next work-item changes...");
+                    generationStatus: "Thinking through the next work-item changes...",
+                    ownerId: ownerId);
                 var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, config.GenerateModel);
                 var response = await llmClient.CompleteAsync(request, requestCancellation);
 
@@ -828,7 +862,8 @@ public class ChatService(
                             progress,
                             isGenerating: true,
                             generationState: ChatGenerationStates.Running,
-                            generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...");
+                            generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...",
+                            ownerId: ownerId);
                         var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                             performedWorkItemMutation = true;
@@ -849,7 +884,7 @@ public class ChatService(
                             toolResult,
                             DidToolResultSucceed(toolResult));
                         var toolActivity = BuildToolActivity(toolCall.Name, toolResult);
-                        await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, toolActivity);
+                        await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, toolActivity, ownerId);
                         await PublishChatSessionEventAsync(
                             userId,
                             projectId,
@@ -866,7 +901,8 @@ public class ChatService(
                             isGenerating: true,
                             generationState: ChatGenerationStates.Running,
                             generationStatus: BuildToolCompletionStatus(toolCall.Name, toolResult),
-                            trackActivity: false);
+                            trackActivity: false,
+                            ownerId: ownerId);
                         await PublishChatUpdatedAsync(userId, projectId, sessionId);
                         await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
                     }
@@ -882,11 +918,12 @@ public class ChatService(
                     await UpdateGenerationProgressAsync(
                         projectId,
                         sessionId,
-                        userId,
-                        progress,
-                        isGenerating: true,
-                        generationState: ChatGenerationStates.Running,
-                        generationStatus: "Refining the backlog before applying changes...");
+                    userId,
+                    progress,
+                    isGenerating: true,
+                    generationState: ChatGenerationStates.Running,
+                    generationStatus: "Refining the backlog before applying changes...",
+                    ownerId: ownerId);
                     llmMessages.Add(new LLMMessage
                     {
                         Role = "user",
@@ -896,9 +933,16 @@ public class ChatService(
                 }
 
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
-                await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent);
+                await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent, ownerId);
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
+                SetGenerationProgress(
+                    progress,
+                    false,
+                    ChatGenerationStates.Completed,
+                    performedWorkItemMutation
+                        ? "Work-item generation completed."
+                        : "Response completed.");
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
@@ -906,7 +950,8 @@ public class ChatService(
                     generationState: ChatGenerationStates.Completed,
                     generationStatus: performedWorkItemMutation
                         ? "Work-item generation completed."
-                        : "Response completed.");
+                        : "Response completed.",
+                    ownerId: ownerId);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 return;
             }
@@ -918,13 +963,16 @@ public class ChatService(
                     projectId,
                     sessionId,
                     "assistant",
-                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.");
+                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.",
+                    ownerId);
+                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "No work-item mutation was completed.");
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
                     wasGenerating: true,
                     generationState: ChatGenerationStates.Failed,
-                    generationStatus: "No work-item mutation was completed.");
+                    generationStatus: "No work-item mutation was completed.",
+                    ownerId: ownerId);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
                 return;
@@ -934,54 +982,64 @@ public class ChatService(
                 projectId,
                 sessionId,
                 "assistant",
-                "I used several tools but wasn't able to finish. Here's what I found so far - could you clarify what you need?");
+                "I used several tools but wasn't able to finish. Here's what I found so far - could you clarify what you need?",
+                ownerId);
+            SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "Generation stopped before a final completion.");
             await ClearGeneratingFlagAsync(
                 projectId,
                 sessionId,
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
-                generationStatus: "Generation stopped before a final completion.");
+                generationStatus: "Generation stopped before a final completion.",
+                ownerId: ownerId);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
         catch (OperationCanceledException) when (sessionCts.IsCancellationRequested)
         {
-            await HandleCanceledRequestAsync(projectId, sessionId, wasGenerating: true, chargedRun: chargedWorkItemRun, userId, requestKey, sessionCts);
+            SetGenerationProgress(progress, false, ChatGenerationStates.Canceled, "Generation canceled.");
+            await HandleCanceledRequestAsync(projectId, sessionId, wasGenerating: true, chargedRun: chargedWorkItemRun, userId, requestKey, sessionCts, ownerId);
             throw;
         }
         catch (OperationCanceledException)
         {
             logger.CopilotLlmTimeout(timeoutSeconds);
+            SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "Generation timed out.");
             await chatSessionRepository.AddMessageAsync(
                 projectId,
                 sessionId,
                 "assistant",
-                "I'm sorry, the request took too long. Please try again.");
+                "I'm sorry, the request took too long. Please try again.",
+                ownerId);
             await ClearGeneratingFlagAsync(
                 projectId,
                 sessionId,
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
-                generationStatus: "Generation timed out.");
+                generationStatus: "Generation timed out.",
+                ownerId: ownerId);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
         catch (Exception ex)
         {
             logger.CopilotLlmFailed(ex);
+            SetGenerationProgress(progress, false, ChatGenerationStates.Failed, BuildAssistantErrorStatus(ex));
             var assistantError = BuildAssistantErrorMessage(ex);
-            await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+            await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError, ownerId);
             await ClearGeneratingFlagAsync(
                 projectId,
                 sessionId,
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
-                generationStatus: BuildAssistantErrorStatus(ex));
+                generationStatus: BuildAssistantErrorStatus(ex),
+                ownerId: ownerId);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
         finally
         {
+            heartbeatCts.Cancel();
             await AwaitHeartbeatCompletionAsync(heartbeatTask);
             ReleaseInFlightRequest(requestKey, sessionCts);
         }
@@ -1007,6 +1065,7 @@ public class ChatService(
                 projectId,
                 sessionId,
                 userId,
+                userId.ToString(),
                 chargedWorkItemRun,
                 exception);
         }
@@ -1033,16 +1092,18 @@ public class ChatService(
         string projectId,
         string sessionId,
         int userId,
+        string ownerId,
         bool chargedWorkItemRun,
         Exception exception)
     {
-        await PersistAssistantErrorAsync(projectId, sessionId, exception);
+        await PersistAssistantErrorAsync(projectId, sessionId, exception, ownerId);
         await ClearGeneratingFlagAsync(
             projectId,
             sessionId,
             wasGenerating: true,
             generationState: ChatGenerationStates.Failed,
-            generationStatus: BuildAssistantErrorStatus(exception));
+            generationStatus: BuildAssistantErrorStatus(exception),
+            ownerId: ownerId);
         await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         await PublishChatUpdatedAsync(userId, projectId, sessionId);
     }
@@ -1097,10 +1158,10 @@ public class ChatService(
         }
     }
 
-    private async Task<ChatMessageDto> PersistAssistantErrorAsync(string projectId, string sessionId, Exception exception)
+    private async Task<ChatMessageDto> PersistAssistantErrorAsync(string projectId, string sessionId, Exception exception, string? ownerId = null)
     {
         var assistantError = BuildAssistantErrorMessage(exception);
-        return await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError);
+        return await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantError, ownerId);
     }
 
     private static bool DidToolResultSucceed(string toolResult)
@@ -1140,7 +1201,8 @@ public class ChatService(
         string generationState,
         string? generationStatus,
         bool publish = true,
-        bool trackActivity = true)
+        bool trackActivity = true,
+        string? ownerId = null)
     {
         var stateChanged = progress.IsGenerating != isGenerating
             || !string.Equals(progress.GenerationState, generationState, StringComparison.Ordinal)
@@ -1159,7 +1221,8 @@ public class ChatService(
             isGenerating,
             generationState,
             generationStatus,
-            activity);
+            activity,
+            ownerId);
 
         if (publish && userId != 0)
             await PublishChatSessionEventAsync(
@@ -1176,7 +1239,8 @@ public class ChatService(
         string projectId,
         string sessionId,
         GenerationProgressState progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? ownerId = null)
     {
         try
         {
@@ -1188,7 +1252,8 @@ public class ChatService(
                     sessionId,
                     progress.IsGenerating,
                     progress.GenerationState,
-                    progress.GenerationStatus);
+                    progress.GenerationStatus,
+                    ownerId: ownerId);
             }
         }
         catch (OperationCanceledException)
@@ -1222,6 +1287,17 @@ public class ChatService(
             message,
             DateTime.UtcNow.ToString("O"));
 
+    private static void SetGenerationProgress(
+        GenerationProgressState progress,
+        bool isGenerating,
+        string generationState,
+        string? generationStatus)
+    {
+        progress.IsGenerating = isGenerating;
+        progress.GenerationState = generationState;
+        progress.GenerationStatus = generationStatus;
+    }
+
     private static ChatSessionActivityDto BuildToolActivity(string toolName, string toolResult)
         => new(
             Guid.NewGuid().ToString(),
@@ -1247,7 +1323,8 @@ public class ChatService(
         string sessionId,
         bool wasGenerating,
         string generationState = ChatGenerationStates.Idle,
-        string? generationStatus = null)
+        string? generationStatus = null,
+        string? ownerId = null)
     {
         if (!wasGenerating) return;
         try
@@ -1260,7 +1337,8 @@ public class ChatService(
                 generationStatus,
                 !string.IsNullOrWhiteSpace(generationStatus)
                     ? BuildStatusActivity(generationStatus)
-                    : null);
+                    : null,
+                ownerId);
         }
         catch (Exception ex)
         {
@@ -1275,7 +1353,8 @@ public class ChatService(
         bool chargedRun,
         int userId,
         string requestKey,
-        CancellationTokenSource sessionCts)
+        CancellationTokenSource sessionCts,
+        string? ownerId = null)
     {
         if (!wasGenerating ||
             !ActiveSessionRequests.TryGetValue(requestKey, out var currentRequest) ||
@@ -1286,7 +1365,8 @@ public class ChatService(
                 sessionId,
                 wasGenerating,
                 ChatGenerationStates.Canceled,
-                "Generation canceled.");
+                "Generation canceled.",
+                ownerId);
             await PublishChatSessionEventAsync(
                 userId,
                 projectId,
@@ -1483,7 +1563,8 @@ public class ChatService(
         string sessionId,
         List<LLMMessage> conversationMessages,
         LLMOptions config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? ownerId = null)
     {
         try
         {
@@ -1515,7 +1596,7 @@ public class ChatService(
                 if (name.Length > 60)
                     name = name[..60];
 
-                await chatSessionRepository.RenameSessionAsync(projectId, sessionId, name);
+                await chatSessionRepository.RenameSessionAsync(projectId, sessionId, name, ownerId);
             }
         }
         catch (OperationCanceledException)
@@ -1581,7 +1662,7 @@ public class ChatService(
         Content = msg.Content,
     };
 
-    private async Task<string> BuildSystemPromptAsync(string projectId, string sessionId)
+    private async Task<string> BuildSystemPromptAsync(string projectId, string sessionId, string? ownerId = null)
     {
         var scopePrompt = IsGlobalScope(projectId)
             ? """
@@ -1595,7 +1676,7 @@ public class ChatService(
             Keep all analysis and actions constrained to this active project.
             """;
 
-        var attachments = await chatSessionRepository.GetAllAttachmentsBySessionIdAsync(projectId, sessionId) ?? [];
+        var attachments = await chatSessionRepository.GetAllAttachmentsBySessionIdAsync(projectId, sessionId, ownerId) ?? [];
         if (attachments.Count == 0)
             return $"{SystemPrompt}\n\n{scopePrompt}";
 
@@ -1611,7 +1692,7 @@ public class ChatService(
         var totalLength = 0;
         foreach (var attachment in attachments)
         {
-            var content = await chatSessionRepository.GetAttachmentContentAsync(projectId, attachment.Id);
+            var content = await chatSessionRepository.GetAttachmentContentAsync(projectId, attachment.Id, ownerId);
             if (content is null) continue;
 
             if (totalLength + content.Length > MaxAttachmentContextLength)

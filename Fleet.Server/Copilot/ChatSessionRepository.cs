@@ -52,16 +52,16 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             .ToList();
     }
 
-    public async Task<IReadOnlyList<ChatMessageDto>> GetMessagesBySessionIdAsync(string projectId, string sessionId)
+    public async Task<IReadOnlyList<ChatMessageDto>> GetMessagesBySessionIdAsync(string projectId, string sessionId, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
         var entities = await context.ChatMessages
             .AsNoTracking()
             .Where(m =>
                 m.ChatSessionId == sessionId &&
-                m.ChatSession.OwnerId == ownerId &&
+                m.ChatSession.OwnerId == effectiveOwnerId &&
                 (scopeProjectId == null
                     ? m.ChatSession.ProjectId == null
                     : m.ChatSession.ProjectId == scopeProjectId))
@@ -80,7 +80,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
                 .Where(a =>
                     a.ChatMessageId != null &&
                     messageIds.Contains(a.ChatMessageId) &&
-                    a.ChatSession.OwnerId == ownerId &&
+                    a.ChatSession.OwnerId == effectiveOwnerId &&
                     (scopeProjectId == null
                         ? a.ChatSession.ProjectId == null
                         : a.ChatSession.ProjectId == scopeProjectId))
@@ -146,12 +146,12 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
     public Task<bool> RenameSessionAsync(string sessionId, string title)
         => RenameSessionAsync(string.Empty, sessionId, title);
 
-    public async Task<bool> RenameSessionAsync(string projectId, string sessionId, string title)
+    public async Task<bool> RenameSessionAsync(string projectId, string sessionId, string title, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
-        var entity = await ScopedSessions(ownerId, scopeProjectId)
+        var entity = await ScopedSessions(effectiveOwnerId, scopeProjectId)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
         if (entity is null) return false;
 
@@ -184,12 +184,12 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         return true;
     }
 
-    public async Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content)
+    public async Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
-        var session = await ScopedSessions(ownerId, scopeProjectId)
+        var session = await ScopedSessions(effectiveOwnerId, scopeProjectId)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
         if (session is null)
             throw new KeyNotFoundException("Chat session not found.");
@@ -233,12 +233,13 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         bool isGenerating,
         string generationState,
         string? generationStatus,
-        ChatSessionActivityDto? activity = null)
+        ChatSessionActivityDto? activity = null,
+        string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
-        var session = await ScopedSessions(ownerId, scopeProjectId)
+        var session = await ScopedSessions(effectiveOwnerId, scopeProjectId)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
         if (session is null)
             return;
@@ -290,12 +291,12 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         return staleSessions.Count;
     }
 
-    public async Task AppendSessionActivityAsync(string projectId, string sessionId, ChatSessionActivityDto activity)
+    public async Task AppendSessionActivityAsync(string projectId, string sessionId, ChatSessionActivityDto activity, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
-        var session = await ScopedSessions(ownerId, scopeProjectId)
+        var session = await ScopedSessions(effectiveOwnerId, scopeProjectId)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
         if (session is null)
             return;
@@ -357,16 +358,16 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         return entities.Select(ToAttachmentDto).ToList();
     }
 
-    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId)
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
         var entities = await context.ChatAttachments
             .AsNoTracking()
             .Where(a =>
                 a.ChatSessionId == sessionId &&
-                a.ChatSession.OwnerId == ownerId &&
+                a.ChatSession.OwnerId == effectiveOwnerId &&
                 (scopeProjectId == null
                     ? a.ChatSession.ProjectId == null
                     : a.ChatSession.ProjectId == scopeProjectId))
@@ -379,16 +380,16 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
     public Task<string?> GetAttachmentContentAsync(string attachmentId)
         => GetAttachmentContentAsync(string.Empty, attachmentId);
 
-    public async Task<string?> GetAttachmentContentAsync(string projectId, string attachmentId)
+    public async Task<string?> GetAttachmentContentAsync(string projectId, string attachmentId, string? ownerId = null)
     {
-        var ownerId = await GetCurrentOwnerIdAsync();
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
         var scopeProjectId = NormalizeProjectId(projectId);
 
         var entity = await context.ChatAttachments
             .AsNoTracking()
             .FirstOrDefaultAsync(a =>
                 a.Id == attachmentId &&
-                a.ChatSession.OwnerId == ownerId &&
+                a.ChatSession.OwnerId == effectiveOwnerId &&
                 (scopeProjectId == null
                     ? a.ChatSession.ProjectId == null
                     : a.ChatSession.ProjectId == scopeProjectId));
@@ -499,6 +500,14 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
     private static bool IsGlobalScope(string projectId)
         => string.IsNullOrWhiteSpace(projectId);
+
+    private async Task<string> ResolveOwnerIdAsync(string? ownerId)
+    {
+        if (!string.IsNullOrWhiteSpace(ownerId))
+            return ownerId;
+
+        return await GetCurrentOwnerIdAsync();
+    }
 
     private async Task<string> GetCurrentOwnerIdAsync()
         => (await authService.GetCurrentUserIdAsync()).ToString();
