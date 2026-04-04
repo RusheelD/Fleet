@@ -28,14 +28,30 @@ import {
     DismissCircleFilled,
     CircleRegular,
 } from '@fluentui/react-icons'
-import type { AgentExecution, AgentInfo } from '../../models'
+import type { AgentExecution, AgentInfo, WorkItem } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
+import { FleetRocketLogo } from '../../components/shared'
 
-type ExecutionStepStatus = AgentInfo['status'] | 'paused'
+type ExecutionStepStatus = AgentInfo['status'] | 'paused' | 'queued'
 type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
+type PlannedSubFlowStep = {
+    workItemNumber: number
+    title: string
+    status: ExecutionStepStatus
+    currentTask: string
+    progress: number
+}
+
+const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
+    'In-PR',
+    'In-PR (AI)',
+    'Resolved',
+    'Resolved (AI)',
+    'Closed',
+])
 
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'subtle'> = {
     running: 'warning',
@@ -221,6 +237,9 @@ const useStyles = makeStyles({
     stepIconPaused: {
         color: appTokens.color.info,
     },
+    stepIconQueued: {
+        color: appTokens.color.brand,
+    },
     stepIconFailed: {
         color: appTokens.color.danger,
     },
@@ -254,6 +273,9 @@ const useStyles = makeStyles({
     },
     connectorPaused: {
         backgroundColor: appTokens.color.info,
+    },
+    connectorQueued: {
+        backgroundColor: appTokens.color.brand,
     },
     connectorFailed: {
         backgroundColor: appTokens.color.danger,
@@ -338,19 +360,36 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: appTokens.space.sm,
+        minHeight: 0,
     },
     subFlowHeader: {
         color: appTokens.color.textSecondary,
+    },
+    subFlowPipeline: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0px',
     },
     subFlowList: {
         display: 'flex',
         flexDirection: 'column',
         gap: appTokens.space.sm,
+        maxHeight: 'min(60vh, 48rem)',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+        paddingRight: appTokens.space.xs,
+    },
+    subFlowListCompact: {
+        maxHeight: 'min(56vh, 40rem)',
+    },
+    subFlowListMobile: {
+        maxHeight: '52vh',
     },
 })
 
 interface ExecutionCardProps {
     execution: AgentExecution
+    workItems?: WorkItem[]
     onPause?: (executionId: string) => void
     onCancel?: (executionId: string) => void
     onResume?: (executionId: string) => void
@@ -384,6 +423,12 @@ function AgentStepIcon({ status, isCompact }: { status: ExecutionStepStatus; isC
             return (
                 <div className={shellClassName}>
                     <PauseRegular className={mergeClasses(styles.stepIcon, styles.stepIconPaused)} />
+                </div>
+            )
+        case 'queued':
+            return (
+                <div className={shellClassName}>
+                    <FleetRocketLogo size={isCompact ? 14 : 16} title="Queued sub-flow" variant="outline" className={mergeClasses(styles.stepIcon, styles.stepIconQueued)} />
                 </div>
             )
         case 'failed':
@@ -423,7 +468,7 @@ function renderExecutionStatusBadge(status: AgentExecution['status']) {
     )
 }
 
-export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs, nested = false }: ExecutionCardProps) {
+export function ExecutionCard({ execution, workItems, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs, nested = false }: ExecutionCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -525,12 +570,124 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                 return styles.connectorRunning
             case 'paused':
                 return styles.connectorPaused
+            case 'queued':
+                return styles.connectorQueued
             case 'failed':
                 return styles.connectorFailed
             default:
                 return undefined
         }
     }
+
+    const workItemsByNumber = new Map((workItems ?? []).map((workItem) => [workItem.workItemNumber, workItem]))
+    const parentWorkItem = workItemsByNumber.get(execution.workItemId)
+    const subFlowByWorkItemNumber = new Map(subFlows.map((subFlow) => [subFlow.workItemId, subFlow]))
+
+    const mapExecutionStatusToStepStatus = (status: AgentExecution['status']): ExecutionStepStatus => {
+        switch (status) {
+            case 'running':
+            case 'completed':
+            case 'failed':
+            case 'cancelled':
+            case 'paused':
+            case 'queued':
+                return status
+            default:
+                return 'queued'
+        }
+    }
+
+    const plannedSubFlowSteps: PlannedSubFlowStep[] = (() => {
+        const plannedChildren = (parentWorkItem?.childWorkItemNumbers ?? [])
+            .map((childNumber) => workItemsByNumber.get(childNumber))
+            .filter((child): child is WorkItem => Boolean(child))
+            .filter((child) => !NON_ACTIONABLE_SUBFLOW_STATES.has(child.state))
+
+        const steps: PlannedSubFlowStep[] = plannedChildren.map((child): PlannedSubFlowStep => {
+            const liveExecution = subFlowByWorkItemNumber.get(child.workItemNumber)
+            if (liveExecution) {
+                const liveStatus = mapExecutionStatusToStepStatus(liveExecution.status)
+                return {
+                    workItemNumber: child.workItemNumber,
+                    title: child.title,
+                    status: liveStatus,
+                    currentTask: liveExecution.currentPhase
+                        ? `${child.title} - ${liveExecution.currentPhase}`
+                        : child.title,
+                    progress: liveExecution.status === 'completed'
+                        ? 1
+                        : Math.max(0, Math.min(liveExecution.progress ?? 0, 1)),
+                }
+            }
+
+            if (execution.status === 'completed') {
+                return {
+                    workItemNumber: child.workItemNumber,
+                    title: child.title,
+                    status: 'completed',
+                    currentTask: `${child.title} - Completed`,
+                    progress: 1,
+                }
+            }
+
+            if (execution.status === 'paused') {
+                return {
+                    workItemNumber: child.workItemNumber,
+                    title: child.title,
+                    status: 'paused',
+                    currentTask: `${child.title} - Paused`,
+                    progress: 0,
+                }
+            }
+
+            if (execution.status === 'failed') {
+                return {
+                    workItemNumber: child.workItemNumber,
+                    title: child.title,
+                    status: 'failed',
+                    currentTask: `${child.title} - Blocked by parent flow failure`,
+                    progress: 0,
+                }
+            }
+
+            if (execution.status === 'cancelled') {
+                return {
+                    workItemNumber: child.workItemNumber,
+                    title: child.title,
+                    status: 'cancelled',
+                    currentTask: `${child.title} - Cancelled`,
+                    progress: 0,
+                }
+            }
+
+            return {
+                workItemNumber: child.workItemNumber,
+                title: child.title,
+                status: 'queued',
+                currentTask: `${child.title} - Queued sub-flow`,
+                progress: 0,
+            }
+        })
+
+        const orphanLiveSteps: PlannedSubFlowStep[] = subFlows
+            .filter((subFlow) => !plannedChildren.some((child) => child.workItemNumber === subFlow.workItemId))
+            .map((subFlow): PlannedSubFlowStep => ({
+                workItemNumber: subFlow.workItemId,
+                title: subFlow.workItemTitle,
+                status: mapExecutionStatusToStepStatus(subFlow.status),
+                currentTask: subFlow.currentPhase
+                    ? `${subFlow.workItemTitle} - ${subFlow.currentPhase}`
+                    : subFlow.workItemTitle,
+                progress: subFlow.status === 'completed'
+                    ? 1
+                    : Math.max(0, Math.min(subFlow.progress ?? 0, 1)),
+            }))
+
+        return [...steps, ...orphanLiveSteps]
+    })()
+    const displayedSubFlowCount = execution.executionMode === 'orchestration'
+        ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
+        : 0
 
     return (
         <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile, isNested && styles.executionCardNested)}>
@@ -576,9 +733,9 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                             Branch: {execution.branchName}
                         </Caption1>
                     )}
-                    {execution.executionMode === 'orchestration' && subFlows.length > 0 && (
+                    {execution.executionMode === 'orchestration' && displayedSubFlowCount > 0 && (
                         <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
-                            Sub-flows: {subFlows.length}
+                            Sub-flows: {displayedSubFlowCount}
                         </Caption1>
                     )}
                     {reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating && (
@@ -691,6 +848,72 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                         </div>
                     )
                 })}
+                {execution.executionMode === 'orchestration' && plannedSubFlowSteps.map((subFlowStep, index) => {
+                    const isRunning = subFlowStep.status === 'running'
+                    const previousStatus = index === 0
+                        ? (agents.length > 0 ? agents[agents.length - 1].status : null)
+                        : plannedSubFlowSteps[index - 1].status
+                    const isLast = index === plannedSubFlowSteps.length - 1
+
+                    return (
+                        <div key={`subflow-${subFlowStep.workItemNumber}`} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
+                            <div className={mergeClasses(styles.stepGutter, isCompact && styles.stepGutterCompact)}>
+                                <div
+                                    className={mergeClasses(
+                                        styles.connectorSegment,
+                                        styles.connectorTop,
+                                        previousStatus ? getConnectorToneClass(previousStatus) : undefined,
+                                    )}
+                                />
+                                {!isLast && (
+                                    <div
+                                        className={mergeClasses(
+                                            styles.connectorSegment,
+                                            styles.connectorBottom,
+                                            getConnectorToneClass(subFlowStep.status),
+                                        )}
+                                    />
+                                )}
+                                <AgentStepIcon status={subFlowStep.status} isCompact={isCompact} />
+                            </div>
+
+                            <div className={styles.stepBody}>
+                                <Text
+                                    size={200}
+                                    weight="semibold"
+                                    className={mergeClasses(styles.roleName, isCompact && styles.roleNameCompact)}
+                                >
+                                    Sub-flow #{subFlowStep.workItemNumber}
+                                </Text>
+                                <Caption1
+                                    className={mergeClasses(
+                                        isRunning ? styles.taskCaptionRunning : styles.taskCaption,
+                                        isCompact && styles.taskCaptionCompact,
+                                        isMobile && styles.taskCaptionMobile,
+                                    )}
+                                >
+                                    {subFlowStep.currentTask}
+                                </Caption1>
+                                {isRunning && subFlowStep.progress > 0 && (
+                                    <ProgressBar
+                                        className={mergeClasses(styles.stepProgress, isCompact && styles.stepProgressCompact)}
+                                        value={subFlowStep.progress}
+                                        thickness="medium"
+                                        color="brand"
+                                    />
+                                )}
+                            </div>
+
+                            <div className={styles.stepTrailing}>
+                                {isRunning && subFlowStep.progress > 0 && subFlowStep.progress < 1 && (
+                                    <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
+                                        {Math.round(subFlowStep.progress * 100)}%
+                                    </Text>
+                                )}
+                            </div>
+                        </div>
+                    )
+                })}
             </div>
 
             {(execution.status === 'paused' || execution.status === 'failed') && (onResume || onRetry || onDelete) && (
@@ -780,11 +1003,12 @@ export function ExecutionCard({ execution, onPause, onCancel, onResume, onRetry,
                     <Text weight="semibold" className={styles.subFlowHeader}>
                         Sub-flows
                     </Text>
-                    <div className={styles.subFlowList}>
+                    <div className={mergeClasses(styles.subFlowList, isCompact && styles.subFlowListCompact, isMobile && styles.subFlowListMobile)}>
                         {subFlows.map((subFlow) => (
                             <ExecutionCard
                                 key={subFlow.id}
                                 execution={subFlow}
+                                workItems={workItems}
                                 onViewDocs={onViewDocs}
                                 nested
                             />

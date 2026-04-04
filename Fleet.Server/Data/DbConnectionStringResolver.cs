@@ -6,6 +6,8 @@ namespace Fleet.Server.Data;
 
 public static class DbConnectionStringResolver
 {
+    private const int SupabaseSessionPoolMaxConnections = 10;
+
     public static string? ResolveFleetDbLocalMigrationConnectionString(IConfiguration configuration)
         => ResolveFleetDbMigrationConnectionString(configuration);
 
@@ -160,6 +162,10 @@ public static class DbConnectionStringResolver
         if (host.EndsWith(".pooler.supabase.com", StringComparison.OrdinalIgnoreCase))
         {
             builder.Port = 5432;
+            builder.Pooling = true;
+
+            if (builder.MaxPoolSize <= 0 || builder.MaxPoolSize > SupabaseSessionPoolMaxConnections)
+                builder.MaxPoolSize = SupabaseSessionPoolMaxConnections;
         }
 
         return builder.ConnectionString;

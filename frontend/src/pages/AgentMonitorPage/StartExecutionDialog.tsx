@@ -295,7 +295,7 @@ export function StartExecutionDialog({
                                 <div className={styles.introCard}>
                                     <Text weight="semibold">Pick one AI work item to execute.</Text>
                                     <Caption1>
-                                        Fleet will run the assigned agents and update progress automatically.
+                                        Fleet runs the full agent pipeline by default unless the work item uses a manual agent cap.
                                     </Caption1>
                                 </div>
                                 <Field
@@ -368,7 +368,7 @@ export function StartExecutionDialog({
                                                                     ) : (
                                                                         <>
                                                                             <span className={styles.dot}>|</span>
-                                                                            <Caption1>Auto agents</Caption1>
+                                                                            <Caption1>Unlimited agents</Caption1>
                                                                         </>
                                                                     )}
                                                                 </span>

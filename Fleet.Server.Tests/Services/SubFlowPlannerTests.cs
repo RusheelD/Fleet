@@ -67,4 +67,42 @@ public class SubFlowPlannerTests
         Assert.AreEqual(1, parsed.SubFlows[0].SubFlows.Count);
         Assert.AreEqual("Conflict resolution", parsed.SubFlows[0].SubFlows[0].Title);
     }
+
+    [TestMethod]
+    public void Parse_ReturnsNull_WhenPlanDepthExceedsLimit()
+    {
+        const string output = """
+            ```json
+            {
+              "split": true,
+              "reason": "Too deeply nested.",
+              "subflows": [
+                {
+                  "title": "Level 1",
+                  "subflows": [
+                    {
+                      "title": "Level 2",
+                      "subflows": [
+                        {
+                          "title": "Level 3",
+                          "subflows": [
+                            {
+                              "title": "Level 4",
+                              "subflows": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            ```
+            """;
+
+        var parsed = SubFlowPlanner.Parse(output);
+
+        Assert.IsNull(parsed);
+    }
 }

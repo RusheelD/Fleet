@@ -1,6 +1,6 @@
 import type { WorkItem } from '../../models'
 
-export const AUTO_ASSIGNMENT_LABEL = 'Auto-detect'
+export const AUTO_ASSIGNMENT_LABEL = 'Auto (unlimited)'
 export const MANUAL_ASSIGNMENT_LABEL = 'Manual assignment'
 export const WORK_ITEM_ASSIGNMENT_OPTION_LABELS = [
     AUTO_ASSIGNMENT_LABEL,

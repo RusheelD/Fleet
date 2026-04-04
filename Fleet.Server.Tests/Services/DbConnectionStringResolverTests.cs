@@ -35,6 +35,22 @@ public class DbConnectionStringResolverTests
         Assert.IsNotNull(result);
         StringAssert.Contains(result, "Host=db.abc.pooler.supabase.com");
         StringAssert.Contains(result, "Port=5432");
+        StringAssert.Contains(result, "Maximum Pool Size=10");
+    }
+
+    [TestMethod]
+    public void ResolveFleetDbConnectionString_ClampsSupabaseSessionPoolSize()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:fleetdb"] = "Host=db.abc.pooler.supabase.com;Port=5432;Database=fleet;Username=user;Password=pw;Maximum Pool Size=50",
+        });
+
+        var result = DbConnectionStringResolver.ResolveFleetDbConnectionString(configuration);
+
+        Assert.IsNotNull(result);
+        StringAssert.Contains(result, "Host=db.abc.pooler.supabase.com");
+        StringAssert.Contains(result, "Maximum Pool Size=10");
     }
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values)

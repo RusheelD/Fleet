@@ -7,6 +7,7 @@ namespace Fleet.Server.Agents;
 internal static partial class SubFlowPlanner
 {
     private const int MaxTotalSubFlows = 24;
+    private const int MaxNestedDepth = 3;
 
     public static GeneratedSubFlowPlan? Parse(string? output)
     {
@@ -44,6 +45,9 @@ internal static partial class SubFlowPlanner
                 return null;
 
             if (CountSubFlows(subFlows) > MaxTotalSubFlows)
+                return null;
+
+            if (GetMaxDepth(subFlows) > MaxNestedDepth)
                 return null;
 
             return new GeneratedSubFlowPlan(
@@ -91,6 +95,11 @@ internal static partial class SubFlowPlanner
 
     private static int CountSubFlows(IEnumerable<GeneratedSubFlowSpec> specs)
         => specs.Sum(spec => 1 + CountSubFlows(spec.SubFlows));
+
+    private static int GetMaxDepth(IEnumerable<GeneratedSubFlowSpec> specs)
+        => specs.Any()
+            ? specs.Max(spec => 1 + GetMaxDepth(spec.SubFlows))
+            : 0;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {

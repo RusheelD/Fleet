@@ -431,18 +431,17 @@ public class AgentOrchestrationService(
                 cancellationToken);
 
             // 6. Use AI to determine which agents are needed for this work item.
-            var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
-            var selectedModelKey = ModelKeys.Haiku;
             var executionMode = directChildWorkItems.Count > 0
                 ? AgentExecutionModes.Orchestration
                 : AgentExecutionModes.Standard;
-            var pipeline = executionMode == AgentExecutionModes.Orchestration
-                ? OrchestrationPreludePipeline
-                : await SelectPipelineAsync(workItemContext, cancellationToken);
+            var selectedModelKey = ModelKeys.Haiku;
+            var pipeline = ResolveDefaultPipeline(executionMode);
             pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             logger.LogInformation(
-                "Execution: AI-selected pipeline with {PhaseCount} agents, model={Model}",
-                pipeline.SelectMany(g => g).Count(), selectedModelKey);
+                "Execution: using default pipeline with {PhaseCount} agents, mode={ExecutionMode}, assignmentMode={AssignmentMode}",
+                pipeline.SelectMany(g => g).Count(),
+                executionMode,
+                workItem.AssignmentMode ?? "auto");
 
             // 7. Resolve collision-safe branch and PR title values.
             var plannedPrTitle = retryPlan?.ReusePullRequestTitle ?? BuildPullRequestTitle(workItem);
@@ -761,11 +760,10 @@ public class AgentOrchestrationService(
         var pipeline = BuildPipelineFromExecutionAgents(pausedExecution.Agents);
         if (pipeline.Length == 0)
         {
-            var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
-                pipeline = await SelectPipelineAsync(workItemContext, cancellationToken);
-                pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
+            pipeline = ResolveDefaultPipeline(pausedExecution.ExecutionMode);
+            pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             logger.LogWarning(
-                "Execution {ExecutionId}: paused execution had no reconstructable agent pipeline; falling back to AI-selected pipeline with {PhaseCount} roles",
+                "Execution {ExecutionId}: paused execution had no reconstructable agent pipeline; falling back to the default pipeline with {PhaseCount} roles",
                 executionId,
                 pipeline.SelectMany(group => group).Count());
         }
@@ -1243,21 +1241,32 @@ public class AgentOrchestrationService(
                 $"Sub-flow #{childWorkItem.WorkItemNumber} is blocked by prior execution {existingExecution.Id} in status '{existingExecution.Status}'.");
         }
 
-        async Task<Data.Entities.AgentExecution> WaitForTerminalSubFlowExecutionAsync(string childExecutionId)
+        async Task<Dictionary<string, Data.Entities.AgentExecution>> WaitForTerminalSubFlowExecutionsAsync(
+            IReadOnlyCollection<string> childExecutionIds)
         {
             while (true)
             {
                 externalCancellation.ThrowIfCancellationRequested();
 
-                var current = await scopedDb.AgentExecutions
+                var currentExecutions = await scopedDb.AgentExecutions
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(execution => execution.Id == childExecutionId, externalCancellation)
-                    ?? throw new InvalidOperationException($"Sub-flow execution {childExecutionId} no longer exists.");
+                    .Where(execution => childExecutionIds.Contains(execution.Id))
+                    .ToListAsync(externalCancellation);
 
-                if (!string.Equals(current.Status, "running", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(current.Status, "queued", StringComparison.OrdinalIgnoreCase))
+                if (currentExecutions.Count != childExecutionIds.Count)
                 {
-                    return current;
+                    var foundIds = currentExecutions.Select(execution => execution.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var missingExecutionId = childExecutionIds.First(id => !foundIds.Contains(id));
+                    throw new InvalidOperationException($"Sub-flow execution {missingExecutionId} no longer exists.");
+                }
+
+                var allTerminal = currentExecutions.All(current =>
+                    !string.Equals(current.Status, "running", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(current.Status, "queued", StringComparison.OrdinalIgnoreCase));
+
+                if (allTerminal)
+                {
+                    return currentExecutions.ToDictionary(execution => execution.Id, StringComparer.OrdinalIgnoreCase);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(2), externalCancellation);
@@ -1308,9 +1317,12 @@ public class AgentOrchestrationService(
                     launchedChildren.Add((child, childExecutionId));
                 }
 
-                var terminalExecutions = await Task.WhenAll(
-                    launchedChildren.Select(async launched =>
-                        (launched.WorkItem, Execution: await WaitForTerminalSubFlowExecutionAsync(launched.ExecutionId))));
+                var terminalExecutionMap = await WaitForTerminalSubFlowExecutionsAsync(
+                    launchedChildren.Select(launched => launched.ExecutionId).ToArray());
+
+                var terminalExecutions = launchedChildren
+                    .Select(launched => (launched.WorkItem, Execution: terminalExecutionMap[launched.ExecutionId]))
+                    .ToArray();
 
                 var blockingExecution = terminalExecutions.FirstOrDefault(result =>
                     !string.Equals(result.Execution.Status, "completed", StringComparison.OrdinalIgnoreCase));
@@ -1600,7 +1612,8 @@ public class AgentOrchestrationService(
                             currentRawOutputsByRole.TryGetValue(AgentRole.Planner, out var plannerOutput))
                         {
                             var generatedPlan = SubFlowPlanner.Parse(plannerOutput);
-                            if (generatedPlan is not null)
+                            if (generatedPlan is not null &&
+                                ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan))
                             {
                                 var createdSubFlows = await MaterializeGeneratedSubFlowsAsync(
                                     scopedWorkItemRepo,
@@ -1622,6 +1635,13 @@ public class AgentOrchestrationService(
                                     await PublishProjectsUpdatedAsync();
                                     await PublishLogsUpdatedAsync();
                                 }
+                            }
+                            else if (generatedPlan is not null)
+                            {
+                                logger.LogInformation(
+                                    "Execution {ExecutionId}: skipped planner-generated sub-flow materialization for work item #{WorkItemNumber} because the task is already small enough to execute directly.",
+                                    executionId,
+                                    workItem.WorkItemNumber);
                             }
                         }
 
@@ -2262,6 +2282,47 @@ public class AgentOrchestrationService(
             .OrderBy(child => child.WorkItemNumber)
             .ToList();
 
+    internal static bool ShouldMaterializeGeneratedSubFlows(
+        Models.WorkItemDto workItem,
+        GeneratedSubFlowPlan generatedPlan)
+    {
+        if (generatedPlan.SubFlows.Count == 0)
+            return false;
+
+        if (workItem.Difficulty <= 2)
+            return false;
+
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
+            return false;
+
+        var flattenedSubFlows = FlattenGeneratedSubFlows(generatedPlan.SubFlows).ToArray();
+        if (flattenedSubFlows.Length == 0)
+            return false;
+
+        if (generatedPlan.SubFlows.Count == 1 && generatedPlan.SubFlows[0].SubFlows.Count == 0)
+            return false;
+
+        if (flattenedSubFlows.Any(subFlow => subFlow.Difficulty > workItem.Difficulty))
+            return false;
+
+        var materiallyReducesComplexity = flattenedSubFlows.Any(subFlow => subFlow.Difficulty < workItem.Difficulty);
+        if (!materiallyReducesComplexity && workItem.ParentWorkItemNumber is not null)
+            return false;
+
+        return true;
+    }
+
+    private static IEnumerable<GeneratedSubFlowSpec> FlattenGeneratedSubFlows(IEnumerable<GeneratedSubFlowSpec> subFlows)
+    {
+        foreach (var subFlow in subFlows)
+        {
+            yield return subFlow;
+
+            foreach (var child in FlattenGeneratedSubFlows(subFlow.SubFlows))
+                yield return child;
+        }
+    }
+
     private async Task<List<Models.WorkItemDto>> MaterializeGeneratedSubFlowsAsync(
         IWorkItemRepository scopedWorkItemRepo,
         string projectId,
@@ -2627,6 +2688,11 @@ public class AgentOrchestrationService(
                 .Select(group => group!)
                 .ToArray();
     }
+
+    internal static AgentRole[][] ResolveDefaultPipeline(string? executionMode)
+        => string.Equals(executionMode, AgentExecutionModes.Orchestration, StringComparison.OrdinalIgnoreCase)
+            ? OrchestrationPreludePipeline
+            : FullPipeline;
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
     {

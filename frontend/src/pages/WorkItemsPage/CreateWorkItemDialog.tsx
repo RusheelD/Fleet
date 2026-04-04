@@ -267,7 +267,7 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                                 <Dropdown
                                     placeholder="Agent assignment"
                                     value={agentLabel}
-                                    onOptionSelect={(_e, data) => setAgentLabel(data.optionText ?? 'Auto-detect')}
+                                    onOptionSelect={(_e, data) => setAgentLabel(data.optionText ?? AUTO_ASSIGNMENT_LABEL)}
                                 >
                                             {WORK_ITEM_ASSIGNMENT_OPTION_LABELS.map((label) => (
                                                 <Option key={label}>{label}</Option>

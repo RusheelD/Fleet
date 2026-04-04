@@ -559,6 +559,7 @@ export function AgentMonitorPage() {
                             <ExecutionCard
                                 key={execution.id}
                                 execution={execution}
+                                workItems={workItems ?? []}
                                 onPause={handlePause}
                                 onCancel={handleCancel}
                                 onResume={handleResume}

@@ -168,9 +168,113 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ResolveDefaultPipeline_UsesFullPipelineForStandardRuns()
+    {
+        var pipeline = AgentOrchestrationService.ResolveDefaultPipeline(AgentExecutionModes.Standard);
+
+        Assert.AreEqual(6, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, pipeline[4]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review, AgentRole.Documentation }, pipeline[5]);
+    }
+
+    [TestMethod]
+    public void ResolveDefaultPipeline_UsesPreludeForOrchestrationRuns()
+    {
+        var pipeline = AgentOrchestrationService.ResolveDefaultPipeline(AgentExecutionModes.Orchestration);
+
+        Assert.AreEqual(2, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+    }
+
+    [TestMethod]
     public void ResolveMaxConcurrentAgentsPerTask_DoesNotClampAutoAssignedWorkItems()
     {
         Assert.AreEqual(4, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "auto", 1));
         Assert.AreEqual(4, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "auto", 5));
+    }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_ForSmallNestedTask()
+    {
+        var workItem = new Models.WorkItemDto(
+            WorkItemNumber: 12,
+            Title: "Tight leaf task",
+            State: "New",
+            Priority: 2,
+            Difficulty: 3,
+            AssignedTo: "Fleet AI",
+            Tags: [],
+            IsAI: true,
+            Description: "Small enough to finish directly.",
+            ParentWorkItemNumber: 5,
+            ChildWorkItemNumbers: [],
+            LevelId: null);
+
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Split it further",
+            [
+                new GeneratedSubFlowSpec("Child A", "Child", 2, 2, [], "", []),
+                new GeneratedSubFlowSpec("Child B", "Child", 2, 2, [], "", []),
+            ]);
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan));
+    }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_WhenSingleChildJustPuntsWork()
+    {
+        var workItem = new Models.WorkItemDto(
+            WorkItemNumber: 21,
+            Title: "Parent task",
+            State: "New",
+            Priority: 2,
+            Difficulty: 4,
+            AssignedTo: "Fleet AI",
+            Tags: [],
+            IsAI: true,
+            Description: "A substantial task.",
+            ParentWorkItemNumber: null,
+            ChildWorkItemNumbers: [],
+            LevelId: null);
+
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Split it once",
+            [
+                new GeneratedSubFlowSpec("Same task again", "No real breakdown", 2, 4, [], "", []),
+            ]);
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan));
+    }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsTrue_ForMeaningfulTopLevelBreakdown()
+    {
+        var workItem = new Models.WorkItemDto(
+            WorkItemNumber: 34,
+            Title: "Large feature",
+            State: "New",
+            Priority: 1,
+            Difficulty: 5,
+            AssignedTo: "Fleet AI",
+            Tags: [],
+            IsAI: true,
+            Description: "Big enough to split.",
+            ParentWorkItemNumber: null,
+            ChildWorkItemNumbers: [],
+            LevelId: null);
+
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Separate backend and frontend",
+            [
+                new GeneratedSubFlowSpec("Backend", "API work", 2, 4, [], "", []),
+                new GeneratedSubFlowSpec("Frontend", "UI work", 2, 3, [], "", []),
+            ]);
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan));
     }
 }
