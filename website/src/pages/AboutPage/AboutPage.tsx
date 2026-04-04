@@ -1,6 +1,5 @@
 import {
     makeStyles,
-    tokens,
     Title1,
     Title2,
     Title3,
@@ -18,6 +17,7 @@ import {
     ArrowRightRegular,
 } from '@fluentui/react-icons'
 import { APP_URL } from '../../config'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     hero: {
@@ -27,27 +27,27 @@ const useStyles = makeStyles({
         textAlign: 'center',
         paddingTop: '80px',
         paddingBottom: '64px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
-        background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        background: `linear-gradient(180deg, ${appTokens.color.surface} 0%, ${appTokens.color.pageBackground} 100%)`,
         '@media (max-width: 900px)': {
             paddingTop: '64px',
             paddingBottom: '48px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     heroSubtitle: {
         maxWidth: '600px',
-        marginTop: tokens.spacingVerticalM,
-        color: tokens.colorNeutralForeground2,
+        marginTop: appTokens.space.md,
+        color: appTokens.color.textSecondary,
     },
     section: {
         position: 'relative' as const,
         paddingTop: '64px',
         paddingBottom: '64px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
         maxWidth: '1000px',
         marginLeft: 'auto',
         marginRight: 'auto',
@@ -55,12 +55,12 @@ const useStyles = makeStyles({
         '@media (max-width: 900px)': {
             paddingTop: '56px',
             paddingBottom: '56px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     sectionAlt: {
-        backgroundColor: tokens.colorNeutralBackground2,
+        backgroundColor: appTokens.color.surfaceAlt,
         maxWidth: 'unset',
     },
     sectionInner: {
@@ -74,34 +74,37 @@ const useStyles = makeStyles({
         alignItems: 'center',
         textAlign: 'center',
         marginBottom: '48px',
-        gap: tokens.spacingVerticalS,
+        gap: appTokens.space.sm,
     },
     sectionSubtitle: {
-        color: tokens.colorNeutralForeground2,
+        color: appTokens.color.textSecondary,
     },
 
     // Mission / Vision
     missionGrid: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: tokens.spacingHorizontalXXL,
+        gap: appTokens.space.xxl,
         '@media (max-width: 768px)': {
             gridTemplateColumns: '1fr',
         },
     },
     missionCard: {
-        padding: tokens.spacingVerticalL,
+        padding: appTokens.space.lg,
+        backgroundColor: appTokens.color.surfaceRaised,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     missionIcon: {
         fontSize: '28px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
 
     // Values
     valuesGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: tokens.spacingHorizontalL,
+        gap: appTokens.space.lg,
         '@media (max-width: 900px)': {
             gridTemplateColumns: 'repeat(2, 1fr)',
         },
@@ -110,13 +113,16 @@ const useStyles = makeStyles({
         },
     },
     valueCard: {
-        padding: tokens.spacingVerticalL,
+        padding: appTokens.space.lg,
         textAlign: 'center',
+        backgroundColor: appTokens.color.surfaceRaised,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     valueIcon: {
         fontSize: '32px',
-        color: tokens.colorBrandForeground1,
-        marginBottom: tokens.spacingVerticalS,
+        color: appTokens.color.brand,
+        marginBottom: appTokens.space.sm,
     },
 
     // Story
@@ -126,7 +132,7 @@ const useStyles = makeStyles({
         marginRight: 'auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
+        gap: appTokens.space.md,
     },
 
     // CTA
@@ -135,16 +141,16 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         alignItems: 'center',
         textAlign: 'center',
-        gap: tokens.spacingVerticalL,
+        gap: appTokens.space.lg,
         paddingTop: '64px',
         paddingBottom: '64px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
         '@media (max-width: 900px)': {
             paddingTop: '56px',
             paddingBottom: '56px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     ctaButton: {

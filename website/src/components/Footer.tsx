@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
-    tokens,
     Body1,
     Text,
     Link,
@@ -9,58 +8,59 @@ import {
     Caption1,
 } from '@fluentui/react-components'
 import { FleetRocketLogo } from './FleetRocketLogo'
+import { appTokens } from '../styles/appTokens'
 
 const useStyles = makeStyles({
     footer: {
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
-        paddingTop: tokens.spacingVerticalXXL,
-        paddingBottom: tokens.spacingVerticalL,
-        backgroundColor: tokens.colorNeutralBackground2,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        paddingTop: appTokens.space.xxl,
+        paddingBottom: appTokens.space.lg,
+        backgroundColor: appTokens.color.surfaceAlt,
         '@media (max-width: 900px)': {
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
-            paddingTop: tokens.spacingVerticalXL,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
+            paddingTop: appTokens.space.xl,
         },
     },
     grid: {
         display: 'grid',
         gridTemplateColumns: '2fr 1fr 1fr 1fr',
-        gap: tokens.spacingHorizontalXXXL,
-        marginBottom: tokens.spacingVerticalXL,
+        gap: appTokens.space.xxxl,
+        marginBottom: appTokens.space.xl,
         '@media (max-width: 768px)': {
             gridTemplateColumns: '1fr',
-            gap: tokens.spacingVerticalL,
+            gap: appTokens.space.lg,
         },
     },
     brandCol: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalS,
+        gap: appTokens.space.sm,
     },
     brandRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
-        color: tokens.colorBrandForeground1,
+        gap: appTokens.space.sm,
+        color: appTokens.color.brand,
     },
     linkCol: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     colTitle: {
-        fontWeight: tokens.fontWeightSemibold,
-        marginBottom: tokens.spacingVerticalXS,
+        fontWeight: appTokens.fontWeight.semibold,
+        marginBottom: appTokens.space.xs,
     },
     bottom: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: tokens.spacingVerticalM,
+        paddingTop: appTokens.space.md,
         '@media (max-width: 768px)': {
             flexDirection: 'column',
-            gap: tokens.spacingVerticalS,
+            gap: appTokens.space.sm,
             alignItems: 'flex-start',
         },
     },
@@ -103,7 +103,7 @@ export function Footer() {
                 </div>
             </div>
 
-            <Divider />
+            <Divider style={{ borderColor: appTokens.color.border }} />
 
             <div className={styles.bottom}>
                 <Caption1>&copy; {new Date().getFullYear()} Fleet. All rights reserved.</Caption1>

@@ -1,6 +1,5 @@
 import {
     makeStyles,
-    tokens,
     Title1,
     Title2,
     Title3,
@@ -17,6 +16,7 @@ import {
 } from '@fluentui/react-icons'
 import { APP_URL } from '../../config'
 import type { PlanData } from '../../models'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     hero: {
@@ -26,37 +26,37 @@ const useStyles = makeStyles({
         textAlign: 'center',
         paddingTop: '80px',
         paddingBottom: '48px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
-        background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        background: `linear-gradient(180deg, ${appTokens.color.surface} 0%, ${appTokens.color.pageBackground} 100%)`,
         '@media (max-width: 900px)': {
             paddingTop: '64px',
             paddingBottom: '40px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     heroSubtitle: {
         maxWidth: '560px',
-        marginTop: tokens.spacingVerticalM,
-        color: tokens.colorNeutralForeground2,
+        marginTop: appTokens.space.md,
+        color: appTokens.color.textSecondary,
     },
     section: {
         paddingTop: '48px',
         paddingBottom: '80px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
         '@media (max-width: 900px)': {
             paddingTop: '40px',
             paddingBottom: '56px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     pricingGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: tokens.spacingHorizontalXL,
+        gap: appTokens.space.xl,
         maxWidth: '1200px',
         marginLeft: 'auto',
         marginRight: 'auto',
@@ -71,60 +71,63 @@ const useStyles = makeStyles({
         },
     },
     card: {
-        padding: tokens.spacingVerticalL,
+        padding: appTokens.space.lg,
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
+        gap: appTokens.space.md,
+        backgroundColor: appTokens.color.surfaceRaised,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     cardPopular: {
-        border: `2px solid ${tokens.colorBrandStroke1}`,
+        border: `2px solid ${appTokens.color.brandStroke}`,
     },
     cardHeader: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     cardHeaderRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
     priceRow: {
         display: 'flex',
         alignItems: 'baseline',
-        gap: tokens.spacingHorizontalXS,
+        gap: appTokens.space.xs,
         flexWrap: 'wrap',
     },
     priceAmount: {
-        fontSize: tokens.fontSizeHero800,
-        fontWeight: tokens.fontWeightBold,
-        lineHeight: tokens.lineHeightHero800,
+        fontSize: appTokens.fontSize.hero,
+        fontWeight: appTokens.fontWeight.bold,
+        lineHeight: appTokens.lineHeight.hero,
     },
     pricePeriod: {
-        color: tokens.colorNeutralForeground2,
+        color: appTokens.color.textSecondary,
     },
     featureList: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalS,
-        paddingTop: tokens.spacingVerticalS,
-        paddingBottom: tokens.spacingVerticalS,
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
     },
     featureItem: {
         display: 'flex',
         alignItems: 'flex-start',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     featureCheck: {
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
         fontSize: '16px',
         marginTop: '2px',
         flexShrink: 0,
     },
 
     sectionAlt: {
-        backgroundColor: tokens.colorNeutralBackground2,
+        backgroundColor: appTokens.color.surfaceAlt,
     },
     faqHeader: {
         textAlign: 'center',
@@ -133,7 +136,7 @@ const useStyles = makeStyles({
     faqGrid: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: tokens.spacingHorizontalXL,
+        gap: appTokens.space.xl,
         maxWidth: '900px',
         marginLeft: 'auto',
         marginRight: 'auto',
@@ -144,7 +147,7 @@ const useStyles = makeStyles({
     faqItem: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
 
     cta: {
@@ -152,16 +155,16 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         alignItems: 'center',
         textAlign: 'center',
-        gap: tokens.spacingVerticalL,
+        gap: appTokens.space.lg,
         paddingTop: '64px',
         paddingBottom: '64px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
         '@media (max-width: 900px)': {
             paddingTop: '56px',
             paddingBottom: '56px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     ctaButton: {

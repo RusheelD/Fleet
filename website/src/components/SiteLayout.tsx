@@ -1,14 +1,16 @@
 import { Outlet } from 'react-router-dom'
-import { makeStyles, tokens } from '@fluentui/react-components'
+import { makeStyles } from '@fluentui/react-components'
 import { Navbar } from './'
 import { Footer } from './'
+import { appTokens } from '../styles/appTokens'
 
 const useStyles = makeStyles({
     root: {
         display: 'flex',
         flexDirection: 'column',
         minHeight: '100vh',
-        backgroundColor: tokens.colorNeutralBackground1,
+        backgroundColor: appTokens.color.pageBackground,
+        color: appTokens.color.textPrimary,
         width: '100%',
     },
     content: {

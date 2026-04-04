@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
     makeStyles,
-    tokens,
     Button,
     Title3,
     mergeClasses,
@@ -11,38 +10,39 @@ import { NavigationRegular, DismissRegular } from '@fluentui/react-icons'
 import { APP_URL } from '../config'
 import { useIsMobile } from '../hooks'
 import { FleetRocketLogo } from './FleetRocketLogo'
+import { appTokens } from '../styles/appTokens'
 
 const useStyles = makeStyles({
     nav: {
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
-        paddingTop: tokens.spacingVerticalM,
-        paddingBottom: tokens.spacingVerticalM,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        borderBottom: appTokens.border.subtle,
         position: 'sticky',
         top: 0,
         zIndex: 100,
-        backgroundColor: tokens.colorNeutralBackground1,
+        backgroundColor: appTokens.color.surface,
         '@media (max-width: 900px)': {
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
-            paddingTop: tokens.spacingVerticalS,
-            paddingBottom: tokens.spacingVerticalS,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
+            paddingTop: appTokens.space.sm,
+            paddingBottom: appTokens.space.sm,
         },
     },
     navTopRow: {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: tokens.spacingHorizontalM,
+        gap: appTokens.space.md,
     },
     brand: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
         cursor: 'pointer',
         textDecoration: 'none',
-        color: 'inherit',
+        color: appTokens.color.textPrimary,
     },
     brandIcon: {
         width: '24px',
@@ -51,7 +51,7 @@ const useStyles = makeStyles({
     desktopGroup: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalL,
+        gap: appTokens.space.lg,
         '@media (max-width: 900px)': {
             display: 'none',
         },
@@ -59,20 +59,20 @@ const useStyles = makeStyles({
     links: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     navLink: {
-        fontWeight: tokens.fontWeightRegular,
+        fontWeight: appTokens.fontWeight.regular,
         minWidth: 'auto',
     },
     navLinkActive: {
-        fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorBrandForeground1,
+        fontWeight: appTokens.fontWeight.semibold,
+        color: appTokens.color.brand,
     },
     actions: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
+        gap: appTokens.space.sm,
     },
     mobileMenuToggle: {
         display: 'none',
@@ -83,19 +83,19 @@ const useStyles = makeStyles({
     mobilePanel: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalS,
-        paddingTop: tokens.spacingVerticalS,
-        marginTop: tokens.spacingVerticalS,
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        marginTop: appTokens.space.sm,
+        borderTop: appTokens.border.subtle,
     },
     mobileLinks: {
         display: 'grid',
-        gap: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
     },
     mobileActions: {
         display: 'grid',
-        gap: tokens.spacingVerticalXS,
-        marginTop: tokens.spacingVerticalXS,
+        gap: appTokens.space.xs,
+        marginTop: appTokens.space.xs,
     },
     mobileButton: {
         justifyContent: 'flex-start',

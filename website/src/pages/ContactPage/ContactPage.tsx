@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import {
     makeStyles,
-    tokens,
     Title1,
     Title2,
     Title3,
@@ -20,6 +19,7 @@ import {
     ChatRegular,
     BuildingRegular,
 } from '@fluentui/react-icons'
+import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
     hero: {
@@ -29,37 +29,37 @@ const useStyles = makeStyles({
         textAlign: 'center',
         paddingTop: '80px',
         paddingBottom: '48px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
-        background: `linear-gradient(180deg, ${tokens.colorNeutralBackground1} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
+        background: `linear-gradient(180deg, ${appTokens.color.surface} 0%, ${appTokens.color.pageBackground} 100%)`,
         '@media (max-width: 900px)': {
             paddingTop: '64px',
             paddingBottom: '40px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     heroSubtitle: {
         maxWidth: '560px',
-        marginTop: tokens.spacingVerticalM,
-        color: tokens.colorNeutralForeground2,
+        marginTop: appTokens.space.md,
+        color: appTokens.color.textSecondary,
     },
     section: {
         paddingTop: '48px',
         paddingBottom: '80px',
-        paddingLeft: tokens.spacingHorizontalXXL,
-        paddingRight: tokens.spacingHorizontalXXL,
+        paddingLeft: appTokens.space.pageX,
+        paddingRight: appTokens.space.pageX,
         '@media (max-width: 900px)': {
             paddingTop: '40px',
             paddingBottom: '56px',
-            paddingLeft: tokens.spacingHorizontalM,
-            paddingRight: tokens.spacingHorizontalM,
+            paddingLeft: appTokens.space.pageXMobile,
+            paddingRight: appTokens.space.pageXMobile,
         },
     },
     grid: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: tokens.spacingHorizontalXXXL,
+        gap: appTokens.space.xxxl,
         maxWidth: '1000px',
         marginLeft: 'auto',
         marginRight: 'auto',
@@ -70,21 +70,24 @@ const useStyles = makeStyles({
     form: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
+        gap: appTokens.space.md,
         minWidth: 0,
     },
     sidebar: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXL,
+        gap: appTokens.space.xl,
         minWidth: 0,
     },
     contactCard: {
-        padding: tokens.spacingVerticalL,
+        padding: appTokens.space.lg,
+        backgroundColor: appTokens.color.surfaceRaised,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     contactIcon: {
         fontSize: '24px',
-        color: tokens.colorBrandForeground1,
+        color: appTokens.color.brand,
     },
     inputControl: {
         width: '100%',
