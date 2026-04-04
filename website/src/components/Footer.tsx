@@ -8,7 +8,7 @@ import {
     Divider,
     Caption1,
 } from '@fluentui/react-components'
-import { RocketRegular } from '@fluentui/react-icons'
+import { FleetRocketLogo } from './FleetRocketLogo'
 
 const useStyles = makeStyles({
     footer: {
@@ -75,7 +75,7 @@ export function Footer() {
             <div className={styles.grid}>
                 <div className={styles.brandCol}>
                     <div className={styles.brandRow}>
-                        <RocketRegular fontSize={20} />
+                        <FleetRocketLogo size={20} title="Fleet" />
                         <Text weight="semibold">Fleet</Text>
                     </div>
                     <Body1>

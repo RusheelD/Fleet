@@ -35,7 +35,7 @@ import { FleetRocketLogo } from '../components/shared'
  */
 const levelIconMap: Record<string, ReactNode> = {
     'bullseye': <TargetRegular />,
-    'rocket': <FleetRocketLogo size={16} title="Rocket" />,
+    'rocket': <FleetRocketLogo size={16} title="Rocket" variant="outline" />,
     'puzzle-piece': <PuzzlePieceRegular />,
     'book': <BookRegular />,
     'bug': <BugRegular />,

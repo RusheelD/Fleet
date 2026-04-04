@@ -7,9 +7,10 @@ import {
     Title3,
     mergeClasses,
 } from '@fluentui/react-components'
-import { RocketRegular, NavigationRegular, DismissRegular } from '@fluentui/react-icons'
+import { NavigationRegular, DismissRegular } from '@fluentui/react-icons'
 import { APP_URL } from '../config'
 import { useIsMobile } from '../hooks'
+import { FleetRocketLogo } from './FleetRocketLogo'
 
 const useStyles = makeStyles({
     nav: {
@@ -44,8 +45,8 @@ const useStyles = makeStyles({
         color: 'inherit',
     },
     brandIcon: {
-        color: tokens.colorBrandForeground1,
-        fontSize: '24px',
+        width: '24px',
+        height: '24px',
     },
     desktopGroup: {
         display: 'flex',
@@ -137,7 +138,7 @@ export function Navbar() {
         <nav className={styles.nav}>
             <div className={styles.navTopRow}>
                 <div className={styles.brand} onClick={() => navigateTo('/')}>
-                    <RocketRegular className={styles.brandIcon} />
+                    <FleetRocketLogo className={styles.brandIcon} size={24} title="Fleet" />
                     <Title3>Fleet</Title3>
                 </div>
 

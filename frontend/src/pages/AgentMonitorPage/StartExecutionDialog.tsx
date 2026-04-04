@@ -392,7 +392,7 @@ export function StartExecutionDialog({
                         </DialogTrigger>
                         <Button
                             appearance="primary"
-                            icon={<FleetRocketLogo size={18} title="Start execution" />}
+                            icon={<FleetRocketLogo size={18} title="Start execution" variant="outline" />}
                             disabled={selected === null || targetBranch.trim().length === 0 || isPending}
                             onClick={handleStart}
                             className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}

@@ -11,7 +11,6 @@ import {
     CardHeader,
 } from '@fluentui/react-components'
 import {
-    RocketRegular,
     BotRegular,
     BoardRegular,
     PeopleTeamRegular,
@@ -20,6 +19,7 @@ import {
     FlashRegular,
 } from '@fluentui/react-icons'
 import { APP_URL } from '../../config'
+import { FleetRocketLogo } from '../../components'
 
 const useStyles = makeStyles({
     // Hero
@@ -195,7 +195,7 @@ const features = [
         description: 'Chat with AI about your project. Copilot understands your codebase and helps you plan.',
     },
     {
-        icon: <RocketRegular />,
+        icon: <FleetRocketLogo size={20} title="Ship faster" variant="outline" />,
         title: 'Ship Faster',
         description: 'Reduce cycle time by letting agents handle implementation while your team focuses on architecture.',
     },

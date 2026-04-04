@@ -278,7 +278,7 @@ export function ProjectDashboardPage() {
                     onClick={() => navigate(`/projects/${slug}/agents`)}
                 />
                 <QuickActionCard
-                    icon={<FleetRocketLogo size={20} title="Run agents" />}
+                    icon={<FleetRocketLogo size={20} title="Run agents" variant="outline" />}
                     title="Run Agents"
                     description="Start new agent execution"
                     onClick={() => navigate(`/projects/${slug}/agents`)}

@@ -91,6 +91,7 @@ export function CurrentPlanBanner({ currentPlan }: CurrentPlanBannerProps) {
                         className={mergeClasses(styles.planBadgeIcon, isCompact && styles.planBadgeIconCompact)}
                         size={isCompact ? 16 : 24}
                         title="Fleet plan"
+                        variant="outline"
                     />
                     <Title3>{currentPlan.name}</Title3>
                     <Badge appearance="filled" color="brand">Current</Badge>

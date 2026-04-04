@@ -460,7 +460,7 @@ export function AgentMonitorPage() {
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <Toolbar className={mergeClasses(styles.actionsToolbar, isMobile && styles.actionsToolbarMobile)}>
                             <ToolbarButton
-                                icon={<FleetRocketLogo size={18} title="Start execution" />}
+                                icon={<FleetRocketLogo size={18} title="Start execution" variant="outline" />}
                                 onClick={() => setDialogOpen(true)}
                                 className={mergeClasses(isMobile && styles.toolbarButtonMobile)}
                             >

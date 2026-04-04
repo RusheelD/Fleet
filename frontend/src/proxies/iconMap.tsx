@@ -23,7 +23,7 @@ const iconMap: Record<string, ReactNode> = {
     person: <PersonRegular />,
     board: <BoardRegular />,
     trending: <ArrowTrendingRegular />,
-    rocket: <FleetRocketLogo size={16} title="Rocket" />,
+    rocket: <FleetRocketLogo size={16} title="Rocket" variant="outline" />,
     chat: <ChatRegular />,
     diamond: <DiamondRegular />,
     sparkle: <SparkleRegular />,
