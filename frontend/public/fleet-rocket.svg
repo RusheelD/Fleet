@@ -5,44 +5,46 @@
   height="1024"
   viewBox="0 0 1024 1024"
   fill="none">
-  <g transform="translate(512 512) scale(-1,1) translate(-512 -512)">
-    <g
-      transform="translate(512 512) rotate(-35) translate(-512 -512)">
+  <g transform="translate(512 512) scale(1.5) translate(-512 -512)">
+    <g transform="translate(512 512) scale(-1,1) translate(-512 -512)">
       <g
-        stroke="#261617"
-        stroke-width="28"
-        stroke-linecap="round"
-        stroke-linejoin="round">
+        transform="translate(512 512) rotate(-35) translate(-512 -512)">
+        <g
+          stroke="#261617"
+          stroke-width="28"
+          stroke-linecap="round"
+          stroke-linejoin="round">
+          <path
+            fill="#EC4B5F"
+            d="M512 180
+               C590 220 632 330 620 500
+               L610 620
+               C606 670 572 704 522 704
+               H502
+               C452 704 418 670 414 620
+               L404 500
+               C392 330 434 220 512 180 Z"/>
+          <path
+            fill="#EC4B5F"
+            d="M420 560
+               C370 585 330 635 312 708
+               C366 686 414 650 450 602 Z"/>
+          <path
+            fill="#EC4B5F"
+            d="M604 560
+               C654 585 694 635 712 708
+               C658 686 610 650 574 602 Z"/>
+          <path
+            fill="#261617"
+            d="M512 320 L552 388 L472 388 Z"
+            stroke-width="22"/>
+        </g>
         <path
-          fill="#EC4B5F"
-          d="M512 180
-             C590 220 632 330 620 500
-             L610 620
-             C606 670 572 704 522 704
-             H502
-             C452 704 418 670 414 620
-             L404 500
-             C392 330 434 220 512 180 Z"/>
-        <path
-          fill="#EC4B5F"
-          d="M420 560
-             C370 585 330 635 312 708
-             C366 686 414 650 450 602 Z"/>
-        <path
-          fill="#EC4B5F"
-          d="M604 560
-             C654 585 694 635 712 708
-             C658 686 610 650 574 602 Z"/>
-        <path
-          fill="#261617"
-          d="M512 320 L552 388 L472 388 Z"
-          stroke-width="22"/>
+          fill="#F5A04C"
+          d="M512 706
+             C546 758 540 830 512 884
+             C484 830 478 758 512 706 Z"/>
       </g>
-      <path
-        fill="#F5A04C"
-        d="M512 706
-           C546 758 540 830 512 884
-           C484 830 478 758 512 706 Z"/>
     </g>
   </g>
 </svg>
