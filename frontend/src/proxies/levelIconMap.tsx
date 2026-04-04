@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import {
     TargetRegular,
-    RocketRegular,
     PuzzlePieceRegular,
     BookRegular,
     BugRegular,
@@ -28,6 +27,7 @@ import {
     CalendarRegular,
     TagRegular,
 } from '@fluentui/react-icons'
+import { FleetRocketLogo } from '../components/shared'
 
 /**
  * Maps level icon name strings from the API to Fluent UI React icon components.
@@ -35,7 +35,7 @@ import {
  */
 const levelIconMap: Record<string, ReactNode> = {
     'bullseye': <TargetRegular />,
-    'rocket': <RocketRegular />,
+    'rocket': <FleetRocketLogo size={16} title="Rocket" />,
     'puzzle-piece': <PuzzlePieceRegular />,
     'book': <BookRegular />,
     'bug': <BugRegular />,

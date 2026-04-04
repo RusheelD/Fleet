@@ -12,10 +12,11 @@ import {
     useId,
     Toaster,
 } from '@fluentui/react-components'
-import { RocketRegular, ArrowUpRegular } from '@fluentui/react-icons'
+import { ArrowUpRegular } from '@fluentui/react-icons'
 import type { CurrentPlan } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
+import { FleetRocketLogo } from '../../components/shared'
 
 const useStyles = makeStyles({
     currentPlan: {
@@ -52,11 +53,13 @@ const useStyles = makeStyles({
         gap: '0.375rem',
     },
     planBadgeIcon: {
-        fontSize: '24px',
-        color: appTokens.color.brand,
+        width: '24px',
+        height: '24px',
+        flexShrink: 0,
     },
     planBadgeIconCompact: {
-        fontSize: '16px',
+        width: '16px',
+        height: '16px',
     },
     compactBody: {
         fontSize: '12px',
@@ -84,7 +87,11 @@ export function CurrentPlanBanner({ currentPlan }: CurrentPlanBannerProps) {
             <Toaster toasterId={toasterId} />
             <div className={mergeClasses(styles.planInfo, isCompact && styles.planInfoCompact)}>
                 <div className={mergeClasses(styles.planBadge, isCompact && styles.planBadgeCompact)}>
-                    <RocketRegular className={mergeClasses(styles.planBadgeIcon, isCompact && styles.planBadgeIconCompact)} />
+                    <FleetRocketLogo
+                        className={mergeClasses(styles.planBadgeIcon, isCompact && styles.planBadgeIconCompact)}
+                        size={isCompact ? 16 : 24}
+                        title="Fleet plan"
+                    />
                     <Title3>{currentPlan.name}</Title3>
                     <Badge appearance="filled" color="brand">Current</Badge>
                 </div>

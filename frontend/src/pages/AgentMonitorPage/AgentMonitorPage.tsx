@@ -23,9 +23,8 @@ import {
     DismissCircleRegular,
     SearchRegular,
     ArrowClockwiseRegular,
-    RocketRegular,
 } from '@fluentui/react-icons'
-import { PageHeader } from '../../components/shared'
+import { FleetRocketLogo, PageHeader } from '../../components/shared'
 import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
@@ -461,7 +460,7 @@ export function AgentMonitorPage() {
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <Toolbar className={mergeClasses(styles.actionsToolbar, isMobile && styles.actionsToolbarMobile)}>
                             <ToolbarButton
-                                icon={<RocketRegular />}
+                                icon={<FleetRocketLogo size={18} title="Start execution" />}
                                 onClick={() => setDialogOpen(true)}
                                 className={mergeClasses(isMobile && styles.toolbarButtonMobile)}
                             >

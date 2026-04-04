@@ -53,7 +53,7 @@ export function FleetRocketLogo({
             {title ? <title>{title}</title> : null}
             <style>
                 {`
-                    .rocket-body { fill: var(--rocket-primary, currentColor); }
+                    .rocket-fill { fill: var(--rocket-primary, currentColor); }
                     .rocket-stroke { stroke: var(--rocket-stroke, currentColor); }
                     .rocket-window { fill: var(--rocket-window, currentColor); }
                     .rocket-flame { fill: var(--rocket-flame, currentColor); }
@@ -61,86 +61,52 @@ export function FleetRocketLogo({
             </style>
 
             <g transform="translate(512 512) scale(-1,1) translate(-512 -512)">
-                <g
-                    transform="translate(512 512) rotate(-35) translate(-512 -512)"
-                    className="rocket-stroke"
-                    strokeWidth="18"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                >
-                    <path
-                        className="rocket-body"
-                        d="M512 180
-                           C590 220 632 320 620 470
-                           L606 640
-                           C603 676 578 700 542 700
-                           H482
-                           C446 700 421 676 418 640
-                           L404 470
-                           C392 320 434 220 512 180 Z"
-                    />
-
-                    <path
-                        className="rocket-body"
-                        d="M512 112
-                           C550 136 573 170 582 214
-                           C537 198 487 198 442 214
-                           C451 170 474 136 512 112 Z"
-                    />
-
-                    <path
-                        className="rocket-window"
-                        d="M512 300
-                           L560 380
-                           L464 380
-                           Z"
-                        strokeWidth="18"
+                <g transform="translate(512 512) rotate(-35) translate(-512 -512)">
+                    <g
+                        className="rocket-stroke"
+                        strokeWidth="28"
+                        strokeLinecap="round"
                         strokeLinejoin="round"
-                    />
-
-                    <path
-                        className="rocket-body"
-                        d="M418 570
-                           C360 590 320 640 304 714
-                           C360 694 406 662 438 616 Z"
-                    />
-
-                    <path
-                        className="rocket-body"
-                        d="M606 570
-                           C664 590 704 640 720 714
-                           C664 694 618 662 586 616 Z"
-                    />
-
-                    <path className="rocket-body" d="M350 420 H412 V700 H350 Z" />
-                    <path className="rocket-body" d="M381 380 L405 420 H357 Z" />
-
-                    <path className="rocket-body" d="M612 420 H674 V700 H612 Z" />
-                    <path className="rocket-body" d="M643 380 L667 420 H619 Z" />
-
-                    <path className="rocket-body" d="M474 700 H550 L538 770 H486 Z" />
-                    <path className="rocket-body" d="M362 700 H400 L394 754 H368 Z" />
-                    <path className="rocket-body" d="M624 700 H662 L656 754 H630 Z" />
-
-                    <g className="rocket-flame" stroke="none">
+                    >
                         <path
-                            d="M381 754
-                               C398 784 396 820 381 848
-                               C366 820 364 784 381 754 Z"
+                            className="rocket-fill"
+                            d="M512 180
+                               C590 220 632 330 620 500
+                               L610 620
+                               C606 670 572 704 522 704
+                               H502
+                               C452 704 418 670 414 620
+                               L404 500
+                               C392 330 434 220 512 180 Z"
                         />
 
                         <path
-                            d="M643 754
-                               C660 784 658 820 643 848
-                               C628 820 626 784 643 754 Z"
+                            className="rocket-fill"
+                            d="M420 560
+                               C370 585 330 635 312 708
+                               C366 686 414 650 450 602 Z"
                         />
 
                         <path
-                            d="M512 770
-                               C540 818 536 880 512 924
-                               C488 880 484 818 512 770 Z"
+                            className="rocket-fill"
+                            d="M604 560
+                               C654 585 694 635 712 708
+                               C658 686 610 650 574 602 Z"
+                        />
+
+                        <path
+                            className="rocket-window rocket-stroke"
+                            d="M512 320 L552 388 L472 388 Z"
+                            strokeWidth="22"
                         />
                     </g>
+
+                    <path
+                        className="rocket-flame"
+                        d="M512 706
+                           C546 758 540 830 512 884
+                           C484 830 478 758 512 706 Z"
+                    />
                 </g>
             </g>
         </svg>

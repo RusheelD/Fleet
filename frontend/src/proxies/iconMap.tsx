@@ -7,13 +7,13 @@ import {
     PersonRegular,
     BoardRegular,
     ArrowTrendingRegular,
-    RocketRegular,
     ChatRegular,
     DiamondRegular,
     SparkleRegular,
     QuestionCircleRegular,
     HistoryRegular,
 } from '@fluentui/react-icons'
+import { FleetRocketLogo } from '../components/shared'
 
 const iconMap: Record<string, ReactNode> = {
     branch: <BranchRegular />,
@@ -23,7 +23,7 @@ const iconMap: Record<string, ReactNode> = {
     person: <PersonRegular />,
     board: <BoardRegular />,
     trending: <ArrowTrendingRegular />,
-    rocket: <RocketRegular />,
+    rocket: <FleetRocketLogo size={16} title="Rocket" />,
     chat: <ChatRegular />,
     diamond: <DiamondRegular />,
     sparkle: <SparkleRegular />,

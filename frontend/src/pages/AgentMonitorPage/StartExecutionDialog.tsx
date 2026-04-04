@@ -19,11 +19,12 @@ import {
     Field,
     Input,
 } from '@fluentui/react-components'
-import { BotRegular, RocketRegular } from '@fluentui/react-icons'
+import { BotRegular } from '@fluentui/react-icons'
 import type { WorkItem } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
+import { FleetRocketLogo } from '../../components/shared'
 
 interface StartExecutionDialogProps {
     open: boolean
@@ -391,7 +392,7 @@ export function StartExecutionDialog({
                         </DialogTrigger>
                         <Button
                             appearance="primary"
-                            icon={<RocketRegular />}
+                            icon={<FleetRocketLogo size={18} title="Start execution" />}
                             disabled={selected === null || targetBranch.trim().length === 0 || isPending}
                             onClick={handleStart}
                             className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
