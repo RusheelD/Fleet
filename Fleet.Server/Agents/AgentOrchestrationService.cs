@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -1156,6 +1157,7 @@ public class AgentOrchestrationService(
         var scopedNotificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
         var scopedUsageLedgerService = scope.ServiceProvider.GetRequiredService<IUsageLedgerService>();
         var scopedEventPublisher = scope.ServiceProvider.GetRequiredService<IServerEventPublisher>();
+        await using var dbQueue = new ExecutionDbRequestQueue();
 
         IRepoSandbox? sandbox = null;
 
@@ -1186,24 +1188,37 @@ public class AgentOrchestrationService(
                 ServerEventTopics.ProjectsUpdated,
                 new { projectId });
 
+        Task WithDbLockAsync(Func<Task> action) => dbQueue.EnqueueAsync(async () =>
+        {
+            ThrowIfExecutionDeleted(executionId);
+            await action();
+        });
+
+        Task<T> WithDbResultAsync<T>(Func<Task<T>> action) => dbQueue.EnqueueAsync(async () =>
+        {
+            ThrowIfExecutionDeleted(executionId);
+            return await action();
+        });
+
         async Task UpdateOrchestrationProgressAsync(int completedSubFlows, int totalSubFlows, string currentPhase)
         {
             var completionRatio = totalSubFlows <= 0 ? 0 : (double)completedSubFlows / totalSubFlows;
             var progress = Math.Min(0.95, 0.2 + (completionRatio * 0.75));
-            await UpdateExecutionAsync(scopedDb, executionId, currentPhase, progress);
+            await WithDbLockAsync(async () => await UpdateExecutionAsync(scopedDb, executionId, currentPhase, progress));
             await PublishAgentsUpdatedAsync();
         }
 
         async Task<string> EnsureSubFlowExecutionRunningAsync(Models.WorkItemDto childWorkItem)
         {
-            var existingExecution = await scopedDb.AgentExecutions
-                .AsNoTracking()
-                .Where(execution =>
-                    execution.ProjectId == projectId &&
-                    execution.ParentExecutionId == executionId &&
-                    execution.WorkItemId == childWorkItem.WorkItemNumber)
-                .OrderByDescending(execution => execution.StartedAtUtc)
-                .FirstOrDefaultAsync(externalCancellation);
+            var existingExecution = await WithDbResultAsync(async () =>
+                await scopedDb.AgentExecutions
+                    .AsNoTracking()
+                    .Where(execution =>
+                        execution.ProjectId == projectId &&
+                        execution.ParentExecutionId == executionId &&
+                        execution.WorkItemId == childWorkItem.WorkItemNumber)
+                    .OrderByDescending(execution => execution.StartedAtUtc)
+                    .FirstOrDefaultAsync(externalCancellation));
 
             var orchestrationService = scope.ServiceProvider.GetRequiredService<IAgentOrchestrationService>();
             if (existingExecution is null)
@@ -1248,10 +1263,11 @@ public class AgentOrchestrationService(
             {
                 externalCancellation.ThrowIfCancellationRequested();
 
-                var currentExecutions = await scopedDb.AgentExecutions
-                    .AsNoTracking()
-                    .Where(execution => childExecutionIds.Contains(execution.Id))
-                    .ToListAsync(externalCancellation);
+                var currentExecutions = await WithDbResultAsync(async () =>
+                    await scopedDb.AgentExecutions
+                        .AsNoTracking()
+                        .Where(execution => childExecutionIds.Contains(execution.Id))
+                        .ToListAsync(externalCancellation));
 
                 if (currentExecutions.Count != childExecutionIds.Count)
                 {
@@ -1275,7 +1291,8 @@ public class AgentOrchestrationService(
 
         async Task StopDescendantExecutionsAsync(string finalStatus)
         {
-            var descendantIds = await CollectDescendantExecutionIdsAsync(scopedDb, projectId, executionId, CancellationToken.None);
+            var descendantIds = await WithDbResultAsync(async () =>
+                await CollectDescendantExecutionIdsAsync(scopedDb, projectId, executionId, CancellationToken.None));
             foreach (var descendantId in descendantIds)
             {
                 await StopExecutionAsync(descendantId, finalStatus);
@@ -1292,13 +1309,14 @@ public class AgentOrchestrationService(
             var parallelism = Math.Clamp(Math.Min(maxConcurrentAgentsPerTask, MaxParallelSubFlows), 1, MaxParallelSubFlows);
             var completedSubFlows = 0;
 
-            await WriteLogEntryAsync(
-                scopedDb,
-                projectId,
-                "System",
-                "info",
-                $"Execution {executionId} is orchestrating {orderedChildren.Length} sub-flow(s) for work item #{parentWorkItem.WorkItemNumber}.",
-                executionId: executionId);
+            await WithDbLockAsync(async () =>
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "info",
+                    $"Execution {executionId} is orchestrating {orderedChildren.Length} sub-flow(s) for work item #{parentWorkItem.WorkItemNumber}.",
+                    executionId: executionId));
             await PublishLogsUpdatedAsync();
 
             for (var batchStart = 0; batchStart < orderedChildren.Length; batchStart += parallelism)
@@ -1345,7 +1363,7 @@ public class AgentOrchestrationService(
             await CollectDirectChildrenAsync(projectId, parentWorkItem.ChildWorkItemNumbers, refreshedDirectChildren);
             var parentState = ResolveParentFlowState(refreshedDirectChildren);
 
-            await FinalizeExecutionAsync(scopedDb, executionId, "completed");
+            await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed"));
             await PublishAgentsUpdatedAsync();
 
             await scopedWorkItemRepo.UpdateAsync(
@@ -1366,13 +1384,14 @@ public class AgentOrchestrationService(
             await PublishWorkItemsUpdatedAsync();
             await PublishProjectsUpdatedAsync();
 
-            await WriteLogEntryAsync(
-                scopedDb,
-                projectId,
-                "System",
-                "success",
-                $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s).",
-                executionId: executionId);
+            await WithDbLockAsync(async () =>
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "success",
+                    $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s).",
+                    executionId: executionId));
             await PublishLogsUpdatedAsync();
             await scopedNotificationService.PublishAsync(
                 userId,
@@ -1437,21 +1456,6 @@ public class AgentOrchestrationService(
                 : retryPlan.CarryForwardOutputs.ToDictionary(entry => entry.Key, entry => entry.Value);
             var currentRawOutputsByRole = new Dictionary<AgentRole, string>();
             var orchestrationExecution = IsOrchestrationPrelude(pipeline);
-            using var dbLock = new SemaphoreSlim(1, 1);
-
-            async Task WithDbLockAsync(Func<Task> action)
-            {
-                await dbLock.WaitAsync(externalCancellation);
-                try
-                {
-                    ThrowIfExecutionDeleted(executionId);
-                    await action();
-                }
-                finally
-                {
-                    dbLock.Release();
-                }
-            }
 
             static string BuildSteeringBlock(IReadOnlyList<string> notes)
             {
@@ -1499,13 +1503,14 @@ public class AgentOrchestrationService(
                             ? "paused execution context"
                             : "retry context"
                         : $"review remediation cycle {reviewLoopCount}";
-                    await WriteLogEntryAsync(
-                        scopedDb,
-                        projectId,
-                        "System",
-                        "info",
-                        $"Carrying forward completed phases from {carriedRoleLabel}: {string.Join(", ", pipeline.SelectMany(g => g).Where(carriedRoles.Contains))}",
-                        executionId: executionId);
+                    await WithDbLockAsync(async () =>
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Carrying forward completed phases from {carriedRoleLabel}: {string.Join(", ", pipeline.SelectMany(g => g).Where(carriedRoles.Contains))}",
+                            executionId: executionId));
                     await PublishLogsUpdatedAsync();
                 }
 
@@ -1976,11 +1981,12 @@ public class AgentOrchestrationService(
                 var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
                 if (directChildWorkItems.Count > 0)
                 {
-                    await TransitionExecutionToOrchestrationModeAsync(
-                        scopedDb,
-                        executionId,
-                        directChildWorkItems,
-                        currentCycleCarryForwardOutputs);
+                    await WithDbLockAsync(async () =>
+                        await TransitionExecutionToOrchestrationModeAsync(
+                            scopedDb,
+                            executionId,
+                            directChildWorkItems,
+                            currentCycleCarryForwardOutputs));
                     await PublishAgentsUpdatedAsync();
                     await ExecuteSubFlowsAsync(workItem, directChildWorkItems);
                     return;
@@ -2068,7 +2074,7 @@ public class AgentOrchestrationService(
             if (IsExecutionDeleted(executionId))
                 return;
 
-            await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl);
+            await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed", prUrl));
             await PublishAgentsUpdatedAsync();
             await scopedNotificationService.PublishAsync(
                 userId,
@@ -2107,14 +2113,15 @@ public class AgentOrchestrationService(
 
             await PublishWorkItemsUpdatedAsync();
             await PublishProjectsUpdatedAsync();
-            await WriteLogEntryAsync(
-                scopedDb,
-                projectId,
-                "System",
-                "success",
-                $"Execution {executionId} completed successfully" +
-                (prUrl is not null ? $" -- PR: {prUrl}" : ""),
-                executionId: executionId);
+            await WithDbLockAsync(async () =>
+                await WriteLogEntryAsync(
+                    scopedDb,
+                    projectId,
+                    "System",
+                    "success",
+                    $"Execution {executionId} completed successfully" +
+                    (prUrl is not null ? $" -- PR: {prUrl}" : ""),
+                    executionId: executionId));
             await PublishLogsUpdatedAsync();
 
             logger.LogInformation("Execution {ExecutionId}: pipeline completed successfully", executionId);
@@ -2132,15 +2139,16 @@ public class AgentOrchestrationService(
             try
             {
                 await StopDescendantExecutionsAsync(finalStatus);
-                await FinalizeExecutionAsync(scopedDb, executionId, finalStatus);
+                await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, finalStatus));
                 await PublishAgentsUpdatedAsync();
-                await WriteLogEntryAsync(
-                    scopedDb,
-                    projectId,
-                    "System",
-                    "warn",
-                    $"Execution {executionId} was {finalStatus} by user",
-                    executionId: executionId);
+                await WithDbLockAsync(async () =>
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "warn",
+                        $"Execution {executionId} was {finalStatus} by user",
+                        executionId: executionId));
                 await PublishLogsUpdatedAsync();
                 if (finalStatus == "paused")
                 {
@@ -2191,15 +2199,16 @@ public class AgentOrchestrationService(
             // (e.g., broken DB connection) doesn't mask the original error.
             try
             {
-                await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message);
+                await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "failed", errorMessage: ex.Message));
                 await PublishAgentsUpdatedAsync();
-                await WriteLogEntryAsync(
-                    scopedDb,
-                    projectId,
-                    "System",
-                    "error",
-                    $"Execution {executionId} failed: {ex.Message}",
-                    executionId: executionId);
+                await WithDbLockAsync(async () =>
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "error",
+                        $"Execution {executionId} failed: {ex.Message}",
+                        executionId: executionId));
                 await PublishLogsUpdatedAsync();
                 await scopedNotificationService.PublishAsync(
                     userId,
@@ -2741,6 +2750,90 @@ public class AgentOrchestrationService(
             return null;
 
         return assignedAgentCount.Value;
+    }
+
+    private sealed class ExecutionDbRequestQueue : IAsyncDisposable
+    {
+        private readonly Channel<IQueuedDbRequest> _channel = Channel.CreateUnbounded<IQueuedDbRequest>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+
+        private readonly Task _processorTask;
+
+        public ExecutionDbRequestQueue()
+        {
+            _processorTask = Task.Run(ProcessAsync);
+        }
+
+        public async Task EnqueueAsync(Func<Task> action)
+        {
+            var request = new QueuedDbRequest<object?>(async () =>
+            {
+                await action();
+                return null;
+            });
+
+            await _channel.Writer.WriteAsync(request);
+            await request.Completion;
+        }
+
+        public async Task<T> EnqueueAsync<T>(Func<Task<T>> action)
+        {
+            var request = new QueuedDbRequest<T>(action);
+            await _channel.Writer.WriteAsync(request);
+            return await request.Completion;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _channel.Writer.TryComplete();
+            await _processorTask;
+        }
+
+        private async Task ProcessAsync()
+        {
+            await foreach (var request in _channel.Reader.ReadAllAsync())
+            {
+                await request.ExecuteAsync();
+            }
+        }
+
+        private interface IQueuedDbRequest
+        {
+            Task ExecuteAsync();
+        }
+
+        private sealed class QueuedDbRequest<T>(Func<Task<T>> action) : IQueuedDbRequest
+        {
+            private readonly TaskCompletionSource<T> _completion =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task<T> Completion => _completion.Task;
+
+            public async Task ExecuteAsync()
+            {
+                try
+                {
+                    var result = await action();
+                    _completion.TrySetResult(result);
+                }
+                catch (OperationCanceledException canceled) when (canceled.CancellationToken.CanBeCanceled)
+                {
+                    _completion.TrySetCanceled(canceled.CancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    _completion.TrySetCanceled();
+                }
+                catch (Exception ex)
+                {
+                    _completion.TrySetException(ex);
+                }
+            }
+        }
     }
 
     internal static List<(AgentRole Role, string Output)> BuildCarryForwardPhaseOutputs(
