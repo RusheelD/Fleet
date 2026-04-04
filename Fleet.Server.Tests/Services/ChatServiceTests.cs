@@ -644,6 +644,7 @@ public class ChatServiceTests
         var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
         var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Generated work items", "now");
         var assistantPersisted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var generationCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
             .ReturnsAsync(userMsg);
@@ -656,6 +657,16 @@ public class ChatServiceTests
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items", It.IsAny<string?>()))
             .ReturnsAsync(assistantMsg)
             .Callback(() => assistantPersisted.TrySetResult());
+        _chatRepo.Setup(r => r.UpdateSessionGenerationStateAsync(
+                ProjectId,
+                SessionId,
+                false,
+                ChatGenerationStates.Completed,
+                "Work-item generation completed.",
+                It.IsAny<ChatSessionActivityDto?>(),
+                It.IsAny<string?>()))
+            .Returns(Task.CompletedTask)
+            .Callback(() => generationCompleted.TrySetResult());
 
         var toolCalls = new List<LLMToolCall>
         {
@@ -685,6 +696,7 @@ public class ChatServiceTests
         Assert.IsTrue(response.IsDeferred);
         Assert.IsNull(response.AssistantMessage);
         await assistantPersisted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await generationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         _chatRepo.Verify(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Generated work items", It.IsAny<string?>()), Times.Once);
         _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
