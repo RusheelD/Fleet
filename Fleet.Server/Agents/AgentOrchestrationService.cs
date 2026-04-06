@@ -1051,7 +1051,9 @@ public class AgentOrchestrationService(
                             accessToken,
                             repoFullName,
                             branch,
-                            cancellationToken);
+                            cancellationToken,
+                            projectId: projectId,
+                            excludedExecutionIds: descendantExecutionIds.Append(executionId).ToArray());
                     }
                 }
                 catch (Exception ex)
@@ -1536,7 +1538,8 @@ public class AgentOrchestrationService(
                         repoFullName,
                         childBranchName,
                         externalCancellation,
-                        protectedBranchName: sandbox.BranchName);
+                        protectedBranchName: sandbox.BranchName,
+                        projectId: projectId);
                 }
 
                 completedSubFlows += terminalExecutions.Length;
@@ -4457,7 +4460,8 @@ public class AgentOrchestrationService(
                 repoFullName,
                 staleBranch,
                 cancellationToken,
-                protectedBranchName);
+                protectedBranchName,
+                projectId: projectId);
         }
     }
 
@@ -4466,7 +4470,9 @@ public class AgentOrchestrationService(
         string repoFullName,
         string? branchName,
         CancellationToken cancellationToken,
-        string? protectedBranchName = null)
+        string? protectedBranchName = null,
+        string? projectId = null,
+        IReadOnlyCollection<string>? excludedExecutionIds = null)
     {
         var normalizedBranchName = branchName?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedBranchName))
@@ -4479,6 +4485,25 @@ public class AgentOrchestrationService(
             string.Equals(normalizedBranchName, protectedBranchName, StringComparison.OrdinalIgnoreCase))
         {
             return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            var branchStillInUse = await db.AgentExecutions
+                .AsNoTracking()
+                .Where(execution =>
+                    execution.ProjectId == projectId &&
+                    execution.BranchName == normalizedBranchName &&
+                    (execution.Status == "running" || execution.Status == "paused"))
+                .Where(execution => excludedExecutionIds == null || !excludedExecutionIds.Contains(execution.Id))
+                .AnyAsync(cancellationToken);
+            if (branchStillInUse)
+            {
+                logger.LogInformation(
+                    "Skipping cleanup of branch {Branch} because another recoverable execution still references it",
+                    normalizedBranchName);
+                return;
+            }
         }
 
         try
