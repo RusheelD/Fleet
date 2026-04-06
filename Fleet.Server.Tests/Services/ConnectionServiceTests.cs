@@ -538,7 +538,7 @@ public class ConnectionServiceTests
         using (var createPayload = JsonDocument.Parse(sentRequests[0].Body!))
         {
             Assert.AreEqual("demo-repo", createPayload.RootElement.GetProperty("name").GetString());
-            Assert.AreEqual(false, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
+            Assert.AreEqual(true, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
         }
 
         Assert.IsTrue(
@@ -633,7 +633,7 @@ public class ConnectionServiceTests
     }
 
     [TestMethod]
-    public async Task CreateGitHubRepositoryAsync_BootstrapsEmptyRepositoryWithInitialReadmeCommit()
+    public async Task CreateGitHubRepositoryAsync_WaitsForAutoInitializedBranchBeforeWritingReadme()
     {
         var account = new LinkedAccount
         {
@@ -664,10 +664,9 @@ public class ConnectionServiceTests
                 }
                 """),
             JsonResponse(HttpStatusCode.Conflict, """{ "message": "Git Repository is empty." }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "blob-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "tree-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "sha": "commit-sha" }"""),
-            JsonResponse(HttpStatusCode.Created, """{ "ref": "refs/heads/main", "object": { "sha": "commit-sha" } }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "ref": "refs/heads/main" }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "sha": "existing-readme-sha" }"""),
+            JsonResponse(HttpStatusCode.OK, """{ "content": { "sha": "new-readme-sha" }, "commit": { "sha": "commit-sha" } }"""),
         ]);
 
         var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
@@ -697,29 +696,30 @@ public class ConnectionServiceTests
             new CreateGitHubRepositoryRequest("brand-new-repo", "Fresh start", false, null));
 
         Assert.AreEqual("octocat/brand-new-repo", result.FullName);
-        Assert.AreEqual(6, sentRequests.Count);
+        Assert.AreEqual(5, sentRequests.Count);
         Assert.IsTrue(sentRequests[1].Url.EndsWith("/repos/octocat/brand-new-repo/git/ref/heads/main", StringComparison.Ordinal));
-        Assert.IsTrue(sentRequests[2].Url.EndsWith("/repos/octocat/brand-new-repo/git/blobs", StringComparison.Ordinal));
-        Assert.IsTrue(sentRequests[3].Url.EndsWith("/repos/octocat/brand-new-repo/git/trees", StringComparison.Ordinal));
-        Assert.IsTrue(sentRequests[4].Url.EndsWith("/repos/octocat/brand-new-repo/git/commits", StringComparison.Ordinal));
-        Assert.IsTrue(sentRequests[5].Url.EndsWith("/repos/octocat/brand-new-repo/git/refs", StringComparison.Ordinal));
-        Assert.IsFalse(sentRequests.Any(request => request.Url.Contains("/contents/README.md", StringComparison.Ordinal)));
+        Assert.IsTrue(sentRequests[2].Url.EndsWith("/repos/octocat/brand-new-repo/git/ref/heads/main", StringComparison.Ordinal));
+        Assert.IsTrue(sentRequests[3].Url.EndsWith("/repos/octocat/brand-new-repo/contents/README.md?ref=main", StringComparison.Ordinal));
+        Assert.IsTrue(sentRequests[4].Url.EndsWith("/repos/octocat/brand-new-repo/contents/README.md", StringComparison.Ordinal));
+        Assert.IsFalse(sentRequests.Any(request => request.Url.Contains("/git/blobs", StringComparison.Ordinal)));
+        Assert.IsFalse(sentRequests.Any(request => request.Url.Contains("/git/trees", StringComparison.Ordinal)));
+        Assert.IsFalse(sentRequests.Any(request => request.Url.Contains("/git/commits", StringComparison.Ordinal)));
+        Assert.IsFalse(sentRequests.Any(request => request.Url.Contains("/git/refs", StringComparison.Ordinal)));
 
         using (var createPayload = JsonDocument.Parse(sentRequests[0].Body!))
         {
-            Assert.AreEqual(false, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
+            Assert.AreEqual(true, createPayload.RootElement.GetProperty("auto_init").GetBoolean());
         }
 
-        using (var blobPayload = JsonDocument.Parse(sentRequests[2].Body!))
+        using (var putPayload = JsonDocument.Parse(sentRequests[4].Body!))
         {
-            Assert.AreEqual("utf-8", blobPayload.RootElement.GetProperty("encoding").GetString());
-            Assert.AreEqual("# brand-new-repo\n\nFresh start\n", blobPayload.RootElement.GetProperty("content").GetString());
-        }
+            Assert.AreEqual("chore: initialize repository", putPayload.RootElement.GetProperty("message").GetString());
+            Assert.AreEqual("main", putPayload.RootElement.GetProperty("branch").GetString());
+            Assert.AreEqual("existing-readme-sha", putPayload.RootElement.GetProperty("sha").GetString());
 
-        using (var refPayload = JsonDocument.Parse(sentRequests[5].Body!))
-        {
-            Assert.AreEqual("refs/heads/main", refPayload.RootElement.GetProperty("ref").GetString());
-            Assert.AreEqual("commit-sha", refPayload.RootElement.GetProperty("sha").GetString());
+            var encodedContent = putPayload.RootElement.GetProperty("content").GetString();
+            var decodedContent = Encoding.UTF8.GetString(Convert.FromBase64String(encodedContent!));
+            Assert.AreEqual("# brand-new-repo\n\nFresh start\n", decodedContent);
         }
     }
 
