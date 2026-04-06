@@ -56,6 +56,7 @@ import {
     WORK_ITEM_ASSIGNMENT_OPTION_LABELS,
     getWorkItemAssignmentSettings,
 } from './workItemAssignmentOptions'
+import { collectDescendantWorkItemNumbers } from './workItemSelection'
 
 const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
 
@@ -628,6 +629,10 @@ export function WorkItemsPage() {
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
     const selectedCount = selectedWorkItemNumbers.size
     const canApplyBulkChanges = selectedCount > 0 && (bulkState !== '' || bulkAssignmentLabel !== '')
+    const descendantSelection = useMemo(
+        () => collectDescendantWorkItemNumbers(workItems ?? [], selectedWorkItemNumbers),
+        [selectedWorkItemNumbers, workItems],
+    )
 
     const handleApplyBulkChanges = useCallback(() => {
         if (!canApplyBulkChanges) {
@@ -695,6 +700,14 @@ export function WorkItemsPage() {
             },
         })
     }, [bulkDeleteMutation, clearSelection, selectedItem, selectedWorkItemNumbers])
+
+    const handleSelectDescendants = useCallback(() => {
+        if (descendantSelection.length === 0) {
+            return
+        }
+
+        toggleSelectionForItems(descendantSelection, true)
+    }, [descendantSelection, toggleSelectionForItems])
 
     if (isLoading) {
         return (
@@ -963,6 +976,16 @@ export function WorkItemsPage() {
                                                 <Option key={label} value={label}>{label}</Option>
                                             ))}
                                         </Dropdown>
+                                        <Button
+                                            appearance="secondary"
+                                            size="small"
+                                            disabled={descendantSelection.length === 0}
+                                            onClick={handleSelectDescendants}
+                                        >
+                                            {descendantSelection.length > 0
+                                                ? `Select Descendants (${descendantSelection.length})`
+                                                : 'Select Descendants'}
+                                        </Button>
                                         <Button
                                             appearance="primary"
                                             size="small"

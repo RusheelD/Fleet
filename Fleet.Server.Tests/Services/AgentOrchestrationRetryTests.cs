@@ -349,6 +349,25 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsTrue_ForHighDifficultyNestedParallelBranches()
+    {
+        var parent = CreateWorkItem(74, "Cross-platform workspace revamp", 5, childNumbers: [75, 76, 77]);
+        var childA = CreateWorkItem(75, "Desktop shell rewrite", 5, parent: 74, childNumbers: [78, 79]);
+        var childB = CreateWorkItem(76, "Mobile workspace parity", 4, parent: 74, childNumbers: [80]);
+        var childC = CreateWorkItem(77, "Release docs", 2, parent: 74);
+        var grandchildA1 = CreateWorkItem(78, "Window management", 4, parent: 75);
+        var grandchildA2 = CreateWorkItem(79, "Navigation state", 3, parent: 75);
+        var grandchildB1 = CreateWorkItem(80, "Responsive execution cards", 3, parent: 76);
+        var descendants = new[] { childA, childB, childC, grandchildA1, grandchildA2, grandchildB1 };
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            new[] { childA, childB, childC },
+            descendants,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
     public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_WhenExecutionDepthLimitReached()
     {
         var parent = CreateWorkItem(80, "Deep parent feature", 5, childNumbers: [81, 82]);
@@ -361,6 +380,43 @@ public class AgentOrchestrationRetryTests
             descendants,
             descendants,
             AgentOrchestrationService.MaxSubFlowExecutionDepth));
+    }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsTrue_ForHighDifficultyNestedParallelPlan()
+    {
+        var workItem = CreateWorkItem(90, "Platform-wide sync overhaul", 5);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Split the platform work into meaningful parallel branches",
+            [
+                new GeneratedSubFlowSpec(
+                    "Desktop sync engine",
+                    "Rebuild the desktop sync shell and orchestration.",
+                    1,
+                    5,
+                    [],
+                    "",
+                    [
+                        new GeneratedSubFlowSpec("Window lifecycle", "Handle shell lifecycle.", 2, 4, [], "", []),
+                        new GeneratedSubFlowSpec("Navigation persistence", "Preserve navigation state.", 2, 3, [], "", []),
+                    ]),
+                new GeneratedSubFlowSpec(
+                    "Mobile sync experience",
+                    "Bring mobile workflow parity.",
+                    1,
+                    4,
+                    [],
+                    "",
+                    [
+                        new GeneratedSubFlowSpec("Responsive run cards", "Support the compact UI.", 2, 3, [], "", []),
+                    ]),
+                new GeneratedSubFlowSpec("Release notes", "Document the rollout.", 3, 2, [], "", []),
+            ]);
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            executionDepth: 0));
     }
 
     private static Models.WorkItemDto CreateWorkItem(

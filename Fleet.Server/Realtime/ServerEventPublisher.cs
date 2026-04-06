@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Fleet.Server.Realtime;
 
@@ -69,8 +70,15 @@ public sealed class ServerEventPublisher(
                     !cancellationToken.IsCancellationRequested &&
                     keepAliveCts.IsCancellationRequested)
                 {
-                    await response.WriteAsync($": keepalive {DateTime.UtcNow:O}\n\n", cancellationToken);
-                    await response.Body.FlushAsync(cancellationToken);
+                    await WriteEventAsync(
+                        response,
+                        new ServerEventEnvelope(
+                            ServerEventTopics.Heartbeat,
+                            JsonSerializer.Serialize(new
+                            {
+                                timestampUtc = DateTime.UtcNow,
+                            })),
+                        cancellationToken);
                 }
             }
         }
@@ -148,11 +156,13 @@ public sealed class ServerEventPublisher(
 
     private static void ConfigureSseHeaders(HttpResponse response)
     {
+        response.HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
         response.StatusCode = StatusCodes.Status200OK;
         response.ContentType = "text/event-stream";
         response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
         response.Headers["Connection"] = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no";
+        response.Headers["Content-Encoding"] = "identity";
     }
 
     private static async Task WriteEventAsync(

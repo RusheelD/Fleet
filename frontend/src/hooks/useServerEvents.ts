@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
-import type { ChatData, ChatSessionActivity, ChatSessionData } from '../models'
+import type { AgentExecution, ChatData, ChatSessionActivity, ChatSessionData } from '../models'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
 
 interface ServerEventMessage {
@@ -31,6 +31,82 @@ export interface ChatSessionEventPayload {
   generationStatus: string | null
   generationUpdatedAtUtc: string
   activity?: ChatSessionActivity | null
+}
+
+const SSE_STALE_AFTER_MS = 45_000
+
+interface AgentsUpdatedEventPayload {
+  projectId?: string | null
+  executionId?: string | null
+  execution?: AgentExecution | null
+}
+
+function normalizeExecutionTree(execution: AgentExecution): AgentExecution {
+  return {
+    ...execution,
+    subFlows: (execution.subFlows ?? []).map(normalizeExecutionTree),
+  }
+}
+
+function upsertExecutionCollection(
+  current: AgentExecution[],
+  incoming: AgentExecution,
+): { executions: AgentExecution[]; found: boolean } {
+  let found = false
+
+  const executions = current.map((execution) => {
+    if (execution.id === incoming.id) {
+      found = true
+      return incoming
+    }
+
+    if (incoming.parentExecutionId && execution.id === incoming.parentExecutionId) {
+      found = true
+      const existingChildren = execution.subFlows ?? []
+      const existingChildIndex = existingChildren.findIndex((child) => child.id === incoming.id)
+      const nextChildren = existingChildIndex >= 0
+        ? existingChildren.map((child, index) => (index === existingChildIndex ? incoming : child))
+        : [incoming, ...existingChildren]
+
+      return {
+        ...execution,
+        subFlows: nextChildren,
+      }
+    }
+
+    if ((execution.subFlows?.length ?? 0) > 0) {
+      const nested = upsertExecutionCollection(execution.subFlows ?? [], incoming)
+      if (nested.found) {
+        found = true
+        return {
+          ...execution,
+          subFlows: nested.executions,
+        }
+      }
+    }
+
+    return execution
+  })
+
+  return { executions, found }
+}
+
+function queryKeyMatchesProject(queryKey: readonly unknown[], projectId?: string | null): boolean {
+  if (!projectId) {
+    return true
+  }
+
+  const paramsBlob = queryKey[1]
+  if (typeof paramsBlob !== 'string') {
+    return true
+  }
+
+  try {
+    const parsed = JSON.parse(paramsBlob)
+    return Array.isArray(parsed) ? parsed[0] === projectId : true
+  } catch {
+    return true
+  }
 }
 
 function parseEventBlock(block: string): ServerEventMessage | null {
@@ -250,6 +326,36 @@ export function useServerEvents(projectId?: string) {
       )
     }
 
+    const updateExecutionCaches = (payload: AgentsUpdatedEventPayload) => {
+      if (!payload.execution) {
+        return
+      }
+
+      const incomingExecution = normalizeExecutionTree(payload.execution)
+      const executionQueries = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+
+      for (const [queryKey, snapshot] of executionQueries) {
+        if (!Array.isArray(snapshot)) {
+          continue
+        }
+
+        const queryKeyParts = Array.isArray(queryKey) ? queryKey : [queryKey]
+        if (!queryKeyMatchesProject(queryKeyParts, payload.projectId)) {
+          continue
+        }
+
+        const updated = upsertExecutionCollection(snapshot, incomingExecution)
+        if (updated.found) {
+          queryClient.setQueryData(queryKey, updated.executions)
+          continue
+        }
+
+        if (!incomingExecution.parentExecutionId) {
+          queryClient.setQueryData(queryKey, [incomingExecution, ...snapshot])
+        }
+      }
+    }
+
     const invalidateForTopicNow = (topic: string) => {
       if (topic === 'connected') {
         refreshMany(['executions', 'logs', 'work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
@@ -263,6 +369,10 @@ export function useServerEvents(projectId?: string) {
 
       if (topic === 'notifications.updated') {
         refreshQuery('notifications')
+        return
+      }
+
+      if (topic === 'heartbeat') {
         return
       }
 
@@ -326,11 +436,35 @@ export function useServerEvents(projectId?: string) {
       while (!cancelled) {
         const controller = new AbortController()
         activeController = controller
+        let staleTimerId: number | null = null
+
+        const resetStaleTimer = () => {
+          if (staleTimerId !== null) {
+            window.clearTimeout(staleTimerId)
+          }
+
+          staleTimerId = window.setTimeout(() => {
+            if (cancelled || controller.signal.aborted) {
+              return
+            }
+
+            console.warn('SSE stream became stale; forcing reconnect.')
+            controller.abort()
+          }, SSE_STALE_AFTER_MS)
+        }
 
         try {
+          resetStaleTimer()
           await streamServerEvents(
             streamPath,
             ({ eventName, data }) => {
+              reconnectDelayMs = 1000
+              resetStaleTimer()
+
+              if (eventName === 'agents.updated') {
+                updateExecutionCaches(data as AgentsUpdatedEventPayload)
+              }
+
               if (eventName === 'chat.session-event') {
                 const detail = data as ChatSessionEventPayload
                 updateChatSessionCaches(detail)
@@ -355,6 +489,10 @@ export function useServerEvents(projectId?: string) {
         } catch (error) {
           if (!cancelled) {
             console.warn('SSE stream disconnected; retrying.', error)
+          }
+        } finally {
+          if (staleTimerId !== null) {
+            window.clearTimeout(staleTimerId)
           }
         }
 

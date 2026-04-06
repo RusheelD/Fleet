@@ -48,6 +48,14 @@ public class AgentOrchestrationService(
         "Resolved (AI)",
         "Closed",
     };
+    private static readonly HashSet<string> ProtectedBranchNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "main",
+        "master",
+        "develop",
+        "development",
+        "release",
+    };
 
     /// <summary>
     /// Tracks CancellationTokenSources for active executions so they can be cancelled/paused externally.
@@ -303,6 +311,27 @@ public class AgentOrchestrationService(
         _ => 8192,
     };
 
+    private static AgentExecutionDto CreateInitializationExecutionDto(AgentExecution execution)
+        => new(
+            execution.Id,
+            execution.WorkItemId,
+            execution.WorkItemTitle,
+            string.IsNullOrWhiteSpace(execution.ExecutionMode) ? AgentExecutionModes.Standard : execution.ExecutionMode,
+            execution.Status,
+            [.. execution.Agents.Select(agent => new AgentInfoDto(
+                agent.Role.ToString(),
+                agent.Status,
+                agent.CurrentTask,
+                agent.Progress))],
+            execution.StartedAt,
+            string.IsNullOrWhiteSpace(execution.Duration) ? "just now" : execution.Duration,
+            execution.Progress,
+            execution.BranchName,
+            execution.PullRequestUrl,
+            execution.CurrentPhase,
+            ParentExecutionId: execution.ParentExecutionId,
+            SubFlows: []);
+
     public Task<string> StartExecutionAsync(
         string projectId,
         int workItemNumber,
@@ -478,6 +507,16 @@ public class AgentOrchestrationService(
             else
             {
                 var plannedBranch = BuildBranchName(project.BranchPattern, workItemNumber, workItem.Title);
+                if (string.IsNullOrWhiteSpace(parentExecutionId))
+                {
+                    await CleanupStaleTopLevelBranchesAsync(
+                        projectId,
+                        workItemNumber,
+                        accessToken,
+                        repoFullName,
+                        pullRequestTargetBranch,
+                        cancellationToken);
+                }
                 branchName = await ResolveUniqueBranchNameAsync(accessToken, repoFullName, plannedBranch, cancellationToken);
             }
 
@@ -525,7 +564,12 @@ public class AgentOrchestrationService(
                 userId,
                 projectId,
                 ServerEventTopics.AgentsUpdated,
-                new { projectId, executionId },
+                new
+                {
+                    projectId,
+                    executionId,
+                    execution = CreateInitializationExecutionDto(execution),
+                },
                 cancellationToken);
 
             // 9. Mark the work item as in-progress
@@ -937,7 +981,7 @@ public class AgentOrchestrationService(
         var execution = await db.AgentExecutions
             .AsNoTracking()
             .Where(e => e.ProjectId == projectId && e.Id == executionId)
-            .Select(e => new { e.Id, e.Status })
+            .Select(e => new { e.Id, e.Status, e.BranchName, e.UserId })
             .FirstOrDefaultAsync(cancellationToken);
         if (execution is null)
             return null;
@@ -946,6 +990,13 @@ public class AgentOrchestrationService(
             throw new InvalidOperationException("Completed runs cannot be deleted.");
 
         var descendantExecutionIds = await CollectDescendantExecutionIdsAsync(db, projectId, executionId, cancellationToken);
+        var descendantBranches = descendantExecutionIds.Count == 0
+            ? []
+            : await db.AgentExecutions
+                .AsNoTracking()
+                .Where(e => e.ProjectId == projectId && descendantExecutionIds.Contains(e.Id))
+                .Select(e => e.BranchName)
+                .ToListAsync(cancellationToken);
         DeletedExecutions[executionId] = 0;
         foreach (var descendantExecutionId in descendantExecutionIds)
             DeletedExecutions[descendantExecutionId] = 0;
@@ -969,6 +1020,49 @@ public class AgentOrchestrationService(
         }
 
         var deletionResult = await agentTaskRepository.DeleteExecutionAsync(projectId, executionId);
+
+        if (deletionResult is not null &&
+            IsBranchCleanupEligibleStatus(execution.Status) &&
+            int.TryParse(execution.UserId, out var executionUserId))
+        {
+            var repoFullName = await db.Projects
+                .AsNoTracking()
+                .Where(project => project.Id == projectId)
+                .Select(project => project.Repo)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(repoFullName))
+            {
+                try
+                {
+                    var accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                        executionUserId,
+                        repoFullName,
+                        cancellationToken);
+                    var branchesToCleanup = descendantBranches
+                        .Append(execution.BranchName)
+                        .Where(branch => !string.IsNullOrWhiteSpace(branch))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+
+                    foreach (var branch in branchesToCleanup)
+                    {
+                        await TryDeleteRemoteBranchIfSafeAsync(
+                            accessToken,
+                            repoFullName,
+                            branch,
+                            cancellationToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Execution {ExecutionId}: failed to clean up remote branches while deleting the run",
+                        executionId);
+                }
+            }
+        }
 
         if (!ActiveExecutions.ContainsKey(executionId))
             DeletedExecutions.TryRemove(executionId, out _);
@@ -1436,6 +1530,13 @@ public class AgentOrchestrationService(
                         commitAuthorName,
                         commitAuthorEmail,
                         externalCancellation);
+
+                    await TryDeleteRemoteBranchIfSafeAsync(
+                        accessToken,
+                        repoFullName,
+                        childBranchName,
+                        externalCancellation,
+                        protectedBranchName: sandbox.BranchName);
                 }
 
                 completedSubFlows += terminalExecutions.Length;
@@ -2579,22 +2680,54 @@ public class AgentOrchestrationService(
         if (HasSingleChildChain(workItem.WorkItemNumber, childLookup))
             return false;
 
-        var substantialDirectBranches = directChildWorkItems.Count(child =>
-        {
-            var directGrandchildren = GetDirectChildCount(child.WorkItemNumber, childLookup);
-            var leafDescendants = CountLeafWorkItems(child.WorkItemNumber, childLookup);
-            return child.Difficulty >= 3 || directGrandchildren > 0 || leafDescendants > 1;
-        });
+        var branchAnalyses = directChildWorkItems
+            .Select(child =>
+            {
+                var directGrandchildren = GetDirectChildCount(child.WorkItemNumber, childLookup);
+                var leafDescendants = CountLeafWorkItems(child.WorkItemNumber, childLookup);
+                var branchDepth = CountWorkItemBranchDepth(child.WorkItemNumber, childLookup);
+                var complexityScore = ComputeExistingBranchComplexityScore(
+                    child.Difficulty,
+                    directGrandchildren,
+                    leafDescendants,
+                    branchDepth);
+
+                return new
+                {
+                    Child = child,
+                    DirectGrandchildren = directGrandchildren,
+                    LeafDescendants = leafDescendants,
+                    BranchDepth = branchDepth,
+                    ComplexityScore = complexityScore,
+                };
+            })
+            .ToArray();
+
+        var substantialDirectBranches = branchAnalyses.Count(branch =>
+            branch.Child.Difficulty >= 3 ||
+            branch.DirectGrandchildren > 0 ||
+            branch.LeafDescendants > 1);
         if (substantialDirectBranches < 2)
             return false;
 
-        var hasNestedChildren = directChildWorkItems.Any(child => GetDirectChildCount(child.WorkItemNumber, childLookup) > 0);
-        var totalDirectDifficulty = directChildWorkItems.Sum(child => child.Difficulty);
+        var hasNestedChildren = branchAnalyses.Any(branch => branch.DirectGrandchildren > 0);
+        var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.Child.Difficulty);
+        var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
+        var highValueParallelBranches = branchAnalyses.Count(branch =>
+            branch.Child.Difficulty >= 4 &&
+            (branch.DirectGrandchildren > 0 || branch.LeafDescendants > 1));
 
         if (!hasNestedChildren && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
             return false;
 
-        if (!hasNestedChildren && directChildWorkItems.All(child => child.Difficulty <= 3))
+        if (!hasNestedChildren && branchAnalyses.All(branch => branch.Child.Difficulty <= 3))
+            return false;
+
+        if (highValueParallelBranches >= 2)
+            return true;
+
+        var minimumComplexityThreshold = hasNestedChildren ? 11 : 13;
+        if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
         return true;
@@ -2630,10 +2763,33 @@ public class AgentOrchestrationService(
         if (CountGeneratedLeafSubFlows(generatedPlan.SubFlows) < 2)
             return false;
 
-        var substantialDirectBranches = generatedPlan.SubFlows.Count(subFlow =>
-            subFlow.Difficulty >= 3 ||
-            subFlow.SubFlows.Count > 0 ||
-            CountGeneratedLeafSubFlows(subFlow.SubFlows) > 1);
+        var branchAnalyses = generatedPlan.SubFlows
+            .Select(subFlow =>
+            {
+                var directChildren = subFlow.SubFlows.Count;
+                var leafDescendants = CountGeneratedLeafSubFlows(subFlow.SubFlows);
+                var branchDepth = CountGeneratedBranchDepth(subFlow);
+                var complexityScore = ComputeGeneratedBranchComplexityScore(
+                    subFlow.Difficulty,
+                    directChildren,
+                    leafDescendants,
+                    branchDepth);
+
+                return new
+                {
+                    SubFlow = subFlow,
+                    DirectChildren = directChildren,
+                    LeafDescendants = leafDescendants,
+                    BranchDepth = branchDepth,
+                    ComplexityScore = complexityScore,
+                };
+            })
+            .ToArray();
+
+        var substantialDirectBranches = branchAnalyses.Count(branch =>
+            branch.SubFlow.Difficulty >= 3 ||
+            branch.DirectChildren > 0 ||
+            branch.LeafDescendants > 1);
         if (substantialDirectBranches < 2)
             return false;
 
@@ -2641,12 +2797,23 @@ public class AgentOrchestrationService(
         if (!materiallyReducesComplexity)
             return false;
 
-        var hasNestedDirectBranch = generatedPlan.SubFlows.Any(subFlow => subFlow.SubFlows.Count > 0);
-        var totalDirectDifficulty = generatedPlan.SubFlows.Sum(subFlow => subFlow.Difficulty);
+        var hasNestedDirectBranch = branchAnalyses.Any(branch => branch.DirectChildren > 0);
+        var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.SubFlow.Difficulty);
+        var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
+        var highValueParallelBranches = branchAnalyses.Count(branch =>
+            branch.SubFlow.Difficulty >= 4 &&
+            (branch.DirectChildren > 0 || branch.LeafDescendants > 1));
         if (!hasNestedDirectBranch && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
             return false;
 
-        if (!hasNestedDirectBranch && generatedPlan.SubFlows.All(subFlow => subFlow.Difficulty <= 3))
+        if (!hasNestedDirectBranch && branchAnalyses.All(branch => branch.SubFlow.Difficulty <= 3))
+            return false;
+
+        if (highValueParallelBranches >= 2)
+            return true;
+
+        var minimumComplexityThreshold = hasNestedDirectBranch ? 11 : 9;
+        if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
         return true;
@@ -2676,6 +2843,46 @@ public class AgentOrchestrationService(
 
         return leafCount;
     }
+
+    private static int CountWorkItemBranchDepth(
+        int workItemNumber,
+        IReadOnlyDictionary<int, List<Models.WorkItemDto>> childLookup)
+    {
+        if (!childLookup.TryGetValue(workItemNumber, out var children) || children.Count == 0)
+            return 1;
+
+        return 1 + children.Max(child => CountWorkItemBranchDepth(child.WorkItemNumber, childLookup));
+    }
+
+    private static int ComputeExistingBranchComplexityScore(
+        int difficulty,
+        int directGrandchildren,
+        int leafDescendants,
+        int branchDepth)
+        => difficulty
+            + (difficulty >= 4 ? 2 : 0)
+            + Math.Min(2, directGrandchildren)
+            + Math.Min(2, Math.Max(0, leafDescendants - 1))
+            + Math.Min(2, Math.Max(0, branchDepth - 1));
+
+    private static int CountGeneratedBranchDepth(GeneratedSubFlowSpec subFlow)
+    {
+        if (subFlow.SubFlows.Count == 0)
+            return 1;
+
+        return 1 + subFlow.SubFlows.Max(CountGeneratedBranchDepth);
+    }
+
+    private static int ComputeGeneratedBranchComplexityScore(
+        int difficulty,
+        int directChildren,
+        int leafDescendants,
+        int branchDepth)
+        => difficulty
+            + (difficulty >= 4 ? 2 : 0)
+            + Math.Min(2, directChildren)
+            + Math.Min(2, Math.Max(0, leafDescendants - 1))
+            + Math.Min(2, Math.Max(0, branchDepth - 1));
 
     private static int GetDirectChildCount(
         int parentWorkItemNumber,
@@ -3991,6 +4198,10 @@ public class AgentOrchestrationService(
     private static bool CanDeleteExecutionStatus(string? status)
         => !string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsBranchCleanupEligibleStatus(string? status)
+        => string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsExecutionDeleted(string executionId)
         => DeletedExecutions.ContainsKey(executionId);
 
@@ -4217,6 +4428,132 @@ public class AgentOrchestrationService(
         }
 
         throw new InvalidOperationException("Unable to allocate a unique branch name after 100 attempts.");
+    }
+
+    private async Task CleanupStaleTopLevelBranchesAsync(
+        string projectId,
+        int workItemNumber,
+        string accessToken,
+        string repoFullName,
+        string protectedBranchName,
+        CancellationToken cancellationToken)
+    {
+        var staleBranches = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(execution =>
+                execution.ProjectId == projectId &&
+                execution.WorkItemId == workItemNumber &&
+                execution.ParentExecutionId == null &&
+                execution.BranchName != null &&
+                (execution.Status == "failed" || execution.Status == "cancelled"))
+            .Select(execution => execution.BranchName!)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var staleBranch in staleBranches)
+        {
+            await TryDeleteRemoteBranchIfSafeAsync(
+                accessToken,
+                repoFullName,
+                staleBranch,
+                cancellationToken,
+                protectedBranchName);
+        }
+    }
+
+    private async Task TryDeleteRemoteBranchIfSafeAsync(
+        string accessToken,
+        string repoFullName,
+        string? branchName,
+        CancellationToken cancellationToken,
+        string? protectedBranchName = null)
+    {
+        var normalizedBranchName = branchName?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedBranchName))
+            return;
+
+        if (ProtectedBranchNames.Contains(normalizedBranchName))
+            return;
+
+        if (!string.IsNullOrWhiteSpace(protectedBranchName) &&
+            string.Equals(normalizedBranchName, protectedBranchName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var openPr = await FindOpenPullRequestByHeadBranchAsync(
+                accessToken,
+                repoFullName,
+                normalizedBranchName,
+                cancellationToken);
+            if (openPr.Number > 0)
+            {
+                logger.LogInformation(
+                    "Skipping cleanup of branch {Branch} because it still has an open PR ({PullRequestUrl})",
+                    normalizedBranchName,
+                    openPr.Url);
+                return;
+            }
+
+            var client = httpClientFactory.CreateClient("GitHub");
+            var deleted = await DeleteRemoteBranchAsync(
+                client,
+                accessToken,
+                repoFullName,
+                normalizedBranchName,
+                cancellationToken);
+            if (deleted)
+            {
+                logger.LogInformation(
+                    "Deleted stale Fleet branch {Branch} in repository {RepoFullName}",
+                    normalizedBranchName,
+                    repoFullName);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to clean up stale Fleet branch {Branch} in repository {RepoFullName}",
+                normalizedBranchName,
+                repoFullName);
+        }
+    }
+
+    private static async Task<bool> DeleteRemoteBranchAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        var encodedBranch = Uri.EscapeDataString(branchName);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"https://api.github.com/repos/{repoFullName}/git/refs/heads/{encodedBranch}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return false;
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new InvalidOperationException(
+                "GitHub connection is no longer valid. Please re-link your GitHub account.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var details = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"GitHub branch cleanup failed for '{branchName}': {TryExtractGitHubApiErrorMessage(details) ?? details}");
+        }
+
+        return true;
     }
 
     private static async Task<bool> BranchExistsAsync(

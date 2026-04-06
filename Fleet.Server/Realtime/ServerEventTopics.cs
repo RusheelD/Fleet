@@ -3,6 +3,7 @@ namespace Fleet.Server.Realtime;
 public static class ServerEventTopics
 {
     public const string Connected = "connected";
+    public const string Heartbeat = "heartbeat";
     public const string NotificationsUpdated = "notifications.updated";
     public const string ChatUpdated = "chat.updated";
     public const string ChatSessionEvent = "chat.session-event";

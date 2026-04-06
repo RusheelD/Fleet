@@ -394,11 +394,14 @@ export function AgentMonitorPage() {
         startExecution.mutate({ workItemNumber, targetBranch }, {
             onSuccess: (result) => {
                 setDialogOpen(false)
+                setTab('active')
+                setSearchQuery('')
                 dispatchToast(
                     <Toast><ToastTitle>Agent execution started (ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
                 void refetchExec()
+                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(

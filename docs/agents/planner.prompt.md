@@ -119,6 +119,7 @@ Sub-flow rules:
 - Never emit a split plan that is just a single child, or a single-child chain that tunnels down to one component/task.
 - If a feature has only one real child branch, keep it as one execution.
 - Even with multiple components, prefer a single execution when the work is simple and closely coupled.
+- Good sub-flow candidates are 2-3 parallel D4/D5 branches that each own meaningful descendant work of their own.
 - Keep each node to at most 3 direct `subflows`.
 - Do not exceed 3 levels of sub-flow depth total.
 - The JSON block must be valid JSON and must appear at the very end of your output.
