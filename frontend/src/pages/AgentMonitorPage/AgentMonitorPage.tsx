@@ -13,6 +13,8 @@ import {
     useId,
     Toaster,
     Input,
+    Text,
+    Caption1,
 } from '@fluentui/react-components'
 import {
     BotRegular,
@@ -25,6 +27,7 @@ import {
     ArrowClockwiseRegular,
 } from '@fluentui/react-icons'
 import { FleetRocketLogo, PageHeader } from '../../components/shared'
+import { InfoBadge } from '../../components/shared/InfoBadge'
 import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
@@ -154,6 +157,43 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         minHeight: 0,
     },
+    executionPanelShell: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.md,
+        minHeight: 0,
+        flex: 1,
+        paddingTop: appTokens.space.lg,
+        paddingBottom: appTokens.space.lg,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        borderRadius: appTokens.radius.lg,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surface,
+    },
+    executionPanelShellCompact: {
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+    },
+    executionPanelHeader: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: appTokens.space.md,
+        flexWrap: 'wrap',
+    },
+    executionPanelHeaderMeta: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+    },
+    executionPanelSubtitle: {
+        color: appTokens.color.textTertiary,
+    },
     executionList: {
         flex: 1,
         overflow: 'auto',
@@ -181,6 +221,34 @@ const useStyles = makeStyles({
         width: '100%',
         flex: '1 1 100%',
         gridColumn: '1 / -1',
+    },
+    emptyExecutionState: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: appTokens.space.sm,
+        minHeight: '220px',
+        paddingTop: appTokens.space.xl,
+        paddingBottom: appTokens.space.xl,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        borderRadius: appTokens.radius.lg,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+        textAlign: 'center',
+    },
+    emptyExecutionStateIcon: {
+        color: appTokens.color.brand,
+    },
+    emptyExecutionStateBody: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        maxWidth: '28rem',
+    },
+    emptyExecutionStateDetail: {
+        color: appTokens.color.textTertiary,
     },
 })
 
@@ -243,6 +311,84 @@ export function AgentMonitorPage() {
 
         return filteredByTab.filter(matchesExecution)
     }, [filteredByTab, searchQuery])
+
+    const currentTabLabel = useMemo(() => {
+        switch (tab) {
+            case 'active':
+                return 'Active runs'
+            case 'paused':
+                return 'Paused runs'
+            case 'completed':
+                return 'Completed runs'
+            case 'failed':
+                return 'Failed runs'
+            case 'cancelled':
+                return 'Cancelled runs'
+            default:
+                return 'All runs'
+        }
+    }, [tab])
+
+    const executionPanelSubtitle = useMemo(() => {
+        if (searchQuery.trim()) {
+            return `Showing ${filteredExecutions.length} of ${filteredByTab.length} runs matching "${searchQuery.trim()}"`
+        }
+
+        if (filteredExecutions.length === 0) {
+            return `No runs are currently visible in ${currentTabLabel.toLowerCase()}.`
+        }
+
+        return `${filteredExecutions.length} run${filteredExecutions.length === 1 ? '' : 's'} in view`
+    }, [currentTabLabel, filteredByTab.length, filteredExecutions.length, searchQuery])
+
+    const emptyExecutionState = useMemo(() => {
+        if (searchQuery.trim()) {
+            return {
+                title: 'No runs match this search',
+                detail: 'Try a different work item number, agent role, or execution id to find the run you want.',
+            }
+        }
+
+        if (tab === 'active') {
+            return {
+                title: 'No active runs right now',
+                detail: 'Start a new run or resume a paused one to see live execution progress here.',
+            }
+        }
+
+        if (tab === 'paused') {
+            return {
+                title: 'No paused runs',
+                detail: 'Paused executions will show up here with resume controls when Fleet needs your attention.',
+            }
+        }
+
+        if (tab === 'completed') {
+            return {
+                title: 'No completed runs yet',
+                detail: 'Finished runs will appear here once Fleet ships work all the way through.',
+            }
+        }
+
+        if (tab === 'failed') {
+            return {
+                title: 'No failed runs',
+                detail: 'If a run hits a problem, this view will collect the failures so they are easy to retry.',
+            }
+        }
+
+        if (tab === 'cancelled') {
+            return {
+                title: 'No cancelled runs',
+                detail: 'User-cancelled runs will appear here along with their preserved logs and actions.',
+            }
+        }
+
+        return {
+            title: 'No runs yet',
+            detail: 'Start an execution to begin tracking Fleet activity, sub-flows, and logs in one place.',
+        }
+    }, [searchQuery, tab])
 
     const handleStartExecution = (workItemNumber: number, targetBranch: string) => {
         startExecution.mutate({ workItemNumber, targetBranch }, {
@@ -554,20 +700,46 @@ export function AgentMonitorPage() {
 
             <div className={mergeClasses(styles.mainContent, isDense && styles.mainContentCompact)}>
                 <div className={styles.executionPanel}>
-                    <div className={mergeClasses(styles.executionList, isDense && styles.executionListCompact)}>
-                        {filteredExecutions.map((execution) => (
-                            <ExecutionCard
-                                key={execution.id}
-                                execution={execution}
-                                workItems={workItems ?? []}
-                                onPause={handlePause}
-                                onCancel={handleCancel}
-                                onResume={handleResume}
-                                onRetry={handleRetry}
-                                onDelete={handleDelete}
-                                onViewDocs={handleViewDocs}
-                            />
-                        ))}
+                    <div className={mergeClasses(styles.executionPanelShell, isDense && styles.executionPanelShellCompact)}>
+                        <div className={styles.executionPanelHeader}>
+                            <div className={styles.executionPanelHeaderMeta}>
+                                <Text weight="semibold">{currentTabLabel}</Text>
+                                <Caption1 className={styles.executionPanelSubtitle}>{executionPanelSubtitle}</Caption1>
+                            </div>
+                            <InfoBadge appearance="tint" size="small">
+                                {filteredExecutions.length} result{filteredExecutions.length === 1 ? '' : 's'}
+                            </InfoBadge>
+                        </div>
+                        <div className={mergeClasses(styles.executionList, isDense && styles.executionListCompact)}>
+                            {filteredExecutions.length === 0 ? (
+                                <div className={styles.emptyExecutionState}>
+                                    <FleetRocketLogo
+                                        size={30}
+                                        title="No runs"
+                                        variant="outline"
+                                        className={styles.emptyExecutionStateIcon}
+                                    />
+                                    <div className={styles.emptyExecutionStateBody}>
+                                        <Text weight="semibold">{emptyExecutionState.title}</Text>
+                                        <Caption1 className={styles.emptyExecutionStateDetail}>{emptyExecutionState.detail}</Caption1>
+                                    </div>
+                                </div>
+                            ) : (
+                                filteredExecutions.map((execution) => (
+                                    <ExecutionCard
+                                        key={execution.id}
+                                        execution={execution}
+                                        workItems={workItems ?? []}
+                                        onPause={handlePause}
+                                        onCancel={handleCancel}
+                                        onResume={handleResume}
+                                        onRetry={handleRetry}
+                                        onDelete={handleDelete}
+                                        onViewDocs={handleViewDocs}
+                                    />
+                                ))
+                            )}
+                        </div>
                     </div>
                 </div>
 

@@ -199,6 +199,13 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ShouldCreatePullRequestForExecution_ReturnsFalse_ForSubFlowExecutions()
+    {
+        Assert.IsFalse(AgentOrchestrationService.ShouldCreatePullRequestForExecution("parent-execution"));
+        Assert.IsTrue(AgentOrchestrationService.ShouldCreatePullRequestForExecution(null));
+    }
+
+    [TestMethod]
     public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_ForSmallNestedTask()
     {
         var workItem = new Models.WorkItemDto(
@@ -277,4 +284,102 @@ public class AgentOrchestrationRetryTests
 
         Assert.IsTrue(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan));
     }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_WhenExecutionDepthLimitReached()
+    {
+        var workItem = CreateWorkItem(40, "Deep nested feature", 5);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Still trying to split",
+            [
+                new GeneratedSubFlowSpec("Backend", "API work", 2, 4, [], "", []),
+                new GeneratedSubFlowSpec("Frontend", "UI work", 2, 3, [], "", []),
+            ]);
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            AgentOrchestrationService.MaxSubFlowExecutionDepth));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_ForSingleChildChain()
+    {
+        var parent = CreateWorkItem(50, "Feature shell", 5, childNumbers: [51]);
+        var child = CreateWorkItem(51, "Only child", 4, parent: 50, childNumbers: [52]);
+        var grandchild = CreateWorkItem(52, "Leaf component", 3, parent: 51);
+        var descendants = new[] { child, grandchild };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            [child],
+            descendants,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_ForSimpleFeatureBranches()
+    {
+        var parent = CreateWorkItem(60, "Small feature", 4, childNumbers: [61, 62]);
+        var childA = CreateWorkItem(61, "Button copy tweak", 2, parent: 60);
+        var childB = CreateWorkItem(62, "Validation message tweak", 2, parent: 60);
+        var descendants = new[] { childA, childB };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            descendants,
+            descendants,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsTrue_ForComplexParallelBranches()
+    {
+        var parent = CreateWorkItem(70, "Large sync feature", 5, childNumbers: [71, 72]);
+        var childA = CreateWorkItem(71, "Server sync engine", 4, parent: 70, childNumbers: [73]);
+        var childB = CreateWorkItem(72, "Client sync UI", 3, parent: 70);
+        var grandchild = CreateWorkItem(73, "Conflict resolution", 3, parent: 71);
+        var descendants = new[] { childA, childB, grandchild };
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            new[] { childA, childB },
+            descendants,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_WhenExecutionDepthLimitReached()
+    {
+        var parent = CreateWorkItem(80, "Deep parent feature", 5, childNumbers: [81, 82]);
+        var childA = CreateWorkItem(81, "Backend branch", 4, parent: 80);
+        var childB = CreateWorkItem(82, "Frontend branch", 4, parent: 80);
+        var descendants = new[] { childA, childB };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            descendants,
+            descendants,
+            AgentOrchestrationService.MaxSubFlowExecutionDepth));
+    }
+
+    private static Models.WorkItemDto CreateWorkItem(
+        int number,
+        string title,
+        int difficulty,
+        int? parent = null,
+        params int[] childNumbers)
+        => new(
+            WorkItemNumber: number,
+            Title: title,
+            State: "New",
+            Priority: 2,
+            Difficulty: difficulty,
+            AssignedTo: "Fleet AI",
+            Tags: [],
+            IsAI: true,
+            Description: title,
+            ParentWorkItemNumber: parent,
+            ChildWorkItemNumbers: childNumbers,
+            LevelId: null);
 }

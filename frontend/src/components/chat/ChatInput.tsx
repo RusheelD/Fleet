@@ -187,6 +187,32 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: appTokens.space.xs,
         minWidth: 0,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+    },
+    statusRowRunning: {
+        borderTopColor: appTokens.color.brandStroke,
+        borderRightColor: appTokens.color.brandStroke,
+        borderBottomColor: appTokens.color.brandStroke,
+        borderLeftColor: appTokens.color.brandStroke,
+        backgroundColor: appTokens.color.surfaceSelected,
+    },
+    statusRowWarning: {
+        borderTopColor: appTokens.color.warning,
+        borderRightColor: appTokens.color.warning,
+        borderBottomColor: appTokens.color.warning,
+        borderLeftColor: appTokens.color.warning,
+    },
+    statusRowDanger: {
+        borderTopColor: appTokens.color.danger,
+        borderRightColor: appTokens.color.danger,
+        borderBottomColor: appTokens.color.danger,
+        borderLeftColor: appTokens.color.danger,
     },
     statusText: {
         color: appTokens.color.textSecondary,
@@ -313,7 +339,14 @@ export function ChatInput({
     return (
         <div className={mergeClasses(styles.inputArea, isCompact && styles.inputAreaCompact, isMobile && styles.inputAreaMobile)}>
             {showStatus && (
-                <div className={styles.statusRow}>
+                <div
+                    className={mergeClasses(
+                        styles.statusRow,
+                        statusState === 'running' && styles.statusRowRunning,
+                        (statusState === 'canceling' || statusState === 'canceled' || statusState === 'interrupted') && styles.statusRowWarning,
+                        statusState === 'failed' && styles.statusRowDanger,
+                    )}
+                >
                     {statusIcon}
                     <Caption1 className={mergeClasses(styles.statusText, isCompact && styles.statusTextCompact)}>
                         {statusMessage}

@@ -94,6 +94,23 @@ public interface IRepoSandbox : IAsyncDisposable
     Task CommitAndPushAsync(string accessToken, string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Merges a remote branch into the current sandbox branch, preferring the source branch on content conflicts.
+    /// </summary>
+    /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before fetching.</param>
+    /// <param name="sourceBranchName">The remote branch to merge into the current branch.</param>
+    /// <param name="authorName">Commit author name for the merge commit.</param>
+    /// <param name="authorEmail">Commit author email for the merge commit.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task MergeBranchAsync(string accessToken, string sourceBranchName, string authorName, string authorEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pushes the current branch to origin.
+    /// </summary>
+    /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before pushing.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task PushBranchAsync(string accessToken, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets a summary of all file changes since the branch was created.
     /// </summary>
     /// <returns>List of changed files with their status (added/modified/deleted).</returns>

@@ -105,4 +105,27 @@ public class SubFlowPlannerTests
 
         Assert.IsNull(parsed);
     }
+
+    [TestMethod]
+    public void Parse_ReturnsNull_WhenAnyNodeExceedsDirectChildLimit()
+    {
+        const string output = """
+            ```json
+            {
+              "split": true,
+              "reason": "Too many direct branches.",
+              "subflows": [
+                { "title": "Branch 1", "subflows": [] },
+                { "title": "Branch 2", "subflows": [] },
+                { "title": "Branch 3", "subflows": [] },
+                { "title": "Branch 4", "subflows": [] }
+              ]
+            }
+            ```
+            """;
+
+        var parsed = SubFlowPlanner.Parse(output);
+
+        Assert.IsNull(parsed);
+    }
 }

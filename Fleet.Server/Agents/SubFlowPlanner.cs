@@ -8,6 +8,7 @@ internal static partial class SubFlowPlanner
 {
     private const int MaxTotalSubFlows = 24;
     private const int MaxNestedDepth = 3;
+    private const int MaxDirectSubFlowsPerNode = AgentOrchestrationService.MaxSubFlowChildrenPerExecution;
 
     public static GeneratedSubFlowPlan? Parse(string? output)
     {
@@ -48,6 +49,9 @@ internal static partial class SubFlowPlanner
                 return null;
 
             if (GetMaxDepth(subFlows) > MaxNestedDepth)
+                return null;
+
+            if (HasNodeExceedingDirectChildLimit(subFlows))
                 return null;
 
             return new GeneratedSubFlowPlan(
@@ -100,6 +104,10 @@ internal static partial class SubFlowPlanner
         => specs.Any()
             ? specs.Max(spec => 1 + GetMaxDepth(spec.SubFlows))
             : 0;
+
+    private static bool HasNodeExceedingDirectChildLimit(IReadOnlyList<GeneratedSubFlowSpec> specs)
+        => specs.Count > MaxDirectSubFlowsPerNode ||
+           specs.Any(spec => HasNodeExceedingDirectChildLimit(spec.SubFlows));
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {

@@ -167,20 +167,21 @@ export function useServerEvents(projectId?: string) {
 
     const getMinIntervalMs = (topic: string): number => {
       if (topic === 'agents.updated' || topic === 'logs.updated') {
-        return 150
+        return 25
       }
 
       if (topic === 'work-items.updated') {
-        return 75
+        return 25
       }
 
       return 100
     }
 
     const refreshQuery = (queryName: string) => {
-      void queryClient.invalidateQueries({ queryKey: [queryName], refetchType: 'none' })
-      // Force active views to re-poll immediately when a stream message arrives.
-      void queryClient.refetchQueries({ queryKey: [queryName], type: 'active' })
+      void queryClient.invalidateQueries({ queryKey: [queryName], refetchType: 'active' })
+      // Refetch all matching queries so nested execution trees stay in sync even when the
+      // consuming view is mounted indirectly through shared layout state.
+      void queryClient.refetchQueries({ queryKey: [queryName], type: 'all' })
     }
 
     const refreshMany = (queryNames: readonly string[]) => {
@@ -251,7 +252,7 @@ export function useServerEvents(projectId?: string) {
 
     const invalidateForTopicNow = (topic: string) => {
       if (topic === 'connected') {
-        refreshMany(['executions', 'logs', 'work-items'])
+        refreshMany(['executions', 'logs', 'work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
         return
       }
 
@@ -266,17 +267,17 @@ export function useServerEvents(projectId?: string) {
       }
 
       if (topic === 'logs.updated') {
-        refreshQuery('logs')
+        refreshMany(['logs', 'executions'])
         return
       }
 
       if (topic === 'agents.updated') {
-        refreshMany(['executions', 'logs', 'work-items'])
+        refreshMany(['executions', 'logs', 'work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
         return
       }
 
       if (topic === 'work-items.updated') {
-        refreshMany(['work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
+        refreshMany(['work-items', 'executions', 'project-dashboard', 'project-dashboard-slug', 'projects'])
         return
       }
 

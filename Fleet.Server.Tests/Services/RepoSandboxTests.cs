@@ -153,6 +153,24 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void BuildMergeBranchArgumentList_PrefersSourceBranchContents()
+    {
+        var result = RepoSandbox.BuildMergeBranchArgumentList("fleet/42-child-flow");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                "-X",
+                "theirs",
+                "refs/remotes/origin/fleet/42-child-flow",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
     public void DetectGlobalToolchainMutation_BlocksGlobalNpmInstall()
     {
         var result = RepoSandbox.DetectGlobalToolchainMutation("npm", "install -g typescript");

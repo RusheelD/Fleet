@@ -123,7 +123,9 @@ public class AgentOrchestrationService(
         [AgentRole.Documentation] = 8,
     };
 
-    private const int MaxParallelSubFlows = 3;
+    internal const int MaxSubFlowChildrenPerExecution = 3;
+    internal const int MaxSubFlowExecutionDepth = 3;
+    private const int MaxParallelSubFlows = MaxSubFlowChildrenPerExecution;
 
     /// <summary>
     /// Uses a cheap LLM call to determine which agent roles are needed for the work item.
@@ -379,6 +381,7 @@ public class AgentOrchestrationService(
             var childWorkItems = new List<Models.WorkItemDto>();
             await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
             var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
+            var executionDepth = await ResolveExecutionDepthAsync(db, parentExecutionId, cancellationToken);
 
             // 2. Load the project to get the repo name
             var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
@@ -432,12 +435,26 @@ public class AgentOrchestrationService(
                 cancellationToken);
 
             // 6. Use AI to determine which agents are needed for this work item.
-            var executionMode = directChildWorkItems.Count > 0
+            var shouldOrchestrateDirectChildren = ShouldOrchestrateExistingSubFlows(
+                workItem,
+                directChildWorkItems,
+                childWorkItems,
+                executionDepth);
+            var executionMode = shouldOrchestrateDirectChildren
                 ? AgentExecutionModes.Orchestration
                 : AgentExecutionModes.Standard;
             var selectedModelKey = ModelKeys.Haiku;
             var pipeline = ResolveDefaultPipeline(executionMode);
             pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
+            if (directChildWorkItems.Count > 0 && !shouldOrchestrateDirectChildren)
+            {
+                logger.LogInformation(
+                    "Execution: keeping work item #{WorkItemNumber} in a single run despite {DirectChildCount} direct child work items (depth={ExecutionDepth}, difficulty={Difficulty}).",
+                    workItem.WorkItemNumber,
+                    directChildWorkItems.Count,
+                    executionDepth,
+                    workItem.Difficulty);
+            }
             logger.LogInformation(
                 "Execution: using default pipeline with {PhaseCount} agents, mode={ExecutionMode}, assignmentMode={AssignmentMode}",
                 pipeline.SelectMany(g => g).Count(),
@@ -588,7 +605,7 @@ public class AgentOrchestrationService(
                 executionId, projectId, workItem, childWorkItems, repoFullName,
                 branchName, commitAuthorName, commitAuthorEmail,
                 userId, selectedModelKey, pipeline, ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
-                pullRequestTargetBranch, retryPlan, reusePullRequestNumber, !skipQuotaCharge, cts.Token), CancellationToken.None);
+                pullRequestTargetBranch, retryPlan, reusePullRequestNumber, !skipQuotaCharge, parentExecutionId, cts.Token), CancellationToken.None);
 
             return executionId;
         }
@@ -866,6 +883,7 @@ public class AgentOrchestrationService(
                 retryPlan,
                 retryPlan.ReusePullRequestNumber ?? 0,
                 string.IsNullOrWhiteSpace(pausedExecution.ParentExecutionId),
+                pausedExecution.ParentExecutionId,
                 cts.Token), CancellationToken.None);
 
             return true;
@@ -1144,6 +1162,7 @@ public class AgentOrchestrationService(
         RetryExecutionPlan? retryPlan,
         int existingPullRequestNumber,
         bool billableExecution,
+        string? parentExecutionId,
         CancellationToken externalCancellation)
     {
         // Use IServiceScopeFactory (singleton) instead of the request-scoped IServiceProvider.
@@ -1158,8 +1177,11 @@ public class AgentOrchestrationService(
         var scopedUsageLedgerService = scope.ServiceProvider.GetRequiredService<IUsageLedgerService>();
         var scopedEventPublisher = scope.ServiceProvider.GetRequiredService<IServerEventPublisher>();
         await using var dbQueue = new ExecutionDbRequestQueue();
+        var shouldCreatePullRequest = ShouldCreatePullRequestForExecution(parentExecutionId);
+        var executionDepth = await ResolveExecutionDepthAsync(scopedDb, parentExecutionId, externalCancellation);
 
         IRepoSandbox? sandbox = null;
+        string accessToken = string.Empty;
 
         Task PublishAgentsUpdatedAsync() =>
             scopedEventPublisher.PublishProjectEventAsync(
@@ -1303,6 +1325,9 @@ public class AgentOrchestrationService(
             Models.WorkItemDto parentWorkItem,
             IReadOnlyList<Models.WorkItemDto> directChildWorkItems)
         {
+            if (sandbox is null)
+                throw new InvalidOperationException("Execution sandbox is not ready for sub-flow orchestration.");
+
             var orderedChildren = directChildWorkItems
                 .OrderBy(child => child.WorkItemNumber)
                 .ToArray();
@@ -1326,14 +1351,39 @@ public class AgentOrchestrationService(
                 await UpdateOrchestrationProgressAsync(
                     completedSubFlows,
                     orderedChildren.Length,
-                    $"Running sub-flows {batchLabel}");
+                    $"Queuing sub-flows {batchLabel}");
+
+                await WithDbLockAsync(async () =>
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "info",
+                        $"Queuing sub-flow batch {batchLabel}.",
+                        executionId: executionId));
+                await PublishLogsUpdatedAsync();
 
                 var launchedChildren = new List<(Models.WorkItemDto WorkItem, string ExecutionId)>(batch.Length);
                 foreach (var child in batch)
                 {
                     var childExecutionId = await EnsureSubFlowExecutionRunningAsync(child);
                     launchedChildren.Add((child, childExecutionId));
+
+                    await WithDbLockAsync(async () =>
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Sub-flow #{child.WorkItemNumber} is running as execution {childExecutionId}.",
+                            executionId: executionId));
+                    await PublishLogsUpdatedAsync();
                 }
+
+                await UpdateOrchestrationProgressAsync(
+                    completedSubFlows,
+                    orderedChildren.Length,
+                    $"Waiting on sub-flows {batchLabel}");
 
                 var terminalExecutionMap = await WaitForTerminalSubFlowExecutionsAsync(
                     launchedChildren.Select(launched => launched.ExecutionId).ToArray());
@@ -1350,6 +1400,44 @@ public class AgentOrchestrationService(
                         $"Sub-flow #{blockingExecution.WorkItem.WorkItemNumber} ended in status '{blockingExecution.Execution.Status}'.");
                 }
 
+                accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                    scopedConnectionService,
+                    userId,
+                    repoFullName,
+                    externalCancellation);
+
+                await UpdateOrchestrationProgressAsync(
+                    completedSubFlows,
+                    orderedChildren.Length,
+                    $"Merging sub-flows {batchLabel} into parent batch");
+
+                foreach (var terminalExecution in terminalExecutions.OrderBy(result => result.WorkItem.WorkItemNumber))
+                {
+                    var childBranchName = terminalExecution.Execution.BranchName?.Trim();
+                    if (string.IsNullOrWhiteSpace(childBranchName))
+                    {
+                        throw new InvalidOperationException(
+                            $"Sub-flow #{terminalExecution.WorkItem.WorkItemNumber} completed without a branch name to merge.");
+                    }
+
+                    await WithDbLockAsync(async () =>
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Merging sub-flow #{terminalExecution.WorkItem.WorkItemNumber} from branch '{childBranchName}' into '{sandbox.BranchName}'.",
+                            executionId: executionId));
+                    await PublishLogsUpdatedAsync();
+
+                    await sandbox.MergeBranchAsync(
+                        accessToken,
+                        childBranchName,
+                        commitAuthorName,
+                        commitAuthorEmail,
+                        externalCancellation);
+                }
+
                 completedSubFlows += terminalExecutions.Length;
                 await UpdateOrchestrationProgressAsync(
                     completedSubFlows,
@@ -1359,27 +1447,158 @@ public class AgentOrchestrationService(
                         : $"Completed {completedSubFlows}/{orderedChildren.Length} sub-flows");
             }
 
+            accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                scopedConnectionService,
+                userId,
+                repoFullName,
+                externalCancellation);
+
+            await UpdateOrchestrationProgressAsync(
+                orderedChildren.Length,
+                orderedChildren.Length,
+                shouldCreatePullRequest
+                    ? "Publishing merged parent batch"
+                    : "Publishing merged sub-flow batch");
+
+            await sandbox.PushBranchAsync(accessToken, externalCancellation);
+
             var refreshedDirectChildren = new List<Models.WorkItemDto>();
             await CollectDirectChildrenAsync(projectId, parentWorkItem.ChildWorkItemNumbers, refreshedDirectChildren);
-            var parentState = ResolveParentFlowState(refreshedDirectChildren);
+            if (!shouldCreatePullRequest)
+            {
+                var parentState = ResolveParentFlowState(refreshedDirectChildren);
 
-            await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed"));
+                await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed"));
+                await PublishAgentsUpdatedAsync();
+
+                await scopedWorkItemRepo.UpdateAsync(
+                    projectId,
+                    parentWorkItem.WorkItemNumber,
+                    new UpdateWorkItemRequest(
+                        Title: null,
+                        Description: null,
+                        Priority: null,
+                        Difficulty: null,
+                        State: parentState,
+                        AssignedTo: null,
+                        Tags: null,
+                        IsAI: null,
+                        ParentWorkItemNumber: null,
+                        LevelId: null));
+
+                await PublishWorkItemsUpdatedAsync();
+                await PublishProjectsUpdatedAsync();
+
+                await WithDbLockAsync(async () =>
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "success",
+                        $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s) and merging them into branch '{sandbox.BranchName}'.",
+                        executionId: executionId));
+                await PublishLogsUpdatedAsync();
+                await scopedNotificationService.PublishAsync(
+                    userId,
+                    projectId,
+                    "execution_completed",
+                    $"Execution completed for #{parentWorkItem.WorkItemNumber}",
+                    $"{orderedChildren.Length} sub-flow(s) completed.",
+                    executionId);
+                return;
+            }
+
+            var (orchestrationPrUrl, orchestrationPrNumber) = await OpenPullRequestAsync(
+                sandbox,
+                accessToken,
+                repoFullName,
+                parentWorkItem,
+                commitAuthorName,
+                commitAuthorEmail,
+                pullRequestTargetBranch,
+                scopedDb,
+                executionId,
+                externalCancellation,
+                draft: false,
+                seedBranchWithMarkerCommit: false);
+
+            var resolvedPrNumber = orchestrationPrNumber > 0
+                ? orchestrationPrNumber
+                : (TryParsePullRequestNumber(orchestrationPrUrl) ?? 0);
+            if (resolvedPrNumber <= 0)
+            {
+                var discoveredPr = await FindOpenPullRequestByHeadBranchAsync(
+                    accessToken,
+                    repoFullName,
+                    sandbox.BranchName,
+                    externalCancellation);
+                if (discoveredPr.Number > 0)
+                {
+                    resolvedPrNumber = discoveredPr.Number;
+                    if (string.IsNullOrWhiteSpace(orchestrationPrUrl))
+                        orchestrationPrUrl = discoveredPr.Url;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(orchestrationPrUrl))
+            {
+                throw new InvalidOperationException(
+                    $"Fleet completed the parent batch, but could not create or locate a GitHub pull request for branch '{sandbox.BranchName}'.");
+            }
+
+            if (resolvedPrNumber > 0)
+            {
+                await MarkPullRequestReadyAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation);
+            }
+
+            var prLifecycle = resolvedPrNumber > 0
+                ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation)
+                : null;
+
+            await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed", orchestrationPrUrl));
             await PublishAgentsUpdatedAsync();
-
-            await scopedWorkItemRepo.UpdateAsync(
+            await scopedNotificationService.PublishAsync(
+                userId,
                 projectId,
-                parentWorkItem.WorkItemNumber,
-                new UpdateWorkItemRequest(
-                    Title: null,
-                    Description: null,
-                    Priority: null,
-                    Difficulty: null,
-                    State: parentState,
-                    AssignedTo: null,
-                    Tags: null,
-                    IsAI: null,
-                    ParentWorkItemNumber: null,
-                    LevelId: null));
+                "pr_ready",
+                $"PR ready for #{parentWorkItem.WorkItemNumber}",
+                orchestrationPrUrl ?? "A pull request is ready for review.",
+                executionId);
+            await scopedNotificationService.PublishAsync(
+                userId,
+                projectId,
+                "execution_completed",
+                $"Execution completed for #{parentWorkItem.WorkItemNumber}",
+                parentWorkItem.Title,
+                executionId);
+
+            var workItemsToUpdate = childWorkItems
+                .Append(parentWorkItem)
+                .GroupBy(item => item.WorkItemNumber)
+                .Select(group => group.First());
+
+            foreach (var itemToUpdate in workItemsToUpdate)
+            {
+                var targetState = ResolveStateFromPullRequestLifecycle(itemToUpdate.IsAI, prLifecycle);
+                var observedPullRequestState = ResolveObservedPullRequestState(prLifecycle);
+                await scopedWorkItemRepo.UpdateAsync(
+                    projectId,
+                    itemToUpdate.WorkItemNumber,
+                    new UpdateWorkItemRequest(
+                        Title: null,
+                        Description: null,
+                        Priority: null,
+                        Difficulty: null,
+                        State: targetState,
+                        AssignedTo: null,
+                        Tags: null,
+                        IsAI: null,
+                        ParentWorkItemNumber: null,
+                        LevelId: null,
+                        LinkedPullRequestUrl: orchestrationPrUrl,
+                        LastObservedPullRequestState: observedPullRequestState,
+                        LastObservedPullRequestUrl: orchestrationPrUrl));
+            }
 
             await PublishWorkItemsUpdatedAsync();
             await PublishProjectsUpdatedAsync();
@@ -1390,16 +1609,9 @@ public class AgentOrchestrationService(
                     projectId,
                     "System",
                     "success",
-                    $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s).",
+                    $"Execution {executionId} completed successfully -- PR: {orchestrationPrUrl}",
                     executionId: executionId));
             await PublishLogsUpdatedAsync();
-            await scopedNotificationService.PublishAsync(
-                userId,
-                projectId,
-                "execution_completed",
-                $"Execution completed for #{parentWorkItem.WorkItemNumber}",
-                $"{orderedChildren.Length} sub-flow(s) completed.",
-                executionId);
         }
 
         try
@@ -1413,7 +1625,7 @@ public class AgentOrchestrationService(
             logger.LogInformation("Execution {ExecutionId}: cloning {Repo} → branch {Branch}",
                 executionId, repoFullName, branchName);
 
-            var accessToken = await ResolveRequiredRepoAccessTokenAsync(
+            accessToken = await ResolveRequiredRepoAccessTokenAsync(
                 scopedConnectionService,
                 userId,
                 repoFullName,
@@ -1436,6 +1648,12 @@ public class AgentOrchestrationService(
                 : null;
             var prNumber = existingPullRequestNumber;
             var draftPullRequestReady = !string.IsNullOrWhiteSpace(prUrl);
+            if (!shouldCreatePullRequest)
+            {
+                prUrl = null;
+                prNumber = 0;
+                draftPullRequestReady = false;
+            }
 
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
@@ -1618,7 +1836,7 @@ public class AgentOrchestrationService(
                         {
                             var generatedPlan = SubFlowPlanner.Parse(plannerOutput);
                             if (generatedPlan is not null &&
-                                ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan))
+                                ShouldMaterializeGeneratedSubFlows(workItem, generatedPlan, executionDepth))
                             {
                                 var createdSubFlows = await MaterializeGeneratedSubFlowsAsync(
                                     scopedWorkItemRepo,
@@ -1644,13 +1862,13 @@ public class AgentOrchestrationService(
                             else if (generatedPlan is not null)
                             {
                                 logger.LogInformation(
-                                    "Execution {ExecutionId}: skipped planner-generated sub-flow materialization for work item #{WorkItemNumber} because the task is already small enough to execute directly.",
+                                    "Execution {ExecutionId}: skipped planner-generated sub-flow materialization for work item #{WorkItemNumber} because the task is better handled as a direct run or already hit a sub-flow limit.",
                                     executionId,
                                     workItem.WorkItemNumber);
                             }
                         }
 
-                        if (directChildWorkItems.Count > 0)
+                        if (ShouldOrchestrateExistingSubFlows(workItem, directChildWorkItems, childWorkItems, executionDepth))
                         {
                             orchestrationExecution = true;
                             await TransitionExecutionToOrchestrationModeAsync(
@@ -1658,14 +1876,23 @@ public class AgentOrchestrationService(
                                 executionId,
                                 directChildWorkItems,
                                 currentOutputsByRole);
+                            await WithDbLockAsync(async () =>
+                                await WriteLogEntryAsync(
+                                    scopedDb,
+                                    projectId,
+                                    "System",
+                                    "info",
+                                    $"Planner delegated this run into {directChildWorkItems.Count} sub-flow(s).",
+                                    executionId: executionId));
                             await PublishAgentsUpdatedAsync();
+                            await PublishLogsUpdatedAsync();
                             await ExecuteSubFlowsAsync(workItem, directChildWorkItems);
                             return;
                         }
 
-                        if (!draftPullRequestReady)
+                        if (shouldCreatePullRequest && !draftPullRequestReady)
                         {
-                            (prUrl, prNumber) = await OpenDraftPullRequestAsync(
+                            (prUrl, prNumber) = await OpenPullRequestAsync(
                                 sandbox,
                                 accessToken,
                                 repoFullName,
@@ -1675,7 +1902,9 @@ public class AgentOrchestrationService(
                                 pullRequestTargetBranch,
                                 scopedDb,
                                 executionId,
-                                externalCancellation);
+                                externalCancellation,
+                                draft: true,
+                                seedBranchWithMarkerCommit: true);
                             draftPullRequestReady = true;
                         }
                     }
@@ -1979,7 +2208,7 @@ public class AgentOrchestrationService(
             if (orchestrationExecution)
             {
                 var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
-                if (directChildWorkItems.Count > 0)
+                if (ShouldOrchestrateExistingSubFlows(workItem, directChildWorkItems, childWorkItems, executionDepth))
                 {
                     await WithDbLockAsync(async () =>
                         await TransitionExecutionToOrchestrationModeAsync(
@@ -1987,15 +2216,24 @@ public class AgentOrchestrationService(
                             executionId,
                             directChildWorkItems,
                             currentCycleCarryForwardOutputs));
+                    await WithDbLockAsync(async () =>
+                        await WriteLogEntryAsync(
+                            scopedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Execution is switching from planning into orchestration for {directChildWorkItems.Count} sub-flow(s).",
+                            executionId: executionId));
                     await PublishAgentsUpdatedAsync();
+                    await PublishLogsUpdatedAsync();
                     await ExecuteSubFlowsAsync(workItem, directChildWorkItems);
                     return;
                 }
             }
 
-            if (!draftPullRequestReady)
+            if (shouldCreatePullRequest && !draftPullRequestReady)
             {
-                (prUrl, prNumber) = await OpenDraftPullRequestAsync(
+                (prUrl, prNumber) = await OpenPullRequestAsync(
                     sandbox,
                     accessToken,
                     repoFullName,
@@ -2005,7 +2243,9 @@ public class AgentOrchestrationService(
                     pullRequestTargetBranch,
                     scopedDb,
                     executionId,
-                    externalCancellation);
+                    externalCancellation,
+                    draft: true,
+                    seedBranchWithMarkerCommit: true);
                 draftPullRequestReady = true;
             }
 
@@ -2022,6 +2262,28 @@ public class AgentOrchestrationService(
                 authorName: commitAuthorName,
                 authorEmail: commitAuthorEmail,
                 externalCancellation);
+
+            if (!shouldCreatePullRequest)
+            {
+                await sandbox.PushBranchAsync(accessToken, externalCancellation);
+                await WithDbLockAsync(async () => await FinalizeExecutionAsync(scopedDb, executionId, "completed"));
+                await PublishAgentsUpdatedAsync();
+                await WithDbLockAsync(async () =>
+                    await WriteLogEntryAsync(
+                        scopedDb,
+                        projectId,
+                        "System",
+                        "success",
+                        $"Execution {executionId} completed successfully on branch '{sandbox.BranchName}' and is ready to merge into its parent batch.",
+                        executionId: executionId));
+                await PublishLogsUpdatedAsync();
+                await PublishProjectsUpdatedAsync();
+
+                logger.LogInformation(
+                    "Execution {ExecutionId}: sub-flow pipeline completed successfully without opening a pull request",
+                    executionId);
+                return;
+            }
 
             // Mark the draft PR as ready for review
             var resolvedPrNumber = prNumber > 0
@@ -2291,34 +2553,152 @@ public class AgentOrchestrationService(
             .OrderBy(child => child.WorkItemNumber)
             .ToList();
 
+    internal static bool ShouldOrchestrateExistingSubFlows(
+        Models.WorkItemDto workItem,
+        IReadOnlyCollection<Models.WorkItemDto> directChildWorkItems,
+        IReadOnlyCollection<Models.WorkItemDto> descendants,
+        int executionDepth)
+    {
+        if (executionDepth >= MaxSubFlowExecutionDepth)
+            return false;
+
+        if (directChildWorkItems.Count < 2 || directChildWorkItems.Count > MaxSubFlowChildrenPerExecution)
+            return false;
+
+        if (workItem.Difficulty <= 3)
+            return false;
+
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 4)
+            return false;
+
+        var childLookup = BuildChildWorkItemLookup(descendants);
+        var leafCount = CountLeafWorkItems(workItem.WorkItemNumber, childLookup);
+        if (leafCount < 2)
+            return false;
+
+        if (HasSingleChildChain(workItem.WorkItemNumber, childLookup))
+            return false;
+
+        var substantialDirectBranches = directChildWorkItems.Count(child =>
+        {
+            var directGrandchildren = GetDirectChildCount(child.WorkItemNumber, childLookup);
+            var leafDescendants = CountLeafWorkItems(child.WorkItemNumber, childLookup);
+            return child.Difficulty >= 3 || directGrandchildren > 0 || leafDescendants > 1;
+        });
+        if (substantialDirectBranches < 2)
+            return false;
+
+        var hasNestedChildren = directChildWorkItems.Any(child => GetDirectChildCount(child.WorkItemNumber, childLookup) > 0);
+        var totalDirectDifficulty = directChildWorkItems.Sum(child => child.Difficulty);
+
+        if (!hasNestedChildren && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
+            return false;
+
+        if (!hasNestedChildren && directChildWorkItems.All(child => child.Difficulty <= 3))
+            return false;
+
+        return true;
+    }
+
     internal static bool ShouldMaterializeGeneratedSubFlows(
         Models.WorkItemDto workItem,
-        GeneratedSubFlowPlan generatedPlan)
+        GeneratedSubFlowPlan generatedPlan,
+        int executionDepth = 0)
     {
-        if (generatedPlan.SubFlows.Count == 0)
+        if (executionDepth >= MaxSubFlowExecutionDepth)
             return false;
 
-        if (workItem.Difficulty <= 2)
+        if (generatedPlan.SubFlows.Count < 2 || generatedPlan.SubFlows.Count > MaxSubFlowChildrenPerExecution)
             return false;
 
-        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
+        if (workItem.Difficulty <= 3)
+            return false;
+
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 4)
             return false;
 
         var flattenedSubFlows = FlattenGeneratedSubFlows(generatedPlan.SubFlows).ToArray();
         if (flattenedSubFlows.Length == 0)
             return false;
 
-        if (generatedPlan.SubFlows.Count == 1 && generatedPlan.SubFlows[0].SubFlows.Count == 0)
+        if (HasNodeExceedingGeneratedChildLimit(generatedPlan.SubFlows))
             return false;
 
         if (flattenedSubFlows.Any(subFlow => subFlow.Difficulty > workItem.Difficulty))
             return false;
 
+        if (CountGeneratedLeafSubFlows(generatedPlan.SubFlows) < 2)
+            return false;
+
+        var substantialDirectBranches = generatedPlan.SubFlows.Count(subFlow =>
+            subFlow.Difficulty >= 3 ||
+            subFlow.SubFlows.Count > 0 ||
+            CountGeneratedLeafSubFlows(subFlow.SubFlows) > 1);
+        if (substantialDirectBranches < 2)
+            return false;
+
         var materiallyReducesComplexity = flattenedSubFlows.Any(subFlow => subFlow.Difficulty < workItem.Difficulty);
-        if (!materiallyReducesComplexity && workItem.ParentWorkItemNumber is not null)
+        if (!materiallyReducesComplexity)
+            return false;
+
+        var hasNestedDirectBranch = generatedPlan.SubFlows.Any(subFlow => subFlow.SubFlows.Count > 0);
+        var totalDirectDifficulty = generatedPlan.SubFlows.Sum(subFlow => subFlow.Difficulty);
+        if (!hasNestedDirectBranch && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
+            return false;
+
+        if (!hasNestedDirectBranch && generatedPlan.SubFlows.All(subFlow => subFlow.Difficulty <= 3))
             return false;
 
         return true;
+    }
+
+    private static Dictionary<int, List<Models.WorkItemDto>> BuildChildWorkItemLookup(
+        IReadOnlyCollection<Models.WorkItemDto> descendants)
+        => descendants
+            .Where(descendant => descendant.ParentWorkItemNumber is not null)
+            .GroupBy(descendant => descendant.ParentWorkItemNumber!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderBy(item => item.WorkItemNumber).ToList());
+
+    private static int CountLeafWorkItems(
+        int parentWorkItemNumber,
+        IReadOnlyDictionary<int, List<Models.WorkItemDto>> childLookup)
+    {
+        if (!childLookup.TryGetValue(parentWorkItemNumber, out var children) || children.Count == 0)
+            return 0;
+
+        var leafCount = 0;
+        foreach (var child in children)
+        {
+            leafCount += childLookup.ContainsKey(child.WorkItemNumber)
+                ? CountLeafWorkItems(child.WorkItemNumber, childLookup)
+                : 1;
+        }
+
+        return leafCount;
+    }
+
+    private static int GetDirectChildCount(
+        int parentWorkItemNumber,
+        IReadOnlyDictionary<int, List<Models.WorkItemDto>> childLookup)
+        => childLookup.TryGetValue(parentWorkItemNumber, out var children) ? children.Count : 0;
+
+    private static bool HasSingleChildChain(
+        int parentWorkItemNumber,
+        IReadOnlyDictionary<int, List<Models.WorkItemDto>> childLookup)
+    {
+        var currentParentNumber = parentWorkItemNumber;
+        var traversedAnyChildren = false;
+
+        while (childLookup.TryGetValue(currentParentNumber, out var children) && children.Count > 0)
+        {
+            traversedAnyChildren = true;
+            if (children.Count != 1)
+                return false;
+
+            currentParentNumber = children[0].WorkItemNumber;
+        }
+
+        return traversedAnyChildren;
     }
 
     private static IEnumerable<GeneratedSubFlowSpec> FlattenGeneratedSubFlows(IEnumerable<GeneratedSubFlowSpec> subFlows)
@@ -2330,6 +2710,53 @@ public class AgentOrchestrationService(
             foreach (var child in FlattenGeneratedSubFlows(subFlow.SubFlows))
                 yield return child;
         }
+    }
+
+    private static int CountGeneratedLeafSubFlows(IReadOnlyList<GeneratedSubFlowSpec> subFlows)
+    {
+        if (subFlows.Count == 0)
+            return 0;
+
+        var leafCount = 0;
+        foreach (var subFlow in subFlows)
+        {
+            leafCount += subFlow.SubFlows.Count > 0
+                ? CountGeneratedLeafSubFlows(subFlow.SubFlows)
+                : 1;
+        }
+
+        return leafCount;
+    }
+
+    private static bool HasNodeExceedingGeneratedChildLimit(IReadOnlyList<GeneratedSubFlowSpec> subFlows)
+        => subFlows.Count > MaxSubFlowChildrenPerExecution ||
+           subFlows.Any(subFlow => HasNodeExceedingGeneratedChildLimit(subFlow.SubFlows));
+
+    private static async Task<int> ResolveExecutionDepthAsync(
+        FleetDbContext context,
+        string? parentExecutionId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(parentExecutionId))
+            return 0;
+
+        var depth = 0;
+        var currentExecutionId = parentExecutionId;
+        var visitedExecutionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (!string.IsNullOrWhiteSpace(currentExecutionId) &&
+               visitedExecutionIds.Add(currentExecutionId) &&
+               depth < 32)
+        {
+            depth++;
+            currentExecutionId = await context.AgentExecutions
+                .AsNoTracking()
+                .Where(execution => execution.Id == currentExecutionId)
+                .Select(execution => execution.ParentExecutionId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return depth;
     }
 
     private async Task<List<Models.WorkItemDto>> MaterializeGeneratedSubFlowsAsync(
@@ -3574,31 +4001,34 @@ public class AgentOrchestrationService(
     }
 
     /// <summary>
-    /// Opens a draft pull request on GitHub at the start of the pipeline.
-    /// Creates an initial marker commit and pushes the branch so the PR can be opened.
-    /// Agents push subsequent commits throughout development — the PR updates automatically.
+    /// Opens a pull request on GitHub for the current execution branch.
+    /// When requested, seeds the branch with an initial marker commit before opening the PR.
     /// </summary>
-    private async Task<(string? Url, int Number)> OpenDraftPullRequestAsync(
+    private async Task<(string? Url, int Number)> OpenPullRequestAsync(
         IRepoSandbox sandbox, string accessToken, string repoFullName,
         WorkItemDto workItem, string commitAuthorName, string commitAuthorEmail,
         string pullRequestTargetBranch,
         FleetDbContext scopedDb, string executionId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool draft,
+        bool seedBranchWithMarkerCommit)
     {
         try
         {
-            // 1. Create an initial marker commit so the branch has something to push.
-            sandbox.WriteFile(".fleet",
-                $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
-                $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n" +
-                $"Target branch: {pullRequestTargetBranch}\n");
+            if (seedBranchWithMarkerCommit)
+            {
+                sandbox.WriteFile(".fleet",
+                    $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
+                    $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n" +
+                    $"Target branch: {pullRequestTargetBranch}\n");
 
-            await sandbox.CommitAndPushAsync(
-                accessToken,
-                $"fleet: start work on #{workItem.WorkItemNumber} - {workItem.Title}",
-                authorName: commitAuthorName,
-                authorEmail: commitAuthorEmail,
-                cancellationToken);
+                await sandbox.CommitAndPushAsync(
+                    accessToken,
+                    $"fleet: start work on #{workItem.WorkItemNumber} - {workItem.Title}",
+                    authorName: commitAuthorName,
+                    authorEmail: commitAuthorEmail,
+                    cancellationToken);
+            }
 
             // 2. Resolve a collision-safe PR title.
             var client = httpClientFactory.CreateClient("GitHub");
@@ -3615,9 +4045,8 @@ public class AgentOrchestrationService(
                 await scopedDb.SaveChangesAsync(cancellationToken);
             }
 
-            // 3. Open a draft PR. If we hit a title-collision race, resolve once and retry.
-            var openResult = await CreateDraftPullRequestAsync(
-                client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, resolvedPrTitle, cancellationToken);
+            var openResult = await CreatePullRequestAsync(
+                client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, resolvedPrTitle, draft, cancellationToken);
 
             if (!openResult.Success && IsPrTitleCollision(openResult.StatusCode, openResult.ResponseBody))
             {
@@ -3632,8 +4061,8 @@ public class AgentOrchestrationService(
                         await scopedDb.SaveChangesAsync(cancellationToken);
                     }
 
-                    openResult = await CreateDraftPullRequestAsync(
-                        client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, retriedTitle, cancellationToken);
+                    openResult = await CreatePullRequestAsync(
+                        client, accessToken, repoFullName, sandbox.BranchName, baseBranch, workItem, retriedTitle, draft, cancellationToken);
                 }
             }
 
@@ -3648,7 +4077,7 @@ public class AgentOrchestrationService(
                 if (existingPullRequest.Number > 0 && !string.IsNullOrWhiteSpace(existingPullRequest.Url))
                 {
                     logger.LogWarning(
-                        "Draft PR creation returned {Status}; reusing existing PR #{PrNumber}: {PrUrl}",
+                        "PR creation returned {Status}; reusing existing PR #{PrNumber}: {PrUrl}",
                         openResult.StatusCode,
                         existingPullRequest.Number,
                         existingPullRequest.Url);
@@ -3673,7 +4102,7 @@ public class AgentOrchestrationService(
             var prUrl = prResult.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() : null;
             var prNumber = prResult.TryGetProperty("number", out var numProp) ? numProp.GetInt32() : 0;
 
-            logger.LogInformation("Opened draft PR #{PrNumber}: {PrUrl}", prNumber, prUrl);
+            logger.LogInformation("Opened {DraftState}PR #{PrNumber}: {PrUrl}", draft ? "draft " : string.Empty, prNumber, prUrl);
 
             // 4. Persist URL/title on the execution record.
             if (execution is not null)
@@ -3686,12 +4115,12 @@ public class AgentOrchestrationService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to open draft PR for branch {Branch}", sandbox.BranchName);
+            logger.LogError(ex, "Failed to open pull request for branch {Branch}", sandbox.BranchName);
             throw;
         }
     }
 
-    private async Task<DraftPullRequestCreateResult> CreateDraftPullRequestAsync(
+    private async Task<PullRequestCreateResult> CreatePullRequestAsync(
         HttpClient client,
         string accessToken,
         string repoFullName,
@@ -3699,6 +4128,7 @@ public class AgentOrchestrationService(
         string baseBranch,
         WorkItemDto workItem,
         string prTitle,
+        bool draft,
         CancellationToken cancellationToken)
     {
         var prPayload = JsonSerializer.Serialize(new
@@ -3709,7 +4139,7 @@ public class AgentOrchestrationService(
                    "_This PR was opened automatically by Fleet. Agents are actively pushing changes._",
             head = headBranch,
             @base = baseBranch,
-            draft = true,
+            draft,
         });
 
         using var prRequest = new HttpRequestMessage(HttpMethod.Post,
@@ -3721,7 +4151,7 @@ public class AgentOrchestrationService(
         using var prResponse = await client.SendAsync(prRequest, cancellationToken);
         var prResponseBody = await prResponse.Content.ReadAsStringAsync(cancellationToken);
 
-        return new DraftPullRequestCreateResult(
+        return new PullRequestCreateResult(
             prResponse.IsSuccessStatusCode,
             prResponse.StatusCode,
             prResponseBody);
@@ -3906,6 +4336,9 @@ public class AgentOrchestrationService(
     private static string BuildPullRequestCopyTitle(string baseTitle, int copyIndex)
         => copyIndex <= 1 ? $"{baseTitle} (copy)" : $"{baseTitle} (copy {copyIndex})";
 
+    internal static bool ShouldCreatePullRequestForExecution(string? parentExecutionId)
+        => string.IsNullOrWhiteSpace(parentExecutionId);
+
     private static int? TryParsePullRequestNumber(string? pullRequestUrl)
     {
         if (string.IsNullOrWhiteSpace(pullRequestUrl))
@@ -3981,7 +4414,7 @@ public class AgentOrchestrationService(
         }
     }
 
-    private sealed record DraftPullRequestCreateResult(
+    private sealed record PullRequestCreateResult(
         bool Success,
         HttpStatusCode StatusCode,
         string ResponseBody);
@@ -4000,25 +4433,156 @@ public class AgentOrchestrationService(
         try
         {
             var client = httpClientFactory.CreateClient("GitHub");
-            var payload = JsonSerializer.Serialize(new { draft = false });
+            var repoParts = repoFullName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (repoParts.Length != 2)
+            {
+                logger.LogWarning("Failed to mark PR #{PrNumber} as ready because repository name '{RepoFullName}' is invalid", prNumber, repoFullName);
+                return;
+            }
 
-            using var request = new HttpRequestMessage(HttpMethod.Patch,
-                $"https://api.github.com/repos/{repoFullName}/pulls/{prNumber}");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
-            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            var owner = repoParts[0];
+            var name = repoParts[1];
 
-            using var response = await client.SendAsync(request, cancellationToken);
+            var lookupPayload = JsonSerializer.Serialize(new
+            {
+                query = """
+                    query PullRequestNode($owner: String!, $name: String!, $number: Int!) {
+                      repository(owner: $owner, name: $name) {
+                        pullRequest(number: $number) {
+                          id
+                          isDraft
+                        }
+                      }
+                    }
+                    """,
+                variables = new { owner, name, number = prNumber },
+            });
 
-            if (response.IsSuccessStatusCode)
-                logger.LogInformation("Marked PR #{PrNumber} as ready for review", prNumber);
-            else
-                logger.LogWarning("Failed to mark PR #{PrNumber} as ready: {Status}",
-                    prNumber, response.StatusCode);
+            using var lookupRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.github.com/graphql");
+            lookupRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            lookupRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+            lookupRequest.Content = new StringContent(lookupPayload, Encoding.UTF8, "application/json");
+
+            using var lookupResponse = await client.SendAsync(lookupRequest, cancellationToken);
+            var lookupBody = await lookupResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!lookupResponse.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Failed to look up PR #{PrNumber} before marking ready: {Status} {Error}",
+                    prNumber,
+                    lookupResponse.StatusCode,
+                    TryExtractGitHubGraphQlErrorMessage(lookupBody) ?? TryExtractGitHubApiErrorMessage(lookupBody));
+                return;
+            }
+
+            var lookupJson = JsonSerializer.Deserialize<JsonElement>(lookupBody);
+            if (!TryGetPullRequestGraphQlNode(lookupJson, out var prNodeId, out var isDraft))
+            {
+                logger.LogWarning("Failed to resolve a GraphQL node id for PR #{PrNumber}", prNumber);
+                return;
+            }
+
+            if (!isDraft)
+            {
+                logger.LogInformation("PR #{PrNumber} is already open for review", prNumber);
+                return;
+            }
+
+            var mutationPayload = JsonSerializer.Serialize(new
+            {
+                query = """
+                    mutation MarkReady($pullRequestId: ID!) {
+                      markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                        pullRequest {
+                          number
+                          isDraft
+                        }
+                      }
+                    }
+                    """,
+                variables = new { pullRequestId = prNodeId },
+            });
+
+            using var mutationRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.github.com/graphql");
+            mutationRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            mutationRequest.Headers.UserAgent.ParseAdd("Fleet/1.0");
+            mutationRequest.Content = new StringContent(mutationPayload, Encoding.UTF8, "application/json");
+
+            using var mutationResponse = await client.SendAsync(mutationRequest, cancellationToken);
+            var mutationBody = await mutationResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!mutationResponse.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Failed to mark PR #{PrNumber} as ready: {Status} {Error}",
+                    prNumber,
+                    mutationResponse.StatusCode,
+                    TryExtractGitHubGraphQlErrorMessage(mutationBody) ?? TryExtractGitHubApiErrorMessage(mutationBody));
+                return;
+            }
+
+            var lifecycle = await GetPullRequestLifecycleAsync(accessToken, repoFullName, prNumber, cancellationToken);
+            if (lifecycle?.IsDraft == true)
+            {
+                logger.LogWarning("PR #{PrNumber} still appears to be draft after the ready-for-review mutation", prNumber);
+                return;
+            }
+
+            logger.LogInformation("Marked PR #{PrNumber} as ready for review", prNumber);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to mark PR #{PrNumber} as ready for review (non-fatal)", prNumber);
+        }
+    }
+
+    private static bool TryGetPullRequestGraphQlNode(JsonElement payload, out string? nodeId, out bool isDraft)
+    {
+        nodeId = null;
+        isDraft = false;
+
+        if (payload.TryGetProperty("errors", out var errors) &&
+            errors.ValueKind == JsonValueKind.Array &&
+            errors.GetArrayLength() > 0)
+        {
+            return false;
+        }
+
+        if (!payload.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("repository", out var repository) ||
+            repository.ValueKind == JsonValueKind.Null ||
+            !repository.TryGetProperty("pullRequest", out var pullRequest) ||
+            pullRequest.ValueKind == JsonValueKind.Null)
+        {
+            return false;
+        }
+
+        nodeId = pullRequest.TryGetProperty("id", out var nodeProp) ? nodeProp.GetString() : null;
+        isDraft = pullRequest.TryGetProperty("isDraft", out var draftProp) && draftProp.ValueKind == JsonValueKind.True;
+        return !string.IsNullOrWhiteSpace(nodeId);
+    }
+
+    private static string? TryExtractGitHubGraphQlErrorMessage(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+            return null;
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<JsonElement>(responseBody);
+            if (!payload.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+                return null;
+
+            var messages = errors.EnumerateArray()
+                .Select(error => error.TryGetProperty("message", out var messageProp) ? messageProp.GetString() : null)
+                .Where(message => !string.IsNullOrWhiteSpace(message))
+                .Select(message => message!.Trim())
+                .ToArray();
+
+            return messages.Length == 0 ? null : string.Join("; ", messages);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

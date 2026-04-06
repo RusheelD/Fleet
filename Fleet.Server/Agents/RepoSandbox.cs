@@ -437,6 +437,73 @@ public class RepoSandbox : IRepoSandbox
         }
     }
 
+    public async Task MergeBranchAsync(
+        string accessToken,
+        string sourceBranchName,
+        string authorName,
+        string authorEmail,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+
+        if (string.IsNullOrWhiteSpace(sourceBranchName))
+            throw new ArgumentException("Source branch name is required.", nameof(sourceBranchName));
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await UpdateOriginRemoteAsync(accessToken, cancellationToken);
+
+            var normalizedSourceBranch = sourceBranchName.Trim();
+            var result = await RunGitAsync(
+                ["fetch", "--depth", "50", "origin", $"+refs/heads/{normalizedSourceBranch}:refs/remotes/origin/{normalizedSourceBranch}"],
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Git fetch of merge source branch '{normalizedSourceBranch}' failed: {result.Stderr}");
+            }
+
+            result = await RunGitAsync(
+                BuildMergeBranchArgumentList(normalizedSourceBranch),
+                BuildCommitEnvironment(authorName, authorEmail),
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                await AbortMergeIfNeededAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    $"Git merge of branch '{normalizedSourceBranch}' into '{_branchName}' failed: {result.Stderr}");
+            }
+
+            _logger.LogInformation("Merged branch {SourceBranch} into {TargetBranch}", normalizedSourceBranch, _branchName);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public async Task PushBranchAsync(string accessToken, CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await UpdateOriginRemoteAsync(accessToken, cancellationToken);
+            var result = await RunGitAsync(
+                ["push", "-u", "origin", _branchName],
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git push failed: {result.Stderr}");
+
+            _logger.LogInformation("Pushed branch {Branch}", _branchName);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     private async Task UpdateOriginRemoteAsync(string accessToken, CancellationToken cancellationToken)
     {
         var remoteUrl = BuildAuthenticatedCloneUrl(_repoFullName, accessToken);
@@ -840,6 +907,23 @@ public class RepoSandbox : IRepoSandbox
         };
     }
 
+    internal static IReadOnlyList<string> BuildMergeBranchArgumentList(string sourceBranchName)
+    {
+        if (string.IsNullOrWhiteSpace(sourceBranchName))
+            throw new ArgumentException("Source branch name is required.", nameof(sourceBranchName));
+
+        var normalizedSourceBranch = sourceBranchName.Trim();
+        return
+        [
+            "merge",
+            "--no-ff",
+            "--no-edit",
+            "-X",
+            "theirs",
+            $"refs/remotes/origin/{normalizedSourceBranch}",
+        ];
+    }
+
     internal static string BuildAuthenticatedCloneUrl(
         string repoFullName,
         string accessToken,
@@ -1067,5 +1151,24 @@ public class RepoSandbox : IRepoSandbox
         await process.WaitForExitAsync(cancellationToken);
 
         return new CommandResult(process.ExitCode, stdout.ToString().TrimEnd(), stderr.ToString().TrimEnd(), false);
+    }
+
+    private async Task AbortMergeIfNeededAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var abortResult = await RunGitAsync(
+                ["merge", "--abort"],
+                cancellationToken: cancellationToken);
+
+            if (abortResult.ExitCode != 0)
+            {
+                _logger.LogDebug("Merge abort was not needed or could not complete cleanly: {Error}", abortResult.Stderr);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to abort an in-progress merge cleanly");
+        }
     }
 }

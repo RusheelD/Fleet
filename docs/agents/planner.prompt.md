@@ -115,6 +115,12 @@ Sub-flow rules:
 - Express sequencing by nesting a dependent sub-flow under the work item it depends on.
 - Keep every generated child implementation-ready and scoped like a real work item.
 - Do not emit a split plan unless the task genuinely needs multiple full executions.
+- Never use sub-flows for a component-level task, a tight bug fix, or another task that one strong execution can finish cleanly.
+- Never emit a split plan that is just a single child, or a single-child chain that tunnels down to one component/task.
+- If a feature has only one real child branch, keep it as one execution.
+- Even with multiple components, prefer a single execution when the work is simple and closely coupled.
+- Keep each node to at most 3 direct `subflows`.
+- Do not exceed 3 levels of sub-flow depth total.
 - The JSON block must be valid JSON and must appear at the very end of your output.
 
 ## Planning Principles

@@ -1,6 +1,8 @@
 import {
     makeStyles,
     Title3,
+    Text,
+    Caption1,
     Button,
     mergeClasses,
     ToggleButton,
@@ -62,9 +64,18 @@ const useStyles = makeStyles({
     },
     logHeaderTitleRow: {
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: '8px',
         minWidth: 0,
+    },
+    logHeaderTitleStack: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+    },
+    logHeaderSubtitle: {
+        color: appTokens.color.textTertiary,
     },
     logHeaderActions: {
         display: 'flex',
@@ -179,10 +190,16 @@ const useStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'center',
         flex: 1,
-        color: appTokens.color.textMuted,
-        fontStyle: 'italic',
         paddingTop: appTokens.space.xxl,
         paddingBottom: appTokens.space.xxl,
+    },
+    emptyStateBody: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: appTokens.space.xs,
+        color: appTokens.color.textMuted,
+        textAlign: 'center',
     },
     runTabsContainer: {
         padding: '6px 8px',
@@ -468,11 +485,48 @@ export function LogPanel({
         container.scrollTop = container.scrollHeight
     }, [latestLogCursor, selectedRun])
 
+    const selectedRunLabel = useMemo(() => {
+        if (selectedRun === 'all') {
+            return 'Showing every execution and system log'
+        }
+
+        if (selectedRun === 'general') {
+            return 'Showing logs not tied to a specific run'
+        }
+
+        const activeRun = runTabs.find((tab) => tab.value === selectedRun)
+        return activeRun ? `Showing logs for ${activeRun.label}` : 'Showing the selected run'
+    }, [runTabs, selectedRun])
+
+    const emptyStateMessage = useMemo(() => {
+        if (selectedRun === 'all') {
+            return {
+                title: 'No logs yet',
+                detail: 'Run activity will appear here once Fleet starts writing execution updates.',
+            }
+        }
+
+        if (selectedRun === 'general') {
+            return {
+                title: 'No general logs',
+                detail: 'This project does not have any unscoped system logs right now.',
+            }
+        }
+
+        return {
+            title: 'No logs for this run',
+            detail: 'This run has not emitted any visible log entries for the current filter yet.',
+        }
+    }, [selectedRun])
+
     return (
         <div className={mergeClasses(styles.logPanel, isMobile && styles.logPanelMobile)}>
             <div className={mergeClasses(styles.logHeader, isMobile && styles.logHeaderMobile)}>
                 <div className={styles.logHeaderTitleRow}>
-                    <Title3 className={styles.logTitle}>Live Logs</Title3>
+                    <div className={styles.logHeaderTitleStack}>
+                        <Title3 className={styles.logTitle}>Live Logs</Title3>
+                        <Caption1 className={styles.logHeaderSubtitle}>{selectedRunLabel}</Caption1>
+                    </div>
                     <InfoBadge appearance="filled" size="small">{sortedVisibleLogs.length}</InfoBadge>
                 </div>
                 <div className={mergeClasses(styles.logHeaderActions, isMobile && styles.logHeaderActionsMobile)}>
@@ -528,7 +582,12 @@ export function LogPanel({
             </div>
             <div ref={logListRef} className={mergeClasses(styles.logList, isMobile && styles.logListMobile)}>
                 {sortedVisibleLogs.length === 0 && (
-                    <div className={styles.emptyState}>No log entries yet</div>
+                    <div className={styles.emptyState}>
+                        <div className={styles.emptyStateBody}>
+                            <Text weight="semibold">{emptyStateMessage.title}</Text>
+                            <Caption1>{emptyStateMessage.detail}</Caption1>
+                        </div>
+                    </div>
                 )}
                 {sortedVisibleLogs.map((log, i) => (
                     <div key={i} className={mergeClasses(styles.logEntry, isMobile && styles.logEntryMobile)}>

@@ -19,6 +19,8 @@ import {
     PauseRegular,
     StopRegular,
     ArrowClockwiseRegular,
+    ChevronDownRegular,
+    ChevronUpRegular,
     ClockRegular,
     CodeRegular,
     DocumentRegular,
@@ -34,6 +36,7 @@ import { openPullRequest, openPullRequestDiff } from './pullRequest'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
 import { FleetRocketLogo } from '../../components/shared'
+import { useState } from 'react'
 
 type ExecutionStepStatus = AgentInfo['status'] | 'paused' | 'queued'
 type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
@@ -179,6 +182,92 @@ const useStyles = makeStyles({
     executionActionsMobile: {
         width: '100%',
         justifyContent: 'flex-end',
+    },
+    detailPillRow: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.sm,
+    },
+    detailPillRowCompact: {
+        gap: appTokens.space.xs,
+    },
+    detailPill: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        minWidth: '120px',
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+    },
+    detailPillCompact: {
+        minWidth: '104px',
+        paddingTop: appTokens.space.xxxs,
+        paddingBottom: appTokens.space.xxxs,
+        paddingLeft: appTokens.space.xs,
+        paddingRight: appTokens.space.xs,
+    },
+    detailPillMobile: {
+        flex: '1 1 calc(50% - 0.5rem)',
+        minWidth: 'unset',
+    },
+    detailPillLabel: {
+        color: appTokens.color.textTertiary,
+    },
+    detailPillValue: {
+        color: appTokens.color.textPrimary,
+    },
+    phaseBanner: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: appTokens.space.xs,
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+        color: appTokens.color.textSecondary,
+    },
+    phaseBannerRunning: {
+        borderTopColor: appTokens.color.brandStroke,
+        borderRightColor: appTokens.color.brandStroke,
+        borderBottomColor: appTokens.color.brandStroke,
+        borderLeftColor: appTokens.color.brandStroke,
+        backgroundColor: appTokens.color.surfaceSelected,
+        color: appTokens.color.textPrimary,
+    },
+    phaseBannerFailed: {
+        borderTopColor: appTokens.color.danger,
+        borderRightColor: appTokens.color.danger,
+        borderBottomColor: appTokens.color.danger,
+        borderLeftColor: appTokens.color.danger,
+        color: appTokens.color.danger,
+    },
+    phaseBannerPaused: {
+        borderTopColor: appTokens.color.info,
+        borderRightColor: appTokens.color.info,
+        borderBottomColor: appTokens.color.info,
+        borderLeftColor: appTokens.color.info,
+        color: appTokens.color.info,
+    },
+    phaseBannerIcon: {
+        flexShrink: 0,
+        color: appTokens.color.brand,
+    },
+    sectionHeaderRow: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: appTokens.space.sm,
+    },
+    sectionHeaderLabel: {
+        color: appTokens.color.textSecondary,
     },
     pipeline: {
         display: 'flex',
@@ -374,16 +463,77 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: appTokens.space.sm,
-        maxHeight: 'min(60vh, 48rem)',
-        overflowY: 'auto',
-        overscrollBehavior: 'contain',
-        paddingRight: appTokens.space.xs,
+        maxHeight: 'none',
+        overflowY: 'visible',
+        overscrollBehavior: 'auto',
+        paddingRight: 0,
     },
     subFlowListCompact: {
-        maxHeight: 'min(56vh, 40rem)',
+        maxHeight: 'none',
     },
     subFlowListMobile: {
-        maxHeight: '52vh',
+        maxHeight: 'none',
+        overflowY: 'visible',
+        paddingRight: 0,
+    },
+    subFlowMobileList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+    },
+    subFlowSummaryCard: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+        boxShadow: 'none',
+    },
+    subFlowSummaryCardActive: {
+        borderTopColor: appTokens.color.brandStroke,
+        borderRightColor: appTokens.color.brandStroke,
+        borderBottomColor: appTokens.color.brandStroke,
+        borderLeftColor: appTokens.color.brandStroke,
+        backgroundColor: appTokens.color.surfaceSelected,
+    },
+    subFlowSummaryHeader: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: appTokens.space.sm,
+    },
+    subFlowSummaryTitle: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+        flex: 1,
+    },
+    subFlowSummaryDetails: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxxs,
+    },
+    subFlowSummaryProgress: {
+        marginTop: appTokens.space.xxxs,
+    },
+    subFlowSummaryExpandButton: {
+        alignSelf: 'flex-start',
+    },
+    subFlowExpandedContainer: {
+        paddingLeft: appTokens.space.sm,
+        borderLeft: `2px solid ${appTokens.color.border}`,
+    },
+    subFlowSummaryMeta: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.xs,
+        color: appTokens.color.textTertiary,
     },
 })
 
@@ -472,6 +622,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
+    const [expandedSubFlowIds, setExpandedSubFlowIds] = useState<Record<string, boolean>>({})
     const isCompact = preferences?.compactMode ?? false
     const isNested = nested || Boolean(execution.parentExecutionId)
     const toasterId = useId('exec-toaster')
@@ -537,6 +688,27 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
         : reviewLoopCount > 0
             ? `Self-corrected x${reviewLoopCount}`
             : null
+    const runModeLabel = execution.executionMode === 'orchestration' ? 'Flow' : 'Direct'
+    const outputLabel = execution.pullRequestUrl
+        ? execution.status === 'completed'
+            ? 'PR ready'
+            : 'PR active'
+        : execution.executionMode === 'orchestration'
+            ? 'Merged batch'
+            : execution.status === 'completed'
+                ? 'Completed'
+                : 'No PR yet'
+    const activePhaseLabel = execution.currentPhase ?? (
+        execution.status === 'completed'
+            ? 'Run completed'
+            : execution.status === 'paused'
+                ? 'Run paused'
+                : execution.status === 'failed'
+                    ? 'Run failed'
+                    : execution.status === 'cancelled'
+                        ? 'Run cancelled'
+                        : 'Waiting to start'
+    )
 
     const terminalExecutionStatus = execution.status === 'failed' || execution.status === 'cancelled' || execution.status === 'paused'
         ? execution.status
@@ -689,6 +861,98 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
         ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
         : 0
 
+    const toggleSubFlowExpansion = (subFlowId: string) => {
+        setExpandedSubFlowIds((current) => ({
+            ...current,
+            [subFlowId]: !current[subFlowId],
+        }))
+    }
+
+    const isSubFlowExpandedByDefault = (subFlow: AgentExecution) =>
+        subFlow.status === 'running' ||
+        subFlow.status === 'paused' ||
+        subFlow.status === 'failed'
+
+    const renderSubFlowSummaryCard = (subFlow: AgentExecution) => {
+        const isExpanded = expandedSubFlowIds[subFlow.id] ?? isSubFlowExpandedByDefault(subFlow)
+        const isActiveSubFlow =
+            subFlow.status === 'running' ||
+            subFlow.status === 'paused' ||
+            subFlow.status === 'failed'
+
+        return (
+            <div
+                key={subFlow.id}
+                className={mergeClasses(
+                    styles.subFlowSummaryCard,
+                    isActiveSubFlow && styles.subFlowSummaryCardActive,
+                )}
+            >
+                <div className={styles.subFlowSummaryHeader}>
+                    <div className={styles.subFlowSummaryTitle}>
+                        <div className={styles.flexRowGap}>
+                            <Text weight="semibold">#{subFlow.workItemId}</Text>
+                            {renderExecutionStatusBadge(subFlow.status)}
+                        </div>
+                        <Text
+                            weight="semibold"
+                            className={mergeClasses(styles.titleText, styles.titleTextMobile)}
+                        >
+                            {subFlow.workItemTitle}
+                        </Text>
+                    </div>
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+                        onClick={() => toggleSubFlowExpansion(subFlow.id)}
+                    >
+                        {isExpanded ? 'Hide' : 'Details'}
+                    </Button>
+                </div>
+                <div className={styles.subFlowSummaryDetails}>
+                    <Caption1 className={styles.taskCaption}>
+                        {subFlow.currentPhase || 'Waiting on sub-flow execution'}
+                    </Caption1>
+                    <div className={styles.subFlowSummaryMeta}>
+                        <Caption1>Started {formatTimestamp(subFlow.startedAt)}</Caption1>
+                        <Caption1>•</Caption1>
+                        <Caption1>{subFlow.duration}</Caption1>
+                        {subFlow.branchName && (
+                            <>
+                                <Caption1>•</Caption1>
+                                <Caption1>{subFlow.branchName}</Caption1>
+                            </>
+                        )}
+                    </div>
+                    {subFlow.status === 'running' && subFlow.progress > 0 && (
+                        <ProgressBar
+                            className={styles.subFlowSummaryProgress}
+                            value={Math.max(0, Math.min(subFlow.progress, 1))}
+                            thickness="medium"
+                            color="brand"
+                        />
+                    )}
+                </div>
+                {isExpanded && (
+                    <div className={styles.subFlowExpandedContainer}>
+                        <ExecutionCard
+                            execution={subFlow}
+                            workItems={workItems}
+                            onPause={onPause}
+                            onCancel={onCancel}
+                            onResume={onResume}
+                            onRetry={onRetry}
+                            onDelete={onDelete}
+                            onViewDocs={onViewDocs}
+                            nested
+                        />
+                    </div>
+                )}
+            </div>
+        )
+    }
+
     return (
         <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile, isNested && styles.executionCardNested)}>
             <Toaster toasterId={toasterId} />
@@ -764,6 +1028,39 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                 </div>
             </div>
 
+            <div className={mergeClasses(styles.detailPillRow, isCompact && styles.detailPillRowCompact)}>
+                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
+                    <Caption1 className={styles.detailPillLabel}>Mode</Caption1>
+                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{runModeLabel}</Text>
+                </div>
+                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
+                    <Caption1 className={styles.detailPillLabel}>Phase</Caption1>
+                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{activePhaseLabel}</Text>
+                </div>
+                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
+                    <Caption1 className={styles.detailPillLabel}>Output</Caption1>
+                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{outputLabel}</Text>
+                </div>
+                {displayedSubFlowCount > 0 && (
+                    <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
+                        <Caption1 className={styles.detailPillLabel}>Sub-flows</Caption1>
+                        <Text size={200} weight="semibold" className={styles.detailPillValue}>{displayedSubFlowCount}</Text>
+                    </div>
+                )}
+            </div>
+
+            <div
+                className={mergeClasses(
+                    styles.phaseBanner,
+                    execution.status === 'running' && styles.phaseBannerRunning,
+                    execution.status === 'failed' && styles.phaseBannerFailed,
+                    execution.status === 'paused' && styles.phaseBannerPaused,
+                )}
+            >
+                <FleetRocketLogo size={16} title="Run phase" variant="outline" className={styles.phaseBannerIcon} />
+                <Caption1>{activePhaseLabel}</Caption1>
+            </div>
+
             <ProgressBar
                 value={execution.progress}
                 thickness={isCompact ? 'medium' : 'large'}
@@ -779,6 +1076,13 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
             />
 
             <Divider className={isCompact ? styles.compactDivider : undefined} />
+
+            <div className={styles.sectionHeaderRow}>
+                <Text weight="semibold" className={styles.sectionHeaderLabel}>Pipeline</Text>
+                <InfoBadge appearance="tint" size="small">
+                    {agents.length + (execution.executionMode === 'orchestration' ? plannedSubFlowSteps.length : 0)} steps
+                </InfoBadge>
+            </div>
 
             <div className={styles.pipeline}>
                 {agents.map((agent, i) => {
@@ -1000,19 +1304,18 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
             {subFlows.length > 0 && (
                 <div className={styles.subFlowSection}>
                     <Divider className={isCompact ? styles.compactDivider : undefined} />
-                    <Text weight="semibold" className={styles.subFlowHeader}>
-                        Sub-flows
-                    </Text>
+                    <div className={styles.sectionHeaderRow}>
+                        <Text weight="semibold" className={styles.subFlowHeader}>
+                            Sub-flows
+                        </Text>
+                        <InfoBadge appearance="tint" size="small">
+                            {subFlows.length} run{subFlows.length === 1 ? '' : 's'}
+                        </InfoBadge>
+                    </div>
                     <div className={mergeClasses(styles.subFlowList, isCompact && styles.subFlowListCompact, isMobile && styles.subFlowListMobile)}>
-                        {subFlows.map((subFlow) => (
-                            <ExecutionCard
-                                key={subFlow.id}
-                                execution={subFlow}
-                                workItems={workItems}
-                                onViewDocs={onViewDocs}
-                                nested
-                            />
-                        ))}
+                        <div className={styles.subFlowMobileList}>
+                            {subFlows.map(renderSubFlowSummaryCard)}
+                        </div>
                     </div>
                 </div>
             )}

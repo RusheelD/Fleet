@@ -68,6 +68,16 @@ const useStyles = makeStyles({
         justifyContent: 'space-between',
         gap: appTokens.space.sm,
     },
+    filterRow: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.sm,
+        alignItems: 'flex-end',
+    },
+    filterField: {
+        minWidth: '220px',
+        flex: '1 1 240px',
+    },
     workItemList: {
         display: 'flex',
         flexDirection: 'column',
@@ -183,6 +193,39 @@ const useStyles = makeStyles({
     footerHint: {
         color: appTokens.color.textTertiary,
     },
+    selectedSummaryCard: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.lg,
+        paddingRight: appTokens.space.lg,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+    },
+    selectedSummaryGrid: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.sm,
+    },
+    selectedSummaryPill: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        minWidth: '120px',
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+    },
+    selectedSummaryLabel: {
+        color: appTokens.color.textTertiary,
+    },
     branchField: {
         maxWidth: '320px',
     },
@@ -193,6 +236,17 @@ const useStyles = makeStyles({
     emptyState: {
         padding: '2rem 1.5rem',
         textAlign: 'center' as const,
+    },
+    filteredEmptyState: {
+        paddingTop: appTokens.space.lg,
+        paddingBottom: appTokens.space.lg,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+        textAlign: 'center' as const,
+        color: appTokens.color.textTertiary,
     },
     dialogActionsMobile: {
         width: '100%',
@@ -241,6 +295,7 @@ export function StartExecutionDialog({
     const isCompact = preferences?.compactMode ?? false
     const [selected, setSelected] = useState<number | null>(null)
     const [targetBranch, setTargetBranch] = useState('main')
+    const [searchQuery, setSearchQuery] = useState('')
 
     // Filter to work items that are eligible (AI-assigned, active-ish states)
     const eligible = useMemo(
@@ -249,14 +304,39 @@ export function StartExecutionDialog({
                 (wi) =>
                     wi.isAI &&
                     !['Closed', 'Resolved', 'Resolved (AI)', 'In-PR', 'In-PR (AI)'].includes(wi.state),
+            ).sort((left, right) =>
+                left.priority - right.priority ||
+                right.difficulty - left.difficulty ||
+                left.workItemNumber - right.workItemNumber,
             ),
         [workItems],
+    )
+
+    const filteredEligible = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase()
+        if (!query) {
+            return eligible
+        }
+
+        return eligible.filter((workItem) =>
+            workItem.title.toLowerCase().includes(query) ||
+            workItem.workItemNumber.toString().includes(query) ||
+            workItem.state.toLowerCase().includes(query),
+        )
+    }, [eligible, searchQuery])
+
+    const selectedWorkItem = useMemo(
+        () => filteredEligible.find((workItem) => workItem.workItemNumber === selected)
+            ?? eligible.find((workItem) => workItem.workItemNumber === selected)
+            ?? null,
+        [eligible, filteredEligible, selected],
     )
 
     useEffect(() => {
         if (!open) {
             setSelected(null)
             setTargetBranch('main')
+            setSearchQuery('')
             return
         }
 
@@ -311,18 +391,52 @@ export function StartExecutionDialog({
                                         disabled={isPending}
                                     />
                                 </Field>
+                                {selectedWorkItem && (
+                                    <div className={styles.selectedSummaryCard}>
+                                        <Text weight="semibold">Selected run</Text>
+                                        <Text>#{selectedWorkItem.workItemNumber} - {selectedWorkItem.title}</Text>
+                                        <div className={styles.selectedSummaryGrid}>
+                                            <div className={styles.selectedSummaryPill}>
+                                                <Caption1 className={styles.selectedSummaryLabel}>Pipeline</Caption1>
+                                                <Text size={200} weight="semibold">
+                                                    {selectedWorkItem.assignmentMode === 'manual' && selectedWorkItem.assignedAgentCount
+                                                        ? `${selectedWorkItem.assignedAgentCount} agents max`
+                                                        : 'Full Fleet pipeline'}
+                                                </Text>
+                                            </div>
+                                            <div className={styles.selectedSummaryPill}>
+                                                <Caption1 className={styles.selectedSummaryLabel}>Difficulty</Caption1>
+                                                <Text size={200} weight="semibold">D{selectedWorkItem.difficulty}</Text>
+                                            </div>
+                                            <div className={styles.selectedSummaryPill}>
+                                                <Caption1 className={styles.selectedSummaryLabel}>Target branch</Caption1>
+                                                <Text size={200} weight="semibold">{targetBranch.trim() || 'main'}</Text>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className={styles.sectionHeader}>
                                     <Text weight="semibold">Eligible Work Items</Text>
                                     <InfoBadge appearance="filled" size="small">
-                                        {eligible.length} available
+                                        {filteredEligible.length} shown
                                     </InfoBadge>
+                                </div>
+                                <div className={styles.filterRow}>
+                                    <Field label="Search runs" className={styles.filterField}>
+                                        <Input
+                                            value={searchQuery}
+                                            onChange={(_e, data) => setSearchQuery(data.value)}
+                                            placeholder="Search by title, number, or state"
+                                            disabled={isPending}
+                                        />
+                                    </Field>
                                 </div>
                                 <RadioGroup
                                     value={selected?.toString() ?? ''}
                                     onChange={(_e, data) => setSelected(Number(data.value))}
                                 >
                                     <div className={mergeClasses(styles.workItemList, isCompact && styles.workItemListCompact)}>
-                                        {eligible.map((wi) => (
+                                        {filteredEligible.map((wi) => (
                                             (() => {
                                                 const badgeTone = getStateBadgeTone(wi.state)
 
@@ -378,6 +492,11 @@ export function StartExecutionDialog({
                                                 )
                                             })()
                                         ))}
+                                        {filteredEligible.length === 0 && (
+                                            <div className={styles.filteredEmptyState}>
+                                                <Text>No work items match the current search.</Text>
+                                            </div>
+                                        )}
                                     </div>
                                 </RadioGroup>
                                 <Caption1 className={styles.footerHint}>

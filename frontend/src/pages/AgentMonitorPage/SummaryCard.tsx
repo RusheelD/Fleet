@@ -20,6 +20,9 @@ const useStyles = makeStyles({
         gap: appTokens.space.md,
         minWidth: '160px',
         flex: '1 1 160px',
+        border: appTokens.border.subtle,
+        transitionProperty: 'background-color, box-shadow, border-color, transform',
+        transitionDuration: appTokens.motion.fast,
     },
     summaryCardCompact: {
         paddingTop: appTokens.space.xs,
@@ -60,11 +63,16 @@ const useStyles = makeStyles({
         userSelect: 'none',
         ':hover': {
             backgroundColor: appTokens.color.surfaceHover,
+            transform: 'translateY(-1px)',
         },
     },
     summaryCardActive: {
-        backgroundColor: appTokens.color.surfaceBrand,
+        backgroundColor: appTokens.color.surfaceSelected,
         boxShadow: appTokens.border.activeInset,
+        borderTopColor: appTokens.color.brandStroke,
+        borderRightColor: appTokens.color.brandStroke,
+        borderBottomColor: appTokens.color.brandStroke,
+        borderLeftColor: appTokens.color.brandStroke,
     },
 })
 
