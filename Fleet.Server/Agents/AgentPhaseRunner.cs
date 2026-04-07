@@ -1,5 +1,6 @@
 using Fleet.Server.Agents.Tools;
 using Fleet.Server.LLM;
+using Fleet.Server.Mcp;
 using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Agents;
@@ -14,8 +15,10 @@ public class AgentPhaseRunner(
     ILLMClient llmClient,
     AgentToolRegistry toolRegistry,
     IOptions<LLMOptions> llmOptions,
-    ILogger<AgentPhaseRunner> logger) : IAgentPhaseRunner
+    ILogger<AgentPhaseRunner> logger,
+    IMcpToolSessionFactory? mcpToolSessionFactory = null) : IAgentPhaseRunner
 {
+    private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -85,7 +88,13 @@ public class AgentPhaseRunner(
             role, toolContext.ExecutionId, model);
 
         var systemPrompt = promptLoader.GetPrompt(role);
-        var toolDefs = toolRegistry.ToLLMDefinitions(role);
+        await using var mcpToolSession = await _mcpToolSessionFactory.CreateForAgentAsync(
+            toolContext.UserId,
+            role,
+            cancellationToken);
+        var toolDefs = toolRegistry.ToLLMDefinitions(role)
+            .Concat(mcpToolSession.Definitions)
+            .ToList();
 
         var messages = new List<LLMMessage>
         {
@@ -268,7 +277,10 @@ public class AgentPhaseRunner(
                     var allReadOnly = response.ToolCalls.All(tc =>
                     {
                         var tool = toolRegistry.Get(tc.Name);
-                        return tool is { IsReadOnly: true };
+                        if (tool is not null)
+                            return tool.IsReadOnly;
+
+                        return mcpToolSession.HasTool(tc.Name) && mcpToolSession.IsReadOnly(tc.Name);
                     });
 
                     if (allReadOnly && response.ToolCalls.Count > 1)
@@ -276,7 +288,7 @@ public class AgentPhaseRunner(
                         // ── Parallel execution for read-only batches ──
                         var tasks = response.ToolCalls.Select(async toolCall =>
                         {
-                            var result = await ExecuteToolAsync(role, toolCall, toolContext, cts.Token);
+                            var result = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
                             return (toolCall, result);
                         }).ToList();
 
@@ -340,7 +352,7 @@ public class AgentPhaseRunner(
                                 break;
                             }
 
-                            var toolResult = await ExecuteToolAsync(role, toolCall, toolContext, cts.Token);
+                            var toolResult = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
 
                             messages.Add(new LLMMessage
                             {
@@ -410,15 +422,21 @@ public class AgentPhaseRunner(
     }
 
     private async Task<string> ExecuteToolAsync(
-        AgentRole role, LLMToolCall toolCall, AgentToolContext context, CancellationToken ct)
+        AgentRole role, LLMToolCall toolCall, AgentToolContext context, IMcpToolSession mcpToolSession, CancellationToken ct)
     {
-        if (!toolRegistry.IsToolAllowed(role, toolCall.Name))
+        if (!toolRegistry.IsToolAllowed(role, toolCall.Name) &&
+            !(mcpToolSession.HasTool(toolCall.Name) && (role != AgentRole.Manager || mcpToolSession.IsReadOnly(toolCall.Name))))
         {
             logger.LogWarning("Tool {ToolName} is not allowed for role {Role}", toolCall.Name, role);
             return $"Error: tool '{toolCall.Name}' is not allowed for role '{role}'.";
         }
 
         var tool = toolRegistry.Get(toolCall.Name);
+        if (tool is null && mcpToolSession.HasTool(toolCall.Name))
+        {
+            return await mcpToolSession.ExecuteAsync(toolCall.Name, toolCall.ArgumentsJson, ct);
+        }
+
         if (tool is null)
         {
             logger.LogWarning("Unknown agent tool: {ToolName}", toolCall.Name);
@@ -470,5 +488,32 @@ public class AgentPhaseRunner(
             return args.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
         }
         catch { return ""; }
+    }
+
+    private sealed class NoOpMcpToolSessionFactory : IMcpToolSessionFactory
+    {
+        public static readonly NoOpMcpToolSessionFactory Instance = new();
+
+        public Task<IMcpToolSession> CreateForChatAsync(int userId, bool includeWriteTools, CancellationToken cancellationToken = default)
+            => Task.FromResult<IMcpToolSession>(EmptyMcpToolSession.Instance);
+
+        public Task<IMcpToolSession> CreateForAgentAsync(string userId, AgentRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult<IMcpToolSession>(EmptyMcpToolSession.Instance);
+    }
+
+    private sealed class EmptyMcpToolSession : IMcpToolSession
+    {
+        public static readonly EmptyMcpToolSession Instance = new();
+
+        public IReadOnlyList<LLMToolDefinition> Definitions => [];
+
+        public bool HasTool(string toolName) => false;
+
+        public bool IsReadOnly(string toolName) => false;
+
+        public Task<string> ExecuteAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
+            => Task.FromResult($"Error: unknown MCP tool '{toolName}'.");
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

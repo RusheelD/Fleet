@@ -1,7 +1,9 @@
 using Fleet.Server.Auth;
+using Fleet.Server.Agents;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Logging;
+using Fleet.Server.Mcp;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
@@ -22,11 +24,13 @@ public class ChatService(
     ILogger<ChatService> logger,
     IUsageLedgerService? usageLedgerService = null,
     IServerEventPublisher? eventPublisher = null,
-    IServiceScopeFactory? serviceScopeFactory = null) : IChatService
+    IServiceScopeFactory? serviceScopeFactory = null,
+    IMcpToolSessionFactory? mcpToolSessionFactory = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
+    private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -325,11 +329,17 @@ public class ChatService(
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
             //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
+            await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
+                userId,
+                generateWorkItems,
+                requestCancellation);
             var toolDefs = toolRegistry.ToLLMDefinitions(
                 includeWriteTools: generateWorkItems,
                 bulkOnly: generateWorkItems,
                 includeGlobalRepoTools: IsGlobalScope(projectId),
-                includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId));
+                includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId))
+                .Concat(mcpToolSession.Definitions)
+                .ToList();
 
             // 4. Auto-name the session before generation starts (fast Haiku call)
             if (generateWorkItems)
@@ -459,7 +469,7 @@ public class ChatService(
                                 generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...");
                         }
 
-                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
+                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
                         toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                             performedWorkItemMutation = true;
@@ -504,7 +514,8 @@ public class ChatService(
                                 trackActivity: false);
                         }
                         await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
+                        var isWriteTool = toolDef?.IsWriteTool == true || (mcpToolSession.HasTool(toolCall.Name) && !mcpToolSession.IsReadOnly(toolCall.Name));
+                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, isWriteTool);
                     }
 
                     if (totalToolCalls > maxToolCallsTotal)
@@ -806,11 +817,17 @@ public class ChatService(
             });
 
             var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, ownerId);
+            await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
+                userId,
+                includeWriteTools: true,
+                requestCancellation);
             var toolDefs = toolRegistry.ToLLMDefinitions(
                 includeWriteTools: true,
                 bulkOnly: true,
                 includeGlobalRepoTools: IsGlobalScope(projectId),
-                includeNormalChatWriteTools: false);
+                includeNormalChatWriteTools: false)
+                .Concat(mcpToolSession.Definitions)
+                .ToList();
 
             await UpdateGenerationProgressAsync(
                 projectId,
@@ -879,7 +896,7 @@ public class ChatService(
                             generationState: ChatGenerationStates.Running,
                             generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...",
                             ownerId: ownerId);
-                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, requestCancellation);
+                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                             performedWorkItemMutation = true;
                         llmMessages.Add(new LLMMessage
@@ -919,7 +936,8 @@ public class ChatService(
                             trackActivity: false,
                             ownerId: ownerId);
                         await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, toolDef?.IsWriteTool == true);
+                        var isWriteTool = toolDef?.IsWriteTool == true || (mcpToolSession.HasTool(toolCall.Name) && !mcpToolSession.IsReadOnly(toolCall.Name));
+                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, isWriteTool);
                     }
 
                     if (totalToolCalls > maxToolCallsTotal)
@@ -1627,7 +1645,7 @@ public class ChatService(
 
     private async Task<string> ExecuteToolAsync(
         LLMToolCall toolCall, ChatToolContext context, LLMOptions config,
-        IReadOnlyList<LLMToolDefinition> allowedTools, CancellationToken ct)
+        IReadOnlyList<LLMToolDefinition> allowedTools, IMcpToolSession mcpToolSession, CancellationToken ct)
     {
         // Guard: only execute tools that were actually sent to the LLM.
         // Models sometimes hallucinate tool calls for tools not in their definitions.
@@ -1639,6 +1657,25 @@ public class ChatService(
         }
 
         var tool = toolRegistry.Get(toolCall.Name);
+        if (tool is null && mcpToolSession.HasTool(toolCall.Name))
+        {
+            try
+            {
+                var result = await mcpToolSession.ExecuteAsync(toolCall.Name, toolCall.ArgumentsJson, ct);
+                if (result.Length > config.MaxToolOutputLength)
+                {
+                    result = result[..config.MaxToolOutputLength] + "\n... (truncated)";
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                logger.CopilotToolExecutionFailed(ex, toolCall.Name.SanitizeForLogging());
+                return $"Error executing tool '{toolCall.Name}': {ex.Message}";
+            }
+        }
+
         if (tool is null)
         {
             logger.CopilotUnknownTool(toolCall.Name.SanitizeForLogging());
@@ -1897,5 +1934,32 @@ public class ChatService(
         {
             await chatAttachmentStorage.DeleteAsync(attachment.StoragePath);
         }
+    }
+
+    private sealed class NoOpMcpToolSessionFactory : IMcpToolSessionFactory
+    {
+        public static readonly NoOpMcpToolSessionFactory Instance = new();
+
+        public Task<IMcpToolSession> CreateForChatAsync(int userId, bool includeWriteTools, CancellationToken cancellationToken = default)
+            => Task.FromResult<IMcpToolSession>(EmptyMcpToolSession.Instance);
+
+        public Task<IMcpToolSession> CreateForAgentAsync(string userId, AgentRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult<IMcpToolSession>(EmptyMcpToolSession.Instance);
+    }
+
+    private sealed class EmptyMcpToolSession : IMcpToolSession
+    {
+        public static readonly EmptyMcpToolSession Instance = new();
+
+        public IReadOnlyList<LLMToolDefinition> Definitions => [];
+
+        public bool HasTool(string toolName) => false;
+
+        public bool IsReadOnly(string toolName) => false;
+
+        public Task<string> ExecuteAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
+            => Task.FromResult($"Error: unknown MCP tool '{toolName}'.");
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

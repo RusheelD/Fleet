@@ -18,7 +18,17 @@ export type { PlanData } from './plan'
 export type { SearchResult } from './search'
 export type { DashboardActivity, DashboardMetric, DashboardAgent, ProjectDashboard } from './dashboard'
 export type { CurrentPlan, UsageMeter, Plan, SubscriptionData } from './subscription'
-export type { UserProfile, LinkedAccount, UserPreferences, UserSettings } from './user'
+export type {
+  UserProfile,
+  LinkedAccount,
+  McpServer,
+  McpServerTemplate,
+  McpServerTemplateField,
+  McpServerValidationResult,
+  McpServerVariable,
+  UserPreferences,
+  UserSettings,
+} from './user'
 export type { GitHubRepo } from './github'
 export type { NotificationEvent } from './notification'
 

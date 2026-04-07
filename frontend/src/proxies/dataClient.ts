@@ -12,6 +12,7 @@ import {
   search,
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
+  getMcpServers, getMcpServerTemplates, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
   getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
 } from './'
 import type {
@@ -670,6 +671,54 @@ export function useCreateGitHubRepo() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['github-repos'] })
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+    },
+  })
+}
+
+export function useMcpServers(enabled = true) {
+  return useDataQuery('mcp-servers', getMcpServers, [], [], { enableFetch: enabled, staleTime: 0 })
+}
+
+export function useMcpServerTemplates(enabled = true) {
+  return useDataQuery('mcp-server-templates', getMcpServerTemplates, [], [], { enableFetch: enabled })
+}
+
+export function useCreateMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: createMcpServer,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
+    },
+  })
+}
+
+export function useUpdateMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateMcpServer>[1] }) => updateMcpServer(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
+    },
+  })
+}
+
+export function useDeleteMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteMcpServer(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
+    },
+  })
+}
+
+export function useValidateMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => validateMcpServer(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
     },
   })
 }

@@ -57,8 +57,14 @@ export {
   setPrimaryGitHubAccount,
   getGitHubRepos,
   createGitHubRepo,
+  getMcpServers,
+  getMcpServerTemplates,
+  createMcpServer,
+  updateMcpServer,
+  deleteMcpServer,
+  validateMcpServer,
 } from './userProxy'
-export type { CreateGitHubRepoRequest } from './userProxy'
+export type { CreateGitHubRepoRequest, UpsertMcpServerRequest, UpsertMcpServerVariableRequest } from './userProxy'
 export { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 export {
   useDataQuery,
@@ -98,6 +104,12 @@ export {
   useSetPrimaryGitHubAccount,
   useGitHubRepos,
   useCreateGitHubRepo,
+  useMcpServers,
+  useMcpServerTemplates,
+  useCreateMcpServer,
+  useUpdateMcpServer,
+  useDeleteMcpServer,
+  useValidateMcpServer,
   useCreateWorkItem,
   useWorkItemAttachments,
   useUploadWorkItemAttachment,

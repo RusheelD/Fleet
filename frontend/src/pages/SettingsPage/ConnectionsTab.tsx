@@ -22,6 +22,7 @@ import { getApiErrorMessage, getGitHubOAuthState, getGitHubOAuthClientId, useSet
 import { useIsMobile } from '../../hooks'
 import type { LinkedAccount } from '../../models'
 import { appTokens } from '../../styles/appTokens'
+import { McpServersSection } from './McpServersSection'
 
 const PLACEHOLDER_GITHUB_CLIENT_ID = 'YOUR_GITHUB_OAUTH_CLIENT_ID'
 
@@ -213,105 +214,108 @@ export function ConnectionsTab({ connections }: ConnectionsTabProps) {
     }, [setPrimaryGitHub])
 
     return (
-        <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
-            <div className={styles.sectionHeader}>
-                <Title3>Linked Accounts</Title3>
-            </div>
-            <Divider />
-
-            <div className={mergeClasses(styles.infoCard, isMobile && styles.infoCardMobile)}>
-                <PlugConnectedRegular className={styles.infoIcon} />
-                <div>
-                    <Text weight="semibold" block>External Connections</Text>
-                    <Caption1>
-                        Link your GitHub account to enable repository access, pull requests,
-                        and agent-driven development workflows.
-                    </Caption1>
+        <>
+            <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
+                <div className={styles.sectionHeader}>
+                    <Title3>Linked Accounts</Title3>
                 </div>
-            </div>
+                <Divider />
 
-            <AccountRow
-                name="GitHub"
-                connectedAs={hasGitHubConnections ? `${gitHubConnections.length} linked account${gitHubConnections.length === 1 ? '' : 's'}` : undefined}
-                actions={
-                    <Button
-                        appearance="primary"
-                        size="small"
-                        onClick={handleConnectGitHub}
-                        disabled={isConnecting || isResolvingClientId}
-                        className={mergeClasses(isMobile && styles.actionButtonMobile)}
-                    >
-                        {isResolvingClientId ? 'Loading...' : (isConnecting ? 'Connecting...' : 'Connect GitHub')}
-                    </Button>
-                }
-            />
+                <div className={mergeClasses(styles.infoCard, isMobile && styles.infoCardMobile)}>
+                    <PlugConnectedRegular className={styles.infoIcon} />
+                    <div>
+                        <Text weight="semibold" block>External Connections</Text>
+                        <Caption1>
+                            Link your GitHub account to enable repository access, pull requests,
+                            and agent-driven development workflows.
+                        </Caption1>
+                    </div>
+                </div>
 
-            {gitHubConnections.map((account) => (
                 <AccountRow
-                    key={`github-${account.id}`}
-                    name="GitHub Account"
-                    connectedAs={account.connectedAs}
+                    name="GitHub"
+                    connectedAs={hasGitHubConnections ? `${gitHubConnections.length} linked account${gitHubConnections.length === 1 ? '' : 's'}` : undefined}
                     actions={
-                        <>
-                            <Button
-                                appearance={account.isPrimary ? 'primary' : 'subtle'}
-                                size="small"
-                                icon={!account.isPrimary ? <StarRegular /> : undefined}
-                                onClick={() => handleSetPrimaryGitHub(account.id)}
-                                disabled={!!account.isPrimary || setPrimaryGitHub.isPending}
-                            >
-                                {account.isPrimary ? 'Primary' : 'Set Primary'}
-                            </Button>
-                            <Button
-                                appearance="subtle"
-                                size="small"
-                                onClick={() => setDisconnectTarget(account)}
-                            >
-                                Disconnect
-                            </Button>
-                        </>
+                        <Button
+                            appearance="primary"
+                            size="small"
+                            onClick={handleConnectGitHub}
+                            disabled={isConnecting || isResolvingClientId}
+                            className={mergeClasses(isMobile && styles.actionButtonMobile)}
+                        >
+                            {isResolvingClientId ? 'Loading...' : (isConnecting ? 'Connecting...' : 'Connect GitHub')}
+                        </Button>
                     }
                 />
-            ))}
 
-            <Dialog open={!!disconnectTarget} onOpenChange={(_e, data) => { if (!data.open) setDisconnectTarget(null) }}>
-                <DialogSurface>
-                    <DialogBody>
-                        <DialogTitle>Disconnect GitHub</DialogTitle>
-                        <DialogContent>
-                            Are you sure you want to disconnect this GitHub account
-                            {disconnectTarget?.connectedAs ? <> (<b>{disconnectTarget.connectedAs}</b>)</> : null}? Fleet will no longer
-                            be able to access repositories through it.
-                        </DialogContent>
-                        <DialogActions>
-                            <DialogTrigger disableButtonEnhancement>
-                                <Button appearance="secondary">Cancel</Button>
-                            </DialogTrigger>
-                            <Button
-                                appearance="primary"
-                                onClick={handleDisconnectGitHub}
-                                disabled={unlinkGitHub.isPending}
-                            >
-                                {unlinkGitHub.isPending ? 'Disconnecting...' : 'Disconnect'}
-                            </Button>
-                        </DialogActions>
-                    </DialogBody>
-                </DialogSurface>
-            </Dialog>
-
-            {connectError && (
-                <Caption1 className={styles.connectError}>{connectError}</Caption1>
-            )}
-
-            {connections
-                .filter(c => c.provider !== 'GitHub')
-                .map((account) => (
+                {gitHubConnections.map((account) => (
                     <AccountRow
-                        key={`${account.provider}-${account.id}`}
-                        name={account.provider}
+                        key={`github-${account.id}`}
+                        name="GitHub Account"
                         connectedAs={account.connectedAs}
+                        actions={
+                            <>
+                                <Button
+                                    appearance={account.isPrimary ? 'primary' : 'subtle'}
+                                    size="small"
+                                    icon={!account.isPrimary ? <StarRegular /> : undefined}
+                                    onClick={() => handleSetPrimaryGitHub(account.id)}
+                                    disabled={!!account.isPrimary || setPrimaryGitHub.isPending}
+                                >
+                                    {account.isPrimary ? 'Primary' : 'Set Primary'}
+                                </Button>
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={() => setDisconnectTarget(account)}
+                                >
+                                    Disconnect
+                                </Button>
+                            </>
+                        }
                     />
                 ))}
-        </Card>
+
+                <Dialog open={!!disconnectTarget} onOpenChange={(_e, data) => { if (!data.open) setDisconnectTarget(null) }}>
+                    <DialogSurface>
+                        <DialogBody>
+                            <DialogTitle>Disconnect GitHub</DialogTitle>
+                            <DialogContent>
+                                Are you sure you want to disconnect this GitHub account
+                                {disconnectTarget?.connectedAs ? <> (<b>{disconnectTarget.connectedAs}</b>)</> : null}? Fleet will no longer
+                                be able to access repositories through it.
+                            </DialogContent>
+                            <DialogActions>
+                                <DialogTrigger disableButtonEnhancement>
+                                    <Button appearance="secondary">Cancel</Button>
+                                </DialogTrigger>
+                                <Button
+                                    appearance="primary"
+                                    onClick={handleDisconnectGitHub}
+                                    disabled={unlinkGitHub.isPending}
+                                >
+                                    {unlinkGitHub.isPending ? 'Disconnecting...' : 'Disconnect'}
+                                </Button>
+                            </DialogActions>
+                        </DialogBody>
+                    </DialogSurface>
+                </Dialog>
+
+                {connectError && (
+                    <Caption1 className={styles.connectError}>{connectError}</Caption1>
+                )}
+
+                {connections
+                    .filter(c => c.provider !== 'GitHub')
+                    .map((account) => (
+                        <AccountRow
+                            key={`${account.provider}-${account.id}`}
+                            name={account.provider}
+                            connectedAs={account.connectedAs}
+                        />
+                    ))}
+            </Card>
+            <McpServersSection />
+        </>
     )
 }

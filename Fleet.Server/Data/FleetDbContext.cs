@@ -19,6 +19,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<WorkItemAttachment> WorkItemAttachments => Set<WorkItemAttachment>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
+    public DbSet<McpServerConnection> McpServerConnections => Set<McpServerConnection>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<AgentPhaseResult> AgentPhaseResults => Set<AgentPhaseResult>();
     public DbSet<NotificationEvent> NotificationEvents => Set<NotificationEvent>();
@@ -234,6 +235,24 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
             builder.HasIndex(a => new { a.UserProfileId, a.Provider, a.IsPrimary })
                 .HasFilter("\"IsPrimary\" = true AND \"Provider\" = 'GitHub'")
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<McpServerConnection>(builder =>
+        {
+            builder.HasKey(server => server.Id);
+            builder.Property(server => server.Id).ValueGeneratedOnAdd();
+            builder.Property(server => server.Enabled).HasDefaultValue(true);
+            builder.Property(server => server.TransportType).HasDefaultValue("stdio");
+            builder.Property(server => server.ArgumentsJson).HasDefaultValue("[]");
+            builder.Property(server => server.DiscoveredToolsJson).HasDefaultValue("[]");
+
+            builder.HasOne(server => server.UserProfile)
+                .WithMany(user => user.McpServerConnections)
+                .HasForeignKey(server => server.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(server => new { server.UserProfileId, server.Name }).IsUnique();
+            builder.HasIndex(server => new { server.UserProfileId, server.Enabled });
         });
 
         // ── Subscription ───────────────────────────────────────────
