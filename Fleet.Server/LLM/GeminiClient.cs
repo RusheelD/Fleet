@@ -283,16 +283,18 @@ public class GeminiClient(
         var doc = JsonDocument.Parse(responseBody);
         var root = doc.RootElement;
 
+        var usage = ParseUsage(root);
+
         if (!root.TryGetProperty("candidates", out var candidates) || candidates.GetArrayLength() == 0)
         {
-            return new LLMResponse("I wasn't able to generate a response. Please try again.", null);
+            return new LLMResponse("I wasn't able to generate a response. Please try again.", null, usage);
         }
 
         var candidate = candidates[0];
         if (!candidate.TryGetProperty("content", out var content) ||
             !content.TryGetProperty("parts", out var parts))
         {
-            return new LLMResponse("I wasn't able to generate a response. Please try again.", null);
+            return new LLMResponse("I wasn't able to generate a response. Please try again.", null, usage);
         }
 
         string? textContent = null;
@@ -319,6 +321,20 @@ public class GeminiClient(
             }
         }
 
-        return new LLMResponse(textContent, toolCalls);
+        return new LLMResponse(textContent, toolCalls, usage);
+    }
+
+    private static LLMUsage? ParseUsage(JsonElement root)
+    {
+        if (!root.TryGetProperty("usageMetadata", out var meta) || meta.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        int inputTokens = meta.TryGetProperty("promptTokenCount", out var prompt) ? prompt.GetInt32() : 0;
+        int outputTokens = meta.TryGetProperty("candidatesTokenCount", out var cand) ? cand.GetInt32() : 0;
+        int? cachedTokens = meta.TryGetProperty("cachedContentTokenCount", out var cached) ? cached.GetInt32() : null;
+
+        return new LLMUsage(inputTokens, outputTokens, cachedTokens);
     }
 }

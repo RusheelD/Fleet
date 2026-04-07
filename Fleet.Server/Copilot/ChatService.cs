@@ -370,7 +370,14 @@ public class ChatService(
             {
                 // Use Sonnet for generation, Haiku for normal chat
                 var modelOverride = generateWorkItems ? config.GenerateModel : null;
-                var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, modelOverride);
+
+                // Compress context when approaching the token budget
+                var compressedMessages = ContextCompression.Compress(
+                    llmMessages,
+                    config.ContextWindowTokens,
+                    config.ReservedOutputTokens);
+
+                var request = new LLMRequest(systemPrompt, compressedMessages, toolDefs, modelOverride);
                 LLMResponse response;
 
                 try

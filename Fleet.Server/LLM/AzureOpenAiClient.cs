@@ -243,6 +243,40 @@ public class AzureOpenAiClient(
             }
         }
 
-        return new LLMResponse(content, toolCalls);
+        return new LLMResponse(content, toolCalls, ParseUsage(root));
+    }
+
+    private static LLMUsage? ParseUsage(JsonElement root)
+    {
+        if (!root.TryGetProperty("usage", out var usageProp) || usageProp.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        int inputTokens = usageProp.TryGetProperty("input_tokens", out var inp)
+            ? inp.GetInt32()
+            : usageProp.TryGetProperty("prompt_tokens", out var prompt)
+                ? prompt.GetInt32()
+                : 0;
+
+        int outputTokens = usageProp.TryGetProperty("output_tokens", out var outp)
+            ? outp.GetInt32()
+            : usageProp.TryGetProperty("completion_tokens", out var comp)
+                ? comp.GetInt32()
+                : 0;
+
+        int? cachedTokens = null;
+        if (usageProp.TryGetProperty("input_tokens_details", out var details) &&
+            details.TryGetProperty("cached_tokens", out var cached))
+        {
+            cachedTokens = cached.GetInt32();
+        }
+        else if (usageProp.TryGetProperty("prompt_tokens_details", out var promptDetails) &&
+                 promptDetails.TryGetProperty("cached_tokens", out var cachedPrompt))
+        {
+            cachedTokens = cachedPrompt.GetInt32();
+        }
+
+        return new LLMUsage(inputTokens, outputTokens, cachedTokens);
     }
 }

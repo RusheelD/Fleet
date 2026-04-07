@@ -369,6 +369,24 @@ public class ClaudeClient(
             }
         }
 
-        return new LLMResponse(textContent, toolCalls);
+        return new LLMResponse(textContent, toolCalls, ParseUsage(root));
+    }
+
+    private static LLMUsage? ParseUsage(JsonElement root)
+    {
+        if (!root.TryGetProperty("usage", out var usageProp) || usageProp.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        int inputTokens = usageProp.TryGetProperty("input_tokens", out var inp) ? inp.GetInt32() : 0;
+        int outputTokens = usageProp.TryGetProperty("output_tokens", out var outp) ? outp.GetInt32() : 0;
+        int? cachedTokens = usageProp.TryGetProperty("cache_read_input_tokens", out var cached)
+            ? cached.GetInt32()
+            : usageProp.TryGetProperty("cache_creation_input_tokens", out var cacheCreate)
+                ? cacheCreate.GetInt32()
+                : null;
+
+        return new LLMUsage(inputTokens, outputTokens, cachedTokens);
     }
 }

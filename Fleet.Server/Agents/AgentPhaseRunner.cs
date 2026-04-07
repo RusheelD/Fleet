@@ -249,8 +249,14 @@ public class AgentPhaseRunner(
             await ReportProgressAsync(MinimumProgressIncrementPercent, "Starting phase", force: true);
             for (var loop = 0; loop < maxToolLoops; loop++)
             {
+                // Compress context when approaching the token budget
+                var compressedMessages = ContextCompression.Compress(
+                    messages,
+                    llmOptions.Value.ContextWindowTokens,
+                    llmOptions.Value.ReservedOutputTokens);
+
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
-                var request = new LLMRequest(systemPrompt, messages, toolDefs, model, maxTokens,
+                var request = new LLMRequest(systemPrompt, compressedMessages, toolDefs, model, maxTokens,
                     CacheFirstUserMessage: true);
                 LLMResponse response;
 
