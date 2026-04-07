@@ -59,6 +59,7 @@ public class AgentPhaseRunner(
     {
         AgentRole.Backend => TimeSpan.FromMinutes(30),
         AgentRole.Frontend => TimeSpan.FromMinutes(30),
+        AgentRole.Research => TimeSpan.FromMinutes(20),
         AgentRole.Consolidation => TimeSpan.FromMinutes(20),
         AgentRole.Contracts => TimeSpan.FromMinutes(15),
         AgentRole.Testing => TimeSpan.FromMinutes(15),

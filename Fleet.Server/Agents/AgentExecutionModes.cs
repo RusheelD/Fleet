@@ -4,4 +4,5 @@ public static class AgentExecutionModes
 {
     public const string Standard = "standard";
     public const string Orchestration = "orchestration";
+    public const string Coordinator = "coordinator";
 }

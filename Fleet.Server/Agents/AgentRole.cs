@@ -8,6 +8,7 @@ public enum AgentRole
 {
     Manager,
     Planner,
+    Research,
     Contracts,
     Backend,
     Frontend,

@@ -122,6 +122,22 @@ public class AgentOrchestrationService(
         [AgentRole.Manager],
         [AgentRole.Planner],
     ];
+
+    /// <summary>
+    /// Coordinator pipeline: research-first approach that gathers context before
+    /// planning and implementation. Ideal for complex or unfamiliar tasks.
+    /// Flow: Manager → Research → Planner → [Implementation] → [Review, Documentation]
+    /// </summary>
+    private static readonly AgentRole[][] CoordinatorPipeline =
+    [
+        [AgentRole.Manager],
+        [AgentRole.Research],
+        [AgentRole.Planner],
+        [AgentRole.Contracts],
+        [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling],
+        [AgentRole.Consolidation],
+        [AgentRole.Review, AgentRole.Documentation],
+    ];
     private static readonly Dictionary<AgentRole, int> LimitedPipelineRolePriority = new()
     {
         [AgentRole.Backend] = 1,
@@ -129,9 +145,10 @@ public class AgentOrchestrationService(
         [AgentRole.Contracts] = 3,
         [AgentRole.Testing] = 4,
         [AgentRole.Styling] = 5,
-        [AgentRole.Consolidation] = 6,
-        [AgentRole.Review] = 7,
-        [AgentRole.Documentation] = 8,
+        [AgentRole.Research] = 6,
+        [AgentRole.Consolidation] = 7,
+        [AgentRole.Review] = 8,
+        [AgentRole.Documentation] = 9,
     };
 
     internal const int MaxSubFlowChildrenPerExecution = 3;
@@ -275,6 +292,10 @@ public class AgentOrchestrationService(
         // Group 2: Planner
         pipeline.Add([AgentRole.Planner]);
 
+        // Group 2b: Research (if selected — runs between Planner and Contracts in coordinator mode)
+        if (roles.Contains(AgentRole.Research))
+            pipeline.Add([AgentRole.Research]);
+
         // Group 3: Contracts (if selected)
         if (roles.Contains(AgentRole.Contracts))
             pipeline.Add([AgentRole.Contracts]);
@@ -314,6 +335,7 @@ public class AgentOrchestrationService(
     private static int GetMaxTokensForRole(AgentRole role) => role switch
     {
         AgentRole.Planner => 4096,
+        AgentRole.Research => 8192,
         AgentRole.Review => 4096,
         AgentRole.Documentation => 4096,
         AgentRole.Contracts => 8192,
@@ -3859,9 +3881,12 @@ public class AgentOrchestrationService(
     }
 
     internal static AgentRole[][] ResolveDefaultPipeline(string? executionMode)
-        => string.Equals(executionMode, AgentExecutionModes.Orchestration, StringComparison.OrdinalIgnoreCase)
-            ? OrchestrationPreludePipeline
-            : FullPipeline;
+        => executionMode switch
+        {
+            AgentExecutionModes.Orchestration => OrchestrationPreludePipeline,
+            AgentExecutionModes.Coordinator => CoordinatorPipeline,
+            _ => FullPipeline,
+        };
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
     {
