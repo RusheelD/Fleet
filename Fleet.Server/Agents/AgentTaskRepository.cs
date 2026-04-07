@@ -1,4 +1,5 @@
 using Fleet.Server.Data;
+using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -280,5 +281,21 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
         }
 
         return descendants;
+    }
+
+    public async Task<AgentExecution?> GetExecutionByIdAsync(string projectId, string executionId)
+    {
+        return await context.AgentExecutions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == executionId);
+    }
+
+    public async Task<IReadOnlyList<AgentPhaseResult>> GetPhaseResultsAsync(string executionId)
+    {
+        return await context.AgentPhaseResults
+            .AsNoTracking()
+            .Where(p => p.ExecutionId == executionId)
+            .OrderBy(p => p.PhaseOrder)
+            .ToListAsync();
     }
 }

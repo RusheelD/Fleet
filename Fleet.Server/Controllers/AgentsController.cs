@@ -81,6 +81,14 @@ public class AgentsController(
         return Ok(status);
     }
 
+    [HttpGet("executions/{executionId}/metrics")]
+    public async Task<IActionResult> GetExecutionMetrics(string projectId, string executionId)
+    {
+        var metrics = await agentService.GetExecutionMetricsAsync(projectId, executionId);
+        if (metrics is null) return NotFound();
+        return Ok(metrics);
+    }
+
     /// <summary>
     /// Cancels (stops) a running execution.
     /// </summary>

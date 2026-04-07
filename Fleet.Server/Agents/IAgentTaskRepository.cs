@@ -1,3 +1,4 @@
+using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
 
 namespace Fleet.Server.Agents;
@@ -10,6 +11,8 @@ public interface IAgentTaskRepository
     Task<int> ClearLogsByExecutionIdAsync(string projectId, string executionId);
     Task<AgentExecutionDeletionResult?> DeleteExecutionAsync(string projectId, string executionId);
     Task<IReadOnlyList<DashboardAgentDto>> GetDashboardAgentsByProjectIdAsync(string projectId);
+    Task<AgentExecution?> GetExecutionByIdAsync(string projectId, string executionId);
+    Task<IReadOnlyList<AgentPhaseResult>> GetPhaseResultsAsync(string executionId);
 
     /// <summary>Computes total/running execution counts for a single project.</summary>
     Task<AgentSummaryDto> GetAgentSummaryByProjectIdAsync(string projectId);
