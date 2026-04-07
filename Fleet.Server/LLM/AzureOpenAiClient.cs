@@ -243,7 +243,20 @@ public class AzureOpenAiClient(
             }
         }
 
-        return new LLMResponse(content, toolCalls, ParseUsage(root));
+        var stopReason = root.TryGetProperty("status", out var statusProp)
+            ? statusProp.GetString()
+            : null;
+        // Map Responses API "incomplete" with "max_output_tokens" reason to "max_tokens"
+        if (string.Equals(stopReason, "incomplete", StringComparison.OrdinalIgnoreCase) &&
+            root.TryGetProperty("incomplete_details", out var details) &&
+            details.TryGetProperty("reason", out var reasonProp))
+        {
+            var reason = reasonProp.GetString();
+            if (string.Equals(reason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
+                stopReason = "max_tokens";
+        }
+
+        return new LLMResponse(content, toolCalls, ParseUsage(root), stopReason);
     }
 
     private static LLMUsage? ParseUsage(JsonElement root)

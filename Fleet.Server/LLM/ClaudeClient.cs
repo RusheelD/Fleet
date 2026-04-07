@@ -369,7 +369,12 @@ public class ClaudeClient(
             }
         }
 
-        return new LLMResponse(textContent, toolCalls, ParseUsage(root));
+        // Claude uses "stop_reason": "end_turn" | "max_tokens" | "stop_sequence" | "tool_use"
+        var stopReason = root.TryGetProperty("stop_reason", out var stopProp)
+            ? stopProp.GetString()
+            : null;
+
+        return new LLMResponse(textContent, toolCalls, ParseUsage(root), stopReason);
     }
 
     private static LLMUsage? ParseUsage(JsonElement root)

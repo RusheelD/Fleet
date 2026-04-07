@@ -321,7 +321,16 @@ public class GeminiClient(
             }
         }
 
-        return new LLMResponse(textContent, toolCalls, usage);
+        // Gemini uses "finishReason": "STOP" | "MAX_TOKENS" | "SAFETY" etc.
+        var finishReason = candidate.TryGetProperty("finishReason", out var frProp)
+            ? frProp.GetString()
+            : null;
+        // Normalize to common format
+        var stopReason = string.Equals(finishReason, "MAX_TOKENS", StringComparison.OrdinalIgnoreCase)
+            ? "max_tokens"
+            : finishReason?.ToLowerInvariant();
+
+        return new LLMResponse(textContent, toolCalls, usage, stopReason);
     }
 
     private static LLMUsage? ParseUsage(JsonElement root)

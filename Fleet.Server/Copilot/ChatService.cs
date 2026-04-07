@@ -368,6 +368,8 @@ public class ChatService(
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
 
+            var outputTokenCap = AdaptiveTokenCap.DefaultCap;
+
             for (var loop = 0; loop < maxLoops; loop++)
             {
                 // Use Sonnet for generation, Haiku for normal chat
@@ -379,7 +381,9 @@ public class ChatService(
                     config.ContextWindowTokens,
                     config.ReservedOutputTokens);
 
-                var request = new LLMRequest(systemPrompt, compressedMessages, toolDefs, modelOverride);
+                var request = AdaptiveTokenCap.ApplyCap(
+                    new LLMRequest(systemPrompt, compressedMessages, toolDefs, modelOverride),
+                    outputTokenCap);
                 LLMResponse response;
 
                 try
@@ -397,6 +401,7 @@ public class ChatService(
                     }
                     response = await llmClient.CompleteAsync(request, requestCancellation);
                     tokenTracker?.Record(response.Usage);
+                    outputTokenCap = AdaptiveTokenCap.GetNextCap(outputTokenCap, response.WasTruncated);
                 }
                 catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
                 {

@@ -249,6 +249,7 @@ public class AgentPhaseRunner(
         try
         {
             await ReportProgressAsync(MinimumProgressIncrementPercent, "Starting phase", force: true);
+            var outputTokenCap = AdaptiveTokenCap.DefaultCap;
             for (var loop = 0; loop < maxToolLoops; loop++)
             {
                 // Compress context when approaching the token budget
@@ -258,8 +259,10 @@ public class AgentPhaseRunner(
                     llmOptions.Value.ReservedOutputTokens);
 
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
-                var request = new LLMRequest(systemPrompt, compressedMessages, toolDefs, model, maxTokens,
-                    CacheFirstUserMessage: true);
+                var request = AdaptiveTokenCap.ApplyCap(
+                    new LLMRequest(systemPrompt, compressedMessages, toolDefs, model, maxTokens,
+                        CacheFirstUserMessage: true),
+                    outputTokenCap);
                 LLMResponse response;
 
                 try
@@ -286,6 +289,7 @@ public class AgentPhaseRunner(
 
                     response = await responseTask;
                     tokenTracker?.Record(response.Usage);
+                    outputTokenCap = AdaptiveTokenCap.GetNextCap(outputTokenCap, response.WasTruncated);
                 }
                 catch (OperationCanceledException)
                 {
