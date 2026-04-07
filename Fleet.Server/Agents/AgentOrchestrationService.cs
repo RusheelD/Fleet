@@ -30,9 +30,6 @@ public class AgentOrchestrationService(
     IAgentTaskRepository agentTaskRepository,
     IConnectionService connectionService,
     IWorkItemRepository workItemRepository,
-    IWorkItemAttachmentService workItemAttachmentService,
-    IChatSessionRepository chatSessionRepository,
-    IChatAttachmentStorage chatAttachmentStorage,
     IServiceScopeFactory serviceScopeFactory,
     ILLMClient llmClient,
     IHttpClientFactory httpClientFactory,
@@ -1282,6 +1279,9 @@ public class AgentOrchestrationService(
         var scopedConnectionService = scope.ServiceProvider.GetRequiredService<IConnectionService>();
         var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
         var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
+        var scopedWorkItemAttachmentService = scope.ServiceProvider.GetRequiredService<IWorkItemAttachmentService>();
+        var scopedChatSessionRepository = scope.ServiceProvider.GetRequiredService<IChatSessionRepository>();
+        var scopedChatAttachmentStorage = scope.ServiceProvider.GetRequiredService<IChatAttachmentStorage>();
         var scopedNotificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
         var scopedUsageLedgerService = scope.ServiceProvider.GetRequiredService<IUsageLedgerService>();
         var scopedEventPublisher = scope.ServiceProvider.GetRequiredService<IServerEventPublisher>();
@@ -1778,6 +1778,9 @@ public class AgentOrchestrationService(
                 userId.ToString(),
                 workItem,
                 childWorkItems,
+                scopedChatSessionRepository,
+                scopedWorkItemAttachmentService,
+                scopedChatAttachmentStorage,
                 externalCancellation);
 
             // Build the initial user message with work item context (includes children)
@@ -3161,6 +3164,9 @@ public class AgentOrchestrationService(
         string ownerId,
         Models.WorkItemDto workItem,
         List<Models.WorkItemDto> allDescendants,
+        IChatSessionRepository scopedChatSessionRepository,
+        IWorkItemAttachmentService scopedWorkItemAttachmentService,
+        IChatAttachmentStorage scopedChatAttachmentStorage,
         CancellationToken cancellationToken)
     {
         var chatReferences = CollectReferencedChatAttachments(workItem, allDescendants);
@@ -3173,7 +3179,7 @@ public class AgentOrchestrationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var attachment = await chatSessionRepository.GetAttachmentRecordAsync(attachmentId, ownerId);
+            var attachment = await scopedChatSessionRepository.GetAttachmentRecordAsync(attachmentId, ownerId);
             if (attachment is null)
             {
                 logger.LogWarning(
@@ -3185,7 +3191,7 @@ public class AgentOrchestrationService(
 
             byte[]? content = null;
             if (!string.IsNullOrWhiteSpace(attachment.StoragePath))
-                content = await chatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
+                content = await scopedChatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
 
             if (content is null)
                 content = Encoding.UTF8.GetBytes(attachment.Content ?? string.Empty);
@@ -3208,7 +3214,7 @@ public class AgentOrchestrationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var attachment = await workItemAttachmentService.GetAttachmentRecordAsync(projectId, attachmentId, cancellationToken);
+            var attachment = await scopedWorkItemAttachmentService.GetAttachmentRecordAsync(projectId, attachmentId, cancellationToken);
             if (attachment is null)
             {
                 logger.LogWarning(
@@ -3220,7 +3226,7 @@ public class AgentOrchestrationService(
 
             var content = string.IsNullOrWhiteSpace(attachment.StoragePath)
                 ? null
-                : await chatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
+                : await scopedChatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
 
             if (content is null || content.Length == 0)
                 continue;
