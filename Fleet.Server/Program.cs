@@ -393,6 +393,7 @@ builder.Services.AddScoped<ChatService>();
 builder.Services.AddScoped<IChatService>(serviceProvider => serviceProvider.GetRequiredService<ChatService>());
 builder.Services.AddSingleton<IChatAttachmentStorage, FileSystemChatAttachmentStorage>();
 builder.Services.AddScoped<IMemoryExtractor, MemoryExtractor>();
+builder.Services.AddScoped<IMemoryReranker, MemoryReranker>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IUsageLedgerService, UsageLedgerService>();

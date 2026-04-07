@@ -5,7 +5,10 @@ using Fleet.Server.Models;
 
 namespace Fleet.Server.Memories;
 
-public partial class MemoryService(IMemoryRepository repository, ILogger<MemoryService> logger) : IMemoryService
+public partial class MemoryService(
+    IMemoryRepository repository,
+    ILogger<MemoryService> logger,
+    IMemoryReranker? reranker = null) : IMemoryService
 {
     private const int IndexEntryLimit = 24;
     private const int SelectedMemoryLimit = 5;
@@ -81,9 +84,8 @@ public partial class MemoryService(IMemoryRepository repository, ILogger<MemoryS
             builder.AppendLine($"- ... and {memories.Count - IndexEntryLimit} more saved memories not shown in the index.");
         }
 
-        var selected = SelectRelevantMemories(memories, projectId, query)
-            .Take(SelectedMemoryLimit)
-            .ToList();
+        // Use LLM reranking when there are many candidates and a query is available
+        var selected = await SelectWithOptionalRerankAsync(memories, projectId, query, cancellationToken);
 
         if (selected.Count == 0)
         {
@@ -198,6 +200,47 @@ public partial class MemoryService(IMemoryRepository repository, ILogger<MemoryS
             .ThenByDescending(item => item.Memory.ProjectId == projectId)
             .ThenByDescending(item => item.Memory.UpdatedAtUtc)
             .Select(item => item.Memory);
+    }
+
+    /// <summary>
+    /// Selects relevant memories using keyword scoring as the primary method.
+    /// When many candidates exist and an LLM reranker is available, uses the
+    /// LLM to semantically re-rank for higher-quality recall.
+    /// </summary>
+    private async Task<List<MemoryEntry>> SelectWithOptionalRerankAsync(
+        IReadOnlyList<MemoryEntry> memories,
+        string? projectId,
+        string? query,
+        CancellationToken cancellationToken)
+    {
+        // Always include pinned memories
+        var pinned = memories.Where(m => m.AlwaysInclude).ToList();
+
+        // Try LLM reranking for large candidate sets
+        if (reranker is not null && memories.Count >= MemoryReranker.MinCandidatesForRerank && !string.IsNullOrWhiteSpace(query))
+        {
+            var rerankedIndices = await reranker.RerankAsync(query, memories, SelectedMemoryLimit, cancellationToken);
+            if (rerankedIndices.Count > 0)
+            {
+                var reranked = rerankedIndices
+                    .Select(i => memories[i])
+                    .ToList();
+
+                // Merge pinned memories (they always appear) with reranked results
+                var merged = pinned
+                    .Concat(reranked.Where(m => !m.AlwaysInclude))
+                    .Take(SelectedMemoryLimit)
+                    .ToList();
+
+                logger.LogDebug("LLM reranking selected {Count} memories from {Total} candidates", merged.Count, memories.Count);
+                return merged;
+            }
+        }
+
+        // Fallback to keyword scoring
+        return SelectRelevantMemories(memories, projectId, query)
+            .Take(SelectedMemoryLimit)
+            .ToList();
     }
 
     private static int ScoreMemory(MemoryEntry memory, HashSet<string> queryTokens, string? projectId)
