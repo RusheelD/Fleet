@@ -1,4 +1,5 @@
 using Fleet.Server.Auth;
+using Fleet.Server.Diagnostics;
 using Fleet.Server.Agents;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
@@ -29,7 +30,8 @@ public class ChatService(
     IServiceScopeFactory? serviceScopeFactory = null,
     IMcpToolSessionFactory? mcpToolSessionFactory = null,
     IMemoryService? memoryService = null,
-    ISkillService? skillService = null) : IChatService
+    ISkillService? skillService = null,
+    ITokenTracker? tokenTracker = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
@@ -394,6 +396,7 @@ public class ChatService(
                             generationStatus: "Thinking through the next work-item changes...");
                     }
                     response = await llmClient.CompleteAsync(request, requestCancellation);
+                    tokenTracker?.Record(response.Usage);
                 }
                 catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
                 {

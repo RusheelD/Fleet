@@ -21,4 +21,7 @@ public sealed class NoOpUsageLedgerService : IUsageLedgerService
             CodingRunsUsed: 0,
             WorkItemRunsRemaining: null,
             CodingRunsRemaining: null));
+
+    public Task RecordTokensAsync(int userId, int inputTokens, int outputTokens, int cachedTokens = 0, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }

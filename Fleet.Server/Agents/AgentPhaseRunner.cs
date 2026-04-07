@@ -1,4 +1,5 @@
 using Fleet.Server.Agents.Tools;
+using Fleet.Server.Diagnostics;
 using Fleet.Server.LLM;
 using Fleet.Server.Mcp;
 using Fleet.Server.Memories;
@@ -21,7 +22,8 @@ public class AgentPhaseRunner(
     ILogger<AgentPhaseRunner> logger,
     IMcpToolSessionFactory? mcpToolSessionFactory = null,
     IMemoryService? memoryService = null,
-    ISkillService? skillService = null) : IAgentPhaseRunner
+    ISkillService? skillService = null,
+    ITokenTracker? tokenTracker = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
@@ -283,6 +285,7 @@ public class AgentPhaseRunner(
                     }
 
                     response = await responseTask;
+                    tokenTracker?.Record(response.Usage);
                 }
                 catch (OperationCanceledException)
                 {
@@ -290,7 +293,9 @@ public class AgentPhaseRunner(
                     return new PhaseResult(role, string.Empty, totalToolCalls, false,
                         $"Phase timed out after {phaseTimeout.TotalMinutes} minutes.",
                         lastReportedPercent,
-                        lastProgressSummary);
+                        lastProgressSummary,
+                        tokenTracker?.TotalInputTokens ?? 0,
+                        tokenTracker?.TotalOutputTokens ?? 0);
                 }
 
                 // If the model returned tool calls, execute them
@@ -438,7 +443,9 @@ public class AgentPhaseRunner(
                     role, loop + 1, totalToolCalls);
 
                 await ReportProgressAsync(100, "Phase completed", force: true);
-                return new PhaseResult(role, output, totalToolCalls, true);
+                return new PhaseResult(role, output, totalToolCalls, true,
+                    InputTokens: tokenTracker?.TotalInputTokens ?? 0,
+                    OutputTokens: tokenTracker?.TotalOutputTokens ?? 0);
             }
 
             // Exhausted tool loops
@@ -446,12 +453,16 @@ public class AgentPhaseRunner(
             return new PhaseResult(role, string.Empty, totalToolCalls, false,
                 $"Exhausted {maxToolLoops} tool-calling loops without producing final output.",
                 lastReportedPercent,
-                lastProgressSummary);
+                lastProgressSummary,
+                tokenTracker?.TotalInputTokens ?? 0,
+                tokenTracker?.TotalOutputTokens ?? 0);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Phase {Role} failed with exception", role);
-            return new PhaseResult(role, string.Empty, totalToolCalls, false, ex.Message, lastReportedPercent, lastProgressSummary);
+            return new PhaseResult(role, string.Empty, totalToolCalls, false, ex.Message, lastReportedPercent, lastProgressSummary,
+                tokenTracker?.TotalInputTokens ?? 0,
+                tokenTracker?.TotalOutputTokens ?? 0);
         }
     }
 

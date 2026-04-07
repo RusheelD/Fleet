@@ -9,6 +9,9 @@ public class MonthlyUsageLedger
     public int WorkItemRunRefunds { get; set; }
     public int CodingRunCharges { get; set; }
     public int CodingRunRefunds { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    public long CachedInputTokens { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }

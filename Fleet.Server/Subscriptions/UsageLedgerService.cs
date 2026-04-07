@@ -145,4 +145,19 @@ public class UsageLedgerService(FleetDbContext dbContext) : IUsageLedgerService
 
         return UserRoles.Normalize(role);
     }
+
+    public async Task RecordTokensAsync(
+        int userId,
+        int inputTokens,
+        int outputTokens,
+        int cachedTokens = 0,
+        CancellationToken cancellationToken = default)
+    {
+        var ledger = await GetOrCreateCurrentLedgerAsync(userId, cancellationToken);
+        ledger.InputTokens += inputTokens;
+        ledger.OutputTokens += outputTokens;
+        ledger.CachedInputTokens += cachedTokens;
+        ledger.UpdatedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
 }

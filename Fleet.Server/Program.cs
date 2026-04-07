@@ -95,6 +95,7 @@ builder.Services.AddHostedService<AgentExecutionRecoveryService>();
 builder.Services.AddHealthChecks()
     .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
 builder.Services.AddSingleton<ServiceStats>();
+builder.Services.AddScoped<ITokenTracker, TokenTracker>();
 
 // Add PostgreSQL + EF Core via Aspire integration.
 var fleetDbConnectionString = DbConnectionStringResolver.ResolveFleetDbConnectionString(builder.Configuration);

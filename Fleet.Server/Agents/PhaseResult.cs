@@ -23,5 +23,11 @@ public record PhaseResult(
     double EstimatedCompletionPercent = 0,
 
     /// <summary>Latest status summary reported during this attempt.</summary>
-    string? LastProgressSummary = null
+    string? LastProgressSummary = null,
+
+    /// <summary>Total input tokens consumed during this phase.</summary>
+    int InputTokens = 0,
+
+    /// <summary>Total output tokens generated during this phase.</summary>
+    int OutputTokens = 0
 );

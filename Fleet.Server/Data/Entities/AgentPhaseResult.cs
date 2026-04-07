@@ -17,6 +17,12 @@ public class AgentPhaseResult
     /// <summary>Number of tool calls made during this phase.</summary>
     public int ToolCallCount { get; set; }
 
+    /// <summary>Total input tokens consumed during this phase.</summary>
+    public int InputTokens { get; set; }
+
+    /// <summary>Total output tokens generated during this phase.</summary>
+    public int OutputTokens { get; set; }
+
     /// <summary>Whether the phase completed successfully.</summary>
     public bool Success { get; set; }
 

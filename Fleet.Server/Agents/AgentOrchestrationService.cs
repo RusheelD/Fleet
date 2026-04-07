@@ -2519,6 +2519,8 @@ public class AgentOrchestrationService(
                             Role = role.ToString(),
                             Output = result.Output,
                             ToolCallCount = result.ToolCallCount,
+                            InputTokens = result.InputTokens,
+                            OutputTokens = result.OutputTokens,
                             Success = result.Success,
                             Error = result.Error,
                             StartedAt = phaseStart,
