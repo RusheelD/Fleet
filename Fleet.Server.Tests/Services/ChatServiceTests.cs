@@ -5,6 +5,7 @@ using Fleet.Server.LLM;
 using Fleet.Server.Memories;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
+using Fleet.Server.Skills;
 using Fleet.Server.Subscriptions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -876,6 +877,48 @@ public class ChatServiceTests
 
         Assert.IsNotNull(capturedRequest);
         StringAssert.Contains(capturedRequest.SystemPrompt, "Remember the real database testing rule.");
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_WithSkillPrompt_IncludesPlaybookInSystemPrompt()
+    {
+        var skillService = new Mock<ISkillService>();
+        skillService.Setup(service => service.BuildPromptBlockAsync(UserId, ProjectId, "Hello", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("## Playbooks\nUse the bug triage playbook.");
+
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            _toolRegistry,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            skillService: skillService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Response", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Hello"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Response"))
+            .ReturnsAsync(assistantMsg);
+
+        LLMRequest? capturedRequest = null;
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequest = request)
+            .ReturnsAsync(new LLMResponse("Response", null));
+
+        await sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+
+        Assert.IsNotNull(capturedRequest);
+        StringAssert.Contains(capturedRequest.SystemPrompt, "Use the bug triage playbook.");
     }
 
     [TestMethod]

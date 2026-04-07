@@ -5,6 +5,8 @@ import type {
   UserPreferences,
   LinkedAccount,
   MemoryEntry,
+  PromptSkill,
+  PromptSkillTemplate,
   GitHubRepo,
   McpServer,
   McpServerTemplate,
@@ -29,6 +31,14 @@ export interface UpsertMemoryEntryRequest {
   type: 'user' | 'feedback' | 'project' | 'reference' | string
   content: string
   alwaysInclude: boolean
+}
+
+export interface UpsertPromptSkillRequest {
+  name: string
+  description: string
+  whenToUse: string
+  content: string
+  enabled: boolean
 }
 
 export function getUserMemories(): Promise<MemoryEntry[]> {
@@ -61,6 +71,42 @@ export function updateProjectMemory(projectId: string, id: number, data: UpsertM
 
 export function deleteProjectMemory(projectId: string, id: number): Promise<void> {
   return del<void>(`/api/projects/${projectId}/memories/${id}`)
+}
+
+export function getSkillTemplates(): Promise<PromptSkillTemplate[]> {
+  return get<PromptSkillTemplate[]>('/api/skill-templates')
+}
+
+export function getUserSkills(): Promise<PromptSkill[]> {
+  return get<PromptSkill[]>('/api/user/skills')
+}
+
+export function createUserSkill(data: UpsertPromptSkillRequest): Promise<PromptSkill> {
+  return post<PromptSkill>('/api/user/skills', data)
+}
+
+export function updateUserSkill(id: number, data: UpsertPromptSkillRequest): Promise<PromptSkill> {
+  return put<PromptSkill>(`/api/user/skills/${id}`, data)
+}
+
+export function deleteUserSkill(id: number): Promise<void> {
+  return del<void>(`/api/user/skills/${id}`)
+}
+
+export function getProjectSkills(projectId: string): Promise<PromptSkill[]> {
+  return get<PromptSkill[]>(`/api/projects/${projectId}/skills`)
+}
+
+export function createProjectSkill(projectId: string, data: UpsertPromptSkillRequest): Promise<PromptSkill> {
+  return post<PromptSkill>(`/api/projects/${projectId}/skills`, data)
+}
+
+export function updateProjectSkill(projectId: string, id: number, data: UpsertPromptSkillRequest): Promise<PromptSkill> {
+  return put<PromptSkill>(`/api/projects/${projectId}/skills/${id}`, data)
+}
+
+export function deleteProjectSkill(projectId: string, id: number): Promise<void> {
+  return del<void>(`/api/projects/${projectId}/skills/${id}`)
 }
 
 export function getGitHubOAuthState(): Promise<{ state: string }> {

@@ -22,6 +22,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<McpServerConnection> McpServerConnections => Set<McpServerConnection>();
     public DbSet<MemoryEntry> MemoryEntries => Set<MemoryEntry>();
+    public DbSet<PromptSkill> PromptSkills => Set<PromptSkill>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<AgentPhaseResult> AgentPhaseResults => Set<AgentPhaseResult>();
     public DbSet<NotificationEvent> NotificationEvents => Set<NotificationEvent>();
@@ -275,6 +276,25 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .OnDelete(DeleteBehavior.Cascade);
 
             builder.HasIndex(memory => new { memory.UserProfileId, memory.ProjectId, memory.UpdatedAtUtc });
+        });
+
+        modelBuilder.Entity<PromptSkill>(builder =>
+        {
+            builder.HasKey(skill => skill.Id);
+            builder.Property(skill => skill.Id).ValueGeneratedOnAdd();
+            builder.Property(skill => skill.Enabled).HasDefaultValue(true);
+
+            builder.HasOne(skill => skill.UserProfile)
+                .WithMany(user => user.PromptSkills)
+                .HasForeignKey(skill => skill.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasOne(skill => skill.Project)
+                .WithMany(project => project.PromptSkills)
+                .HasForeignKey(skill => skill.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(skill => new { skill.UserProfileId, skill.ProjectId, skill.Enabled });
         });
 
         // ── Subscription ───────────────────────────────────────────

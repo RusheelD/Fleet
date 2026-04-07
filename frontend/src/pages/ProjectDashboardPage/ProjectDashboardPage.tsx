@@ -24,7 +24,7 @@ import {
     LinkRegular,
     OpenRegular,
 } from '@fluentui/react-icons'
-import { FleetRocketLogo, MemoryWorkspace, PageHeader } from '../../components/shared'
+import { FleetRocketLogo, MemoryWorkspace, PageHeader, PlaybookWorkspace } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
 import {
     useProjectDashboardBySlug,
@@ -34,8 +34,14 @@ import {
     useCreateProjectMemory,
     useUpdateProjectMemory,
     useDeleteProjectMemory,
+    useSkillTemplates,
+    useProjectSkills,
+    useCreateProjectSkill,
+    useUpdateProjectSkill,
+    useDeleteProjectSkill,
     resolveIcon,
     type UpsertMemoryEntryRequest,
+    type UpsertPromptSkillRequest,
 } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { appTokens, APP_MOBILE_MEDIA_QUERY } from '../../styles/appTokens'
@@ -183,11 +189,17 @@ export function ProjectDashboardPage() {
     const createProjectMemory = useCreateProjectMemory(dashboard?.id)
     const updateProjectMemory = useUpdateProjectMemory(dashboard?.id)
     const deleteProjectMemory = useDeleteProjectMemory(dashboard?.id)
+    const skillTemplates = useSkillTemplates()
+    const projectSkills = useProjectSkills(dashboard?.id, Boolean(dashboard?.id))
+    const createProjectSkill = useCreateProjectSkill(dashboard?.id)
+    const updateProjectSkill = useUpdateProjectSkill(dashboard?.id)
+    const deleteProjectSkill = useDeleteProjectSkill(dashboard?.id)
     const deleteProject = useDeleteProject()
     const updateProject = useUpdateProject()
     const [unlinkRepoOpen, setUnlinkRepoOpen] = useState(false)
     const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
     const isMemorySaving = createProjectMemory.isPending || updateProjectMemory.isPending || deleteProjectMemory.isPending
+    const isPlaybookSaving = createProjectSkill.isPending || updateProjectSkill.isPending || deleteProjectSkill.isPending
 
     const handleUnlinkRepo = useCallback(() => {
         if (!dashboard) {
@@ -227,6 +239,21 @@ export function ProjectDashboardPage() {
     const handleDeleteMemory = useCallback(
         (id: number) => deleteProjectMemory.mutateAsync(id),
         [deleteProjectMemory],
+    )
+
+    const handleCreatePlaybook = useCallback(
+        (request: UpsertPromptSkillRequest) => createProjectSkill.mutateAsync(request),
+        [createProjectSkill],
+    )
+
+    const handleUpdatePlaybook = useCallback(
+        (id: number, request: UpsertPromptSkillRequest) => updateProjectSkill.mutateAsync({ id, data: request }),
+        [updateProjectSkill],
+    )
+
+    const handleDeletePlaybook = useCallback(
+        (id: number) => deleteProjectSkill.mutateAsync(id),
+        [deleteProjectSkill],
     )
 
     if (isLoading || !dashboard) {
@@ -389,6 +416,20 @@ export function ProjectDashboardPage() {
                 onCreate={handleCreateMemory}
                 onUpdate={handleUpdateMemory}
                 onDelete={handleDeleteMemory}
+            />
+
+            <PlaybookWorkspace
+                title="Project Playbooks"
+                subtitle="Create project-specific workflows Fleet should reuse for this team, such as rollout checklists, triage standards, or backlog shaping conventions."
+                templates={skillTemplates.data}
+                playbooks={projectSkills.data}
+                isLoading={skillTemplates.isLoading || projectSkills.isLoading}
+                isSaving={isPlaybookSaving}
+                emptyMessage="No project playbooks have been created yet."
+                createLabel="New Project Playbook"
+                onCreate={handleCreatePlaybook}
+                onUpdate={handleUpdatePlaybook}
+                onDelete={handleDeletePlaybook}
             />
 
             <Dialog open={unlinkRepoOpen} onOpenChange={(_e, data) => setUnlinkRepoOpen(data.open)}>

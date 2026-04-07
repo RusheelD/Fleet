@@ -58,6 +58,15 @@ export {
   createProjectMemory,
   updateProjectMemory,
   deleteProjectMemory,
+  getSkillTemplates,
+  getUserSkills,
+  createUserSkill,
+  updateUserSkill,
+  deleteUserSkill,
+  getProjectSkills,
+  createProjectSkill,
+  updateProjectSkill,
+  deleteProjectSkill,
   getGitHubOAuthState,
   getGitHubOAuthClientId,
   linkGitHub,
@@ -72,7 +81,13 @@ export {
   deleteMcpServer,
   validateMcpServer,
 } from './userProxy'
-export type { CreateGitHubRepoRequest, UpsertMcpServerRequest, UpsertMcpServerVariableRequest, UpsertMemoryEntryRequest } from './userProxy'
+export type {
+  CreateGitHubRepoRequest,
+  UpsertMcpServerRequest,
+  UpsertMcpServerVariableRequest,
+  UpsertMemoryEntryRequest,
+  UpsertPromptSkillRequest,
+} from './userProxy'
 export { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 export {
   useDataQuery,
@@ -115,6 +130,15 @@ export {
   useCreateProjectMemory,
   useUpdateProjectMemory,
   useDeleteProjectMemory,
+  useSkillTemplates,
+  useUserSkills,
+  useCreateUserSkill,
+  useUpdateUserSkill,
+  useDeleteUserSkill,
+  useProjectSkills,
+  useCreateProjectSkill,
+  useUpdateProjectSkill,
+  useDeleteProjectSkill,
   useLinkGitHub,
   useUnlinkGitHub,
   useSetPrimaryGitHubAccount,

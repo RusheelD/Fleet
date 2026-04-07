@@ -11,12 +11,13 @@ import {
     PersonRegular,
     LinkRegular,
     BookmarkRegular,
+    BotRegular,
     PaintBrushRegular,
     ShieldKeyholeRegular,
     AlertRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
-import { ProfileTab, ConnectionsTab, MemoryTab, AppearanceTab, NotificationsTab, SecurityTab } from './'
+import { ProfileTab, ConnectionsTab, MemoryTab, PlaybooksTab, AppearanceTab, NotificationsTab, SecurityTab } from './'
 import { useUserSettings } from '../../proxies'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
@@ -81,6 +82,7 @@ export function SettingsPage() {
                 <Tab value="profile" icon={<PersonRegular />}>Profile</Tab>
                 <Tab value="connections" icon={<LinkRegular />}>Connections</Tab>
                 <Tab value="memory" icon={<BookmarkRegular />}>Memory</Tab>
+                <Tab value="playbooks" icon={<BotRegular />}>Playbooks</Tab>
                 <Tab value="appearance" icon={<PaintBrushRegular />}>Appearance</Tab>
                 <Tab value="notifications" icon={<AlertRegular />}>Notifications</Tab>
                 <Tab value="security" icon={<ShieldKeyholeRegular />}>Security</Tab>
@@ -89,6 +91,7 @@ export function SettingsPage() {
             {tab === 'profile' && <ProfileTab profile={settings.profile} />}
             {tab === 'connections' && <ConnectionsTab connections={settings.connections} />}
             {tab === 'memory' && <MemoryTab />}
+            {tab === 'playbooks' && <PlaybooksTab />}
             {tab === 'appearance' && <AppearanceTab />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'security' && <SecurityTab />}

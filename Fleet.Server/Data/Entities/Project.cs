@@ -26,4 +26,5 @@ public class Project
     public List<LogEntry> LogEntries { get; set; } = [];
     public List<DashboardAgent> DashboardAgents { get; set; } = [];
     public List<MemoryEntry> MemoryEntries { get; set; } = [];
+    public List<PromptSkill> PromptSkills { get; set; } = [];
 }

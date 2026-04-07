@@ -3,6 +3,7 @@ using Fleet.Server.LLM;
 using Fleet.Server.Mcp;
 using Fleet.Server.Memories;
 using Fleet.Server.Models;
+using Fleet.Server.Skills;
 using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Agents;
@@ -19,10 +20,12 @@ public class AgentPhaseRunner(
     IOptions<LLMOptions> llmOptions,
     ILogger<AgentPhaseRunner> logger,
     IMcpToolSessionFactory? mcpToolSessionFactory = null,
-    IMemoryService? memoryService = null) : IAgentPhaseRunner
+    IMemoryService? memoryService = null,
+    ISkillService? skillService = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
+    private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -102,6 +105,16 @@ public class AgentPhaseRunner(
             if (!string.IsNullOrWhiteSpace(memoryPrompt))
             {
                 systemPrompt = $"{systemPrompt}\n\n{memoryPrompt}";
+            }
+
+            var skillPrompt = await _skillService.BuildPromptBlockAsync(
+                parsedUserId,
+                toolContext.ProjectId,
+                userMessage,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(skillPrompt))
+            {
+                systemPrompt = $"{systemPrompt}\n\n{skillPrompt}";
             }
         }
 
@@ -560,6 +573,41 @@ public class AgentPhaseRunner(
             => throw new NotSupportedException();
 
         public Task DeleteProjectMemoryAsync(int userId, string projectId, int memoryId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
+    }
+
+    private sealed class NoOpSkillService : ISkillService
+    {
+        public static readonly NoOpSkillService Instance = new();
+
+        public Task<IReadOnlyList<PromptSkillTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<PromptSkillTemplateDto>>([]);
+
+        public Task<IReadOnlyList<PromptSkillDto>> GetUserSkillsAsync(int userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<PromptSkillDto>>([]);
+
+        public Task<IReadOnlyList<PromptSkillDto>> GetProjectSkillsAsync(int userId, string projectId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<PromptSkillDto>>([]);
+
+        public Task<PromptSkillDto> CreateUserSkillAsync(int userId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<PromptSkillDto> UpdateUserSkillAsync(int userId, int skillId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteUserSkillAsync(int userId, int skillId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<PromptSkillDto> CreateProjectSkillAsync(int userId, string projectId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<PromptSkillDto> UpdateProjectSkillAsync(int userId, string projectId, int skillId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteProjectSkillAsync(int userId, string projectId, int skillId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)

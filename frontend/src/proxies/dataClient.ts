@@ -13,6 +13,8 @@ import {
   getSubscription,
   getUserSettings, updateProfile, updatePreferences, getUserMemories, createUserMemory, updateUserMemory, deleteUserMemory,
   getProjectMemories, createProjectMemory, updateProjectMemory, deleteProjectMemory,
+  getSkillTemplates, getUserSkills, createUserSkill, updateUserSkill, deleteUserSkill,
+  getProjectSkills, createProjectSkill, updateProjectSkill, deleteProjectSkill,
   linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
   getMcpServers, getMcpServerTemplates, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
   getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
@@ -503,6 +505,78 @@ export function useDeleteProjectMemory(projectId: string | undefined) {
     mutationFn: (id: number) => deleteProjectMemory(projectId!, id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['project-memories'] })
+    },
+  })
+}
+
+export function useSkillTemplates(enabled = true) {
+  return useDataQuery('skill-templates', getSkillTemplates, [], [], { enableFetch: enabled })
+}
+
+export function useUserSkills(enabled = true) {
+  return useDataQuery('user-skills', getUserSkills, [], [], { enableFetch: enabled, staleTime: 0 })
+}
+
+export function useCreateUserSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: createUserSkill,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-skills'] })
+    },
+  })
+}
+
+export function useUpdateUserSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateUserSkill>[1] }) => updateUserSkill(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-skills'] })
+    },
+  })
+}
+
+export function useDeleteUserSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteUserSkill(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-skills'] })
+    },
+  })
+}
+
+export function useProjectSkills(projectId: string | undefined, enabled = true) {
+  return useDataQuery('project-skills', () => getProjectSkills(projectId!), [projectId], [], { enableFetch: enabled, staleTime: 0 })
+}
+
+export function useCreateProjectSkill(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Parameters<typeof createProjectSkill>[1]) => createProjectSkill(projectId!, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-skills'] })
+    },
+  })
+}
+
+export function useUpdateProjectSkill(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateProjectSkill>[2] }) => updateProjectSkill(projectId!, id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-skills'] })
+    },
+  })
+}
+
+export function useDeleteProjectSkill(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteProjectSkill(projectId!, id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-skills'] })
     },
   })
 }
