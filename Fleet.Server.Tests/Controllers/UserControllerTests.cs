@@ -1,5 +1,6 @@
 using Fleet.Server.Auth;
 using Fleet.Server.Controllers;
+using Fleet.Server.Memories;
 using Fleet.Server.Models;
 using Fleet.Server.Users;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ public class UserControllerTests
 {
     private Mock<IUserService> _userService = null!;
     private Mock<IAuthService> _authService = null!;
+    private Mock<IMemoryService> _memoryService = null!;
     private UserController _sut = null!;
 
     private const int UserId = 42;
@@ -21,8 +23,9 @@ public class UserControllerTests
     {
         _userService = new Mock<IUserService>();
         _authService = new Mock<IAuthService>();
+        _memoryService = new Mock<IMemoryService>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(UserId);
-        _sut = new UserController(_userService.Object, _authService.Object);
+        _sut = new UserController(_userService.Object, _authService.Object, _memoryService.Object);
     }
 
     // ── GetSettings ──────────────────────────────────────
@@ -72,5 +75,21 @@ public class UserControllerTests
         var ok = result as OkObjectResult;
         Assert.IsNotNull(ok);
         Assert.AreSame(prefs, ok.Value);
+    }
+
+    [TestMethod]
+    public async Task GetMemories_ReturnsOk()
+    {
+        var memories = new List<MemoryEntryDto>
+        {
+            new(7, "Testing policy", "Use the real DB in integration tests", "feedback", "Use the real DB.", true, "personal", null, DateTime.UtcNow, DateTime.UtcNow, false, null),
+        };
+        _memoryService.Setup(service => service.GetUserMemoriesAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(memories);
+
+        var result = await _sut.GetMemories(CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.IsNotNull(ok);
+        Assert.AreSame(memories, ok.Value);
     }
 }

@@ -1,6 +1,8 @@
 using Fleet.Server.Agents.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Mcp;
+using Fleet.Server.Memories;
+using Fleet.Server.Models;
 using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Agents;
@@ -16,9 +18,11 @@ public class AgentPhaseRunner(
     AgentToolRegistry toolRegistry,
     IOptions<LLMOptions> llmOptions,
     ILogger<AgentPhaseRunner> logger,
-    IMcpToolSessionFactory? mcpToolSessionFactory = null) : IAgentPhaseRunner
+    IMcpToolSessionFactory? mcpToolSessionFactory = null,
+    IMemoryService? memoryService = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
+    private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -88,6 +92,19 @@ public class AgentPhaseRunner(
             role, toolContext.ExecutionId, model);
 
         var systemPrompt = promptLoader.GetPrompt(role);
+        if (int.TryParse(toolContext.UserId, out var parsedUserId))
+        {
+            var memoryPrompt = await _memoryService.BuildPromptBlockAsync(
+                parsedUserId,
+                toolContext.ProjectId,
+                userMessage,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(memoryPrompt))
+            {
+                systemPrompt = $"{systemPrompt}\n\n{memoryPrompt}";
+            }
+        }
+
         await using var mcpToolSession = await _mcpToolSessionFactory.CreateForAgentAsync(
             toolContext.UserId,
             role,
@@ -515,5 +532,37 @@ public class AgentPhaseRunner(
             => Task.FromResult($"Error: unknown MCP tool '{toolName}'.");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class NoOpMemoryService : IMemoryService
+    {
+        public static readonly NoOpMemoryService Instance = new();
+
+        public Task<IReadOnlyList<MemoryEntryDto>> GetUserMemoriesAsync(int userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MemoryEntryDto>>([]);
+
+        public Task<IReadOnlyList<MemoryEntryDto>> GetProjectMemoriesAsync(int userId, string projectId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MemoryEntryDto>>([]);
+
+        public Task<MemoryEntryDto> CreateUserMemoryAsync(int userId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> UpdateUserMemoryAsync(int userId, int memoryId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteUserMemoryAsync(int userId, int memoryId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> CreateProjectMemoryAsync(int userId, string projectId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> UpdateProjectMemoryAsync(int userId, string projectId, int memoryId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteProjectMemoryAsync(int userId, string projectId, int memoryId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
     }
 }

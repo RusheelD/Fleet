@@ -11,7 +11,9 @@ import {
   getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
   search,
   getSubscription,
-  getUserSettings, updateProfile, updatePreferences, linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
+  getUserSettings, updateProfile, updatePreferences, getUserMemories, createUserMemory, updateUserMemory, deleteUserMemory,
+  getProjectMemories, createProjectMemory, updateProjectMemory, deleteProjectMemory,
+  linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
   getMcpServers, getMcpServerTemplates, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
   getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
 } from './'
@@ -433,6 +435,74 @@ export function useLinkGitHub() {
     mutationFn: (data: { code: string; redirectUri: string; state: string }) => linkGitHub(data.code, data.redirectUri, data.state),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+    },
+  })
+}
+
+export function useUserMemories(enabled = true) {
+  return useDataQuery('user-memories', getUserMemories, [], [], { enableFetch: enabled, staleTime: 0 })
+}
+
+export function useCreateUserMemory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: createUserMemory,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-memories'] })
+    },
+  })
+}
+
+export function useUpdateUserMemory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateUserMemory>[1] }) => updateUserMemory(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-memories'] })
+    },
+  })
+}
+
+export function useDeleteUserMemory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteUserMemory(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-memories'] })
+    },
+  })
+}
+
+export function useProjectMemories(projectId: string | undefined, enabled = true) {
+  return useDataQuery('project-memories', () => getProjectMemories(projectId!), [projectId], [], { enableFetch: enabled, staleTime: 0 })
+}
+
+export function useCreateProjectMemory(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Parameters<typeof createProjectMemory>[1]) => createProjectMemory(projectId!, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-memories'] })
+    },
+  })
+}
+
+export function useUpdateProjectMemory(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateProjectMemory>[2] }) => updateProjectMemory(projectId!, id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-memories'] })
+    },
+  })
+}
+
+export function useDeleteProjectMemory(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteProjectMemory(projectId!, id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-memories'] })
     },
   })
 }

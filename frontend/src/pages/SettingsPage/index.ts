@@ -1,6 +1,7 @@
 export { SettingsPage } from './SettingsPage'
 export { ProfileTab } from './ProfileTab'
 export { ConnectionsTab } from './ConnectionsTab'
+export { MemoryTab } from './MemoryTab'
 export { AccountRow } from './AccountRow'
 export { AppearanceTab } from './AppearanceTab'
 export { NotificationsTab } from './NotificationsTab'

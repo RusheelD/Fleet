@@ -4,6 +4,7 @@ using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
 using Fleet.Server.Logging;
 using Fleet.Server.Mcp;
+using Fleet.Server.Memories;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
@@ -25,12 +26,14 @@ public class ChatService(
     IUsageLedgerService? usageLedgerService = null,
     IServerEventPublisher? eventPublisher = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    IMcpToolSessionFactory? mcpToolSessionFactory = null) : IChatService
+    IMcpToolSessionFactory? mcpToolSessionFactory = null,
+    IMemoryService? memoryService = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
+    private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -324,7 +327,7 @@ public class ChatService(
             }
 
             // 2b. Build system prompt with any uploaded documents
-            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId);
+            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, userId, content, requestCancellation);
 
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
@@ -816,7 +819,13 @@ public class ChatService(
                 Content = "Generate work-items based on provided context",
             });
 
-            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, ownerId);
+            var systemPrompt = await BuildSystemPromptAsync(
+                projectId,
+                sessionId,
+                userId,
+                "Generate work-items based on provided context",
+                requestCancellation,
+                ownerId);
             await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
                 userId,
                 includeWriteTools: true,
@@ -1715,7 +1724,13 @@ public class ChatService(
         Content = msg.Content,
     };
 
-    private async Task<string> BuildSystemPromptAsync(string projectId, string sessionId, string? ownerId = null)
+    private async Task<string> BuildSystemPromptAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        string? latestUserMessage,
+        CancellationToken cancellationToken = default,
+        string? ownerId = null)
     {
         var scopePrompt = IsGlobalScope(projectId)
             ? """
@@ -1729,14 +1744,27 @@ public class ChatService(
             Keep all analysis and actions constrained to this active project.
             """;
 
-        var attachments = await chatSessionRepository.GetAllAttachmentsBySessionIdAsync(projectId, sessionId, ownerId) ?? [];
-        if (attachments.Count == 0)
-            return $"{SystemPrompt}\n\n{scopePrompt}";
-
         var builder = new StringBuilder(SystemPrompt);
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine(scopePrompt);
+
+        var memoryPrompt = await _memoryService.BuildPromptBlockAsync(
+            userId,
+            IsGlobalScope(projectId) ? null : projectId,
+            latestUserMessage,
+            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(memoryPrompt))
+        {
+            builder.AppendLine();
+            builder.AppendLine();
+            builder.AppendLine(memoryPrompt);
+        }
+
+        var attachments = await chatSessionRepository.GetAllAttachmentsBySessionIdAsync(projectId, sessionId, ownerId) ?? [];
+        if (attachments.Count == 0)
+            return builder.ToString();
+
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine("## Uploaded References And Assets");
@@ -1961,5 +1989,37 @@ public class ChatService(
             => Task.FromResult($"Error: unknown MCP tool '{toolName}'.");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class NoOpMemoryService : IMemoryService
+    {
+        public static readonly NoOpMemoryService Instance = new();
+
+        public Task<IReadOnlyList<MemoryEntryDto>> GetUserMemoriesAsync(int userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MemoryEntryDto>>([]);
+
+        public Task<IReadOnlyList<MemoryEntryDto>> GetProjectMemoriesAsync(int userId, string projectId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MemoryEntryDto>>([]);
+
+        public Task<MemoryEntryDto> CreateUserMemoryAsync(int userId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> UpdateUserMemoryAsync(int userId, int memoryId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteUserMemoryAsync(int userId, int memoryId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> CreateProjectMemoryAsync(int userId, string projectId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<MemoryEntryDto> UpdateProjectMemoryAsync(int userId, string projectId, int memoryId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DeleteProjectMemoryAsync(int userId, string projectId, int memoryId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
     }
 }

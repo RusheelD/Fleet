@@ -2,6 +2,7 @@ using Fleet.Server.Auth;
 using Fleet.Server.Copilot;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
+using Fleet.Server.Memories;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Fleet.Server.Subscriptions;
@@ -833,6 +834,48 @@ public class ChatServiceTests
         Assert.IsNotNull(capturedRequest);
         Assert.IsTrue(capturedRequest.SystemPrompt.Contains("spec.md"));
         Assert.IsTrue(capturedRequest.SystemPrompt.Contains("Build authentication module."));
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_WithMemoryPrompt_IncludesMemoryInSystemPrompt()
+    {
+        var memoryService = new Mock<IMemoryService>();
+        memoryService.Setup(service => service.BuildPromptBlockAsync(UserId, ProjectId, "Hello", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("## Memory\nRemember the real database testing rule.");
+
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            _toolRegistry,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            memoryService: memoryService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Response", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Hello"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Response"))
+            .ReturnsAsync(assistantMsg);
+
+        LLMRequest? capturedRequest = null;
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequest = request)
+            .ReturnsAsync(new LLMResponse("Response", null));
+
+        await sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+
+        Assert.IsNotNull(capturedRequest);
+        StringAssert.Contains(capturedRequest.SystemPrompt, "Remember the real database testing rule.");
     }
 
     [TestMethod]

@@ -24,9 +24,19 @@ import {
     LinkRegular,
     OpenRegular,
 } from '@fluentui/react-icons'
-import { FleetRocketLogo, PageHeader } from '../../components/shared'
+import { FleetRocketLogo, MemoryWorkspace, PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
-import { useProjectDashboardBySlug, useDeleteProject, useUpdateProject, resolveIcon } from '../../proxies'
+import {
+    useProjectDashboardBySlug,
+    useDeleteProject,
+    useUpdateProject,
+    useProjectMemories,
+    useCreateProjectMemory,
+    useUpdateProjectMemory,
+    useDeleteProjectMemory,
+    resolveIcon,
+    type UpsertMemoryEntryRequest,
+} from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { appTokens, APP_MOBILE_MEDIA_QUERY } from '../../styles/appTokens'
 
@@ -169,10 +179,15 @@ export function ProjectDashboardPage() {
     const isDense = isCompact || isMobile
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
+    const projectMemories = useProjectMemories(dashboard?.id, Boolean(dashboard?.id))
+    const createProjectMemory = useCreateProjectMemory(dashboard?.id)
+    const updateProjectMemory = useUpdateProjectMemory(dashboard?.id)
+    const deleteProjectMemory = useDeleteProjectMemory(dashboard?.id)
     const deleteProject = useDeleteProject()
     const updateProject = useUpdateProject()
     const [unlinkRepoOpen, setUnlinkRepoOpen] = useState(false)
     const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
+    const isMemorySaving = createProjectMemory.isPending || updateProjectMemory.isPending || deleteProjectMemory.isPending
 
     const handleUnlinkRepo = useCallback(() => {
         if (!dashboard) {
@@ -198,6 +213,21 @@ export function ProjectDashboardPage() {
             },
         )
     }, [dashboard, deleteProject, navigate])
+
+    const handleCreateMemory = useCallback(
+        (request: UpsertMemoryEntryRequest) => createProjectMemory.mutateAsync(request),
+        [createProjectMemory],
+    )
+
+    const handleUpdateMemory = useCallback(
+        (id: number, request: UpsertMemoryEntryRequest) => updateProjectMemory.mutateAsync({ id, data: request }),
+        [updateProjectMemory],
+    )
+
+    const handleDeleteMemory = useCallback(
+        (id: number) => deleteProjectMemory.mutateAsync(id),
+        [deleteProjectMemory],
+    )
 
     if (isLoading || !dashboard) {
         return (
@@ -347,6 +377,19 @@ export function ProjectDashboardPage() {
                     </div>
                 </Card>
             </div>
+
+            <MemoryWorkspace
+                title="Project Memory"
+                subtitle="Keep non-code context close to the work: deadlines, known gotchas, stakeholder notes, and reference links that matter across sessions."
+                memories={projectMemories.data}
+                isLoading={projectMemories.isLoading}
+                isSaving={isMemorySaving}
+                emptyMessage="No project memory has been saved yet."
+                createLabel="New Project Memory"
+                onCreate={handleCreateMemory}
+                onUpdate={handleUpdateMemory}
+                onDelete={handleDeleteMemory}
+            />
 
             <Dialog open={unlinkRepoOpen} onOpenChange={(_e, data) => setUnlinkRepoOpen(data.open)}>
                 <DialogSurface>

@@ -50,6 +50,14 @@ export {
   getUserSettings,
   updateProfile,
   updatePreferences,
+  getUserMemories,
+  createUserMemory,
+  updateUserMemory,
+  deleteUserMemory,
+  getProjectMemories,
+  createProjectMemory,
+  updateProjectMemory,
+  deleteProjectMemory,
   getGitHubOAuthState,
   getGitHubOAuthClientId,
   linkGitHub,
@@ -64,7 +72,7 @@ export {
   deleteMcpServer,
   validateMcpServer,
 } from './userProxy'
-export type { CreateGitHubRepoRequest, UpsertMcpServerRequest, UpsertMcpServerVariableRequest } from './userProxy'
+export type { CreateGitHubRepoRequest, UpsertMcpServerRequest, UpsertMcpServerVariableRequest, UpsertMemoryEntryRequest } from './userProxy'
 export { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 export {
   useDataQuery,
@@ -99,6 +107,14 @@ export {
   useUserSettings,
   useUpdateProfile,
   useUpdatePreferences,
+  useUserMemories,
+  useCreateUserMemory,
+  useUpdateUserMemory,
+  useDeleteUserMemory,
+  useProjectMemories,
+  useCreateProjectMemory,
+  useUpdateProjectMemory,
+  useDeleteProjectMemory,
   useLinkGitHub,
   useUnlinkGitHub,
   useSetPrimaryGitHubAccount,

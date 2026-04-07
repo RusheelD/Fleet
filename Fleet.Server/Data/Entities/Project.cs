@@ -25,4 +25,5 @@ public class Project
     public List<AgentExecution> AgentExecutions { get; set; } = [];
     public List<LogEntry> LogEntries { get; set; } = [];
     public List<DashboardAgent> DashboardAgents { get; set; } = [];
+    public List<MemoryEntry> MemoryEntries { get; set; } = [];
 }

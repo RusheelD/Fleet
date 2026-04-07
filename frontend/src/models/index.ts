@@ -18,6 +18,7 @@ export type { PlanData } from './plan'
 export type { SearchResult } from './search'
 export type { DashboardActivity, DashboardMetric, DashboardAgent, ProjectDashboard } from './dashboard'
 export type { CurrentPlan, UsageMeter, Plan, SubscriptionData } from './subscription'
+export type { MemoryEntry, MemoryType } from './memory'
 export type {
   UserProfile,
   LinkedAccount,

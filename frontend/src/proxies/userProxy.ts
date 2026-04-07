@@ -4,6 +4,7 @@ import type {
   UserProfile,
   UserPreferences,
   LinkedAccount,
+  MemoryEntry,
   GitHubRepo,
   McpServer,
   McpServerTemplate,
@@ -20,6 +21,46 @@ export function updateProfile(profile: Partial<UserProfile>): Promise<UserProfil
 
 export function updatePreferences(preferences: UserPreferences): Promise<UserPreferences> {
   return put<UserPreferences>('/api/user/preferences', preferences)
+}
+
+export interface UpsertMemoryEntryRequest {
+  name: string
+  description: string
+  type: 'user' | 'feedback' | 'project' | 'reference' | string
+  content: string
+  alwaysInclude: boolean
+}
+
+export function getUserMemories(): Promise<MemoryEntry[]> {
+  return get<MemoryEntry[]>('/api/user/memories')
+}
+
+export function createUserMemory(data: UpsertMemoryEntryRequest): Promise<MemoryEntry> {
+  return post<MemoryEntry>('/api/user/memories', data)
+}
+
+export function updateUserMemory(id: number, data: UpsertMemoryEntryRequest): Promise<MemoryEntry> {
+  return put<MemoryEntry>(`/api/user/memories/${id}`, data)
+}
+
+export function deleteUserMemory(id: number): Promise<void> {
+  return del<void>(`/api/user/memories/${id}`)
+}
+
+export function getProjectMemories(projectId: string): Promise<MemoryEntry[]> {
+  return get<MemoryEntry[]>(`/api/projects/${projectId}/memories`)
+}
+
+export function createProjectMemory(projectId: string, data: UpsertMemoryEntryRequest): Promise<MemoryEntry> {
+  return post<MemoryEntry>(`/api/projects/${projectId}/memories`, data)
+}
+
+export function updateProjectMemory(projectId: string, id: number, data: UpsertMemoryEntryRequest): Promise<MemoryEntry> {
+  return put<MemoryEntry>(`/api/projects/${projectId}/memories/${id}`, data)
+}
+
+export function deleteProjectMemory(projectId: string, id: number): Promise<void> {
+  return del<void>(`/api/projects/${projectId}/memories/${id}`)
 }
 
 export function getGitHubOAuthState(): Promise<{ state: string }> {

@@ -1,6 +1,7 @@
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Auth;
 using Fleet.Server.Agents;
+using Fleet.Server.Memories;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Data;
@@ -20,6 +21,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<McpServerConnection> McpServerConnections => Set<McpServerConnection>();
+    public DbSet<MemoryEntry> MemoryEntries => Set<MemoryEntry>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<AgentPhaseResult> AgentPhaseResults => Set<AgentPhaseResult>();
     public DbSet<NotificationEvent> NotificationEvents => Set<NotificationEvent>();
@@ -253,6 +255,26 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
 
             builder.HasIndex(server => new { server.UserProfileId, server.Name }).IsUnique();
             builder.HasIndex(server => new { server.UserProfileId, server.Enabled });
+        });
+
+        modelBuilder.Entity<MemoryEntry>(builder =>
+        {
+            builder.HasKey(memory => memory.Id);
+            builder.Property(memory => memory.Id).ValueGeneratedOnAdd();
+            builder.Property(memory => memory.Type).HasDefaultValue(Memories.MemoryEntryTypes.Project);
+            builder.Property(memory => memory.AlwaysInclude).HasDefaultValue(false);
+
+            builder.HasOne(memory => memory.UserProfile)
+                .WithMany(user => user.MemoryEntries)
+                .HasForeignKey(memory => memory.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasOne(memory => memory.Project)
+                .WithMany(project => project.MemoryEntries)
+                .HasForeignKey(memory => memory.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(memory => new { memory.UserProfileId, memory.ProjectId, memory.UpdatedAtUtc });
         });
 
         // ── Subscription ───────────────────────────────────────────

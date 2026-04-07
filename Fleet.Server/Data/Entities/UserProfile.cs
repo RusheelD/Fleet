@@ -19,4 +19,5 @@ public class UserProfile
     // Navigation
     public List<LinkedAccount> LinkedAccounts { get; set; } = [];
     public List<McpServerConnection> McpServerConnections { get; set; } = [];
+    public List<MemoryEntry> MemoryEntries { get; set; } = [];
 }
