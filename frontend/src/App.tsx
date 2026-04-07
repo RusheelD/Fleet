@@ -1,54 +1,69 @@
+import { Suspense, lazy } from 'react'
+import { Spinner, makeStyles } from '@fluentui/react-components'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout'
 import { ProtectedRoute } from './components/shared'
-import { ProjectsPage } from './pages/ProjectsPage'
-import { ProjectDashboardPage } from './pages/ProjectDashboardPage'
-import { WorkItemsPage } from './pages/WorkItemsPage'
-import { AgentMonitorPage } from './pages/AgentMonitorPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { SubscriptionPage } from './pages/SubscriptionPage'
-import { SearchPage } from './pages/SearchPage'
-import { LoginPage } from './pages/LoginPage'
-import { SignUpPage } from './pages/SignUpPage'
-import { GitHubCallbackPage } from './pages/GitHubCallbackPage'
+
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((module) => ({ default: module.ProjectsPage })))
+const ProjectDashboardPage = lazy(() => import('./pages/ProjectDashboardPage').then((module) => ({ default: module.ProjectDashboardPage })))
+const WorkItemsPage = lazy(() => import('./pages/WorkItemsPage').then((module) => ({ default: module.WorkItemsPage })))
+const AgentMonitorPage = lazy(() => import('./pages/AgentMonitorPage').then((module) => ({ default: module.AgentMonitorPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const SubscriptionPage = lazy(() => import('./pages/SubscriptionPage').then((module) => ({ default: module.SubscriptionPage })))
+const SearchPage = lazy(() => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })))
+const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
+const SignUpPage = lazy(() => import('./pages/SignUpPage').then((module) => ({ default: module.SignUpPage })))
+const GitHubCallbackPage = lazy(() => import('./pages/GitHubCallbackPage').then((module) => ({ default: module.GitHubCallbackPage })))
+
+const useStyles = makeStyles({
+  loadingShell: {
+    minHeight: '100vh',
+    display: 'grid',
+    placeItems: 'center',
+  },
+})
 
 function App() {
+  const styles = useStyles()
+
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Public auth routes */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignUpPage />} />
+      <Suspense fallback={<div className={styles.loadingShell}><Spinner label="Loading Fleet..." /></div>}>
+        <Routes>
+          {/* Public auth routes */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignUpPage />} />
 
-        {/* GitHub OAuth callback (protected — needs auth to link) */}
-        <Route element={<ProtectedRoute />}>
-          <Route path="/auth/github/callback" element={<GitHubCallbackPage />} />
-        </Route>
-
-        {/* Redirect root to projects */}
-        <Route path="/" element={<Navigate to="/projects" replace />} />
-
-        {/* Protected routes */}
-        <Route element={<ProtectedRoute />}>
-          {/* Global pages with layout */}
-          <Route element={<Layout />}>
-            <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/subscription" element={<SubscriptionPage />} />
+          {/* GitHub OAuth callback (protected — needs auth to link) */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/auth/github/callback" element={<GitHubCallbackPage />} />
           </Route>
 
-          {/* Project-scoped pages */}
-          <Route path="/projects/:slug" element={<Layout />}>
-            <Route index element={<ProjectDashboardPage />} />
-            <Route path="work-items" element={<WorkItemsPage />} />
-            <Route path="agents" element={<AgentMonitorPage />} />
-          </Route>
-        </Route>
+          {/* Redirect root to projects */}
+          <Route path="/" element={<Navigate to="/projects" replace />} />
 
-        {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/projects" replace />} />
-      </Routes>
+          {/* Protected routes */}
+          <Route element={<ProtectedRoute />}>
+            {/* Global pages with layout */}
+            <Route element={<Layout />}>
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/subscription" element={<SubscriptionPage />} />
+            </Route>
+
+            {/* Project-scoped pages */}
+            <Route path="/projects/:slug" element={<Layout />}>
+              <Route index element={<ProjectDashboardPage />} />
+              <Route path="work-items" element={<WorkItemsPage />} />
+              <Route path="agents" element={<AgentMonitorPage />} />
+            </Route>
+          </Route>
+
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

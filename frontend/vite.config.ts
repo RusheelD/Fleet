@@ -92,6 +92,57 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            const normalizedId = id.replace(/\\/g, '/')
+
+            if (!normalizedId.includes('node_modules')) {
+              if (normalizedId.includes('/src/proxies/')) {
+                return 'app-proxies'
+              }
+
+              if (normalizedId.includes('/src/components/shared/')) {
+                return 'app-shared'
+              }
+
+              if (normalizedId.includes('/src/hooks/')) {
+                return 'app-hooks'
+              }
+
+              return
+            }
+
+            if (normalizedId.includes('@fluentui/react-icons')) {
+              return 'fluent-icons'
+            }
+
+            if (normalizedId.includes('@fluentui')) {
+              return 'fluentui'
+            }
+
+            if (normalizedId.includes('@azure/msal')) {
+              return 'msal'
+            }
+
+            if (normalizedId.includes('react-markdown') || normalizedId.includes('remark-gfm')) {
+              return 'markdown'
+            }
+
+            if (normalizedId.includes('@tanstack/react-query')) {
+              return 'query'
+            }
+
+            if (normalizedId.includes('react-router') || normalizedId.includes('react-dom') || /node_modules\/react\//.test(normalizedId)) {
+              return 'react-core'
+            }
+
+            return 'vendor'
+          },
+        },
+      },
+    },
     server,
   }
 })
