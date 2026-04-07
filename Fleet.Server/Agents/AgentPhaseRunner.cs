@@ -471,6 +471,31 @@ public class AgentPhaseRunner(
 
                 // No tool calls — the model produced final output
                 var output = response.Content ?? string.Empty;
+
+                // Stop verification: if the model did substantial work but returns
+                // a nearly empty response, re-prompt once to confirm the work is
+                // genuinely complete (prevents premature termination in complex phases).
+                if (totalToolCalls >= 5 && output.Length < 20 && loop < maxToolLoops - 1)
+                {
+                    logger.LogInformation(
+                        "Phase {Role}: short final output ({Len} chars) after {ToolCalls} tool calls — running stop verification",
+                        role, output.Length, totalToolCalls);
+
+                    messages.Add(new LLMMessage
+                    {
+                        Role = "assistant",
+                        Content = output,
+                    });
+                    messages.Add(new LLMMessage
+                    {
+                        Role = "user",
+                        Content = "Your response was very brief. Are you sure you have completed all required work for this phase? " +
+                                  "If there are remaining tasks, continue executing them now. " +
+                                  "If you are genuinely done, provide your complete final summary.",
+                    });
+                    continue;
+                }
+
                 logger.LogInformation("Phase {Role} completed: {Loops} loops, {ToolCalls} tool calls",
                     role, loop + 1, totalToolCalls);
 
