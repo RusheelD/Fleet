@@ -7,76 +7,149 @@ namespace Fleet.Server.Search;
 
 public class SearchService(FleetDbContext context, ILogger<SearchService> logger) : ISearchService
 {
+    private const int MaxResultsPerCategory = 25;
+
     public async Task<IReadOnlyList<SearchResultDto>> SearchAsync(string ownerId, string? query, string? type)
     {
         var normalizedType = NormalizeType(type);
+        var normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
         logger.SearchStarted((query ?? string.Empty).SanitizeForLogging(), normalizedType.SanitizeForLogging());
         var results = new List<SearchResultDto>();
 
         var includeAll = normalizedType == "all";
 
-        // Search projects (scoped to current user)
         if (includeAll || normalizedType == "projects")
         {
-            var projects = await context.Projects.AsNoTracking()
-                .Where(p => p.OwnerId == ownerId)
-                .ToListAsync();
-            results.AddRange(projects.Select(p =>
-                new SearchResultDto("project", p.Title, p.Description, $"Last active {p.LastActivity}", p.Slug)));
+            results.AddRange(await SearchProjectsAsync(ownerId, normalizedQuery));
         }
 
-        // Search work items (scoped to user's projects)
         if (includeAll || normalizedType == "workitems")
         {
-            var workItems = await context.WorkItems
-                .AsNoTracking()
-                .Include(w => w.Project)
-                .Where(w => w.Project.OwnerId == ownerId)
-                .ToListAsync();
-            results.AddRange(workItems.Select(w =>
-                new SearchResultDto("workitem", $"#{w.WorkItemNumber} \u2014 {w.Title}",
-                    $"{w.State} \u00b7 Priority {w.Priority}", w.Project.Title, w.Project.Slug)));
+            results.AddRange(await SearchWorkItemsAsync(ownerId, normalizedQuery));
         }
 
-        // Search chat sessions owned by the current user, including global chat.
         if (includeAll || normalizedType == "chats")
         {
-            var chats = await context.ChatSessions
-                .AsNoTracking()
-                .Include(c => c.Project)
-                .Where(c => c.OwnerId == ownerId)
-                .ToListAsync();
-            results.AddRange(chats.Select(c =>
-                new SearchResultDto("chat", c.Title, c.LastMessage,
-                    $"{(c.Project?.Title ?? "Global chat")} \u00b7 {c.Timestamp}", c.Project?.Slug)));
+            results.AddRange(await SearchChatsAsync(ownerId, normalizedQuery));
         }
 
-        // Search agent executions (scoped to user's projects)
         if (includeAll || normalizedType == "agents")
         {
-            var agents = await context.AgentExecutions
-                .AsNoTracking()
-                .Include(e => e.Project)
-                .Where(e => e.Project.OwnerId == ownerId)
-                .ToListAsync();
-            results.AddRange(agents.Select(e =>
-                new SearchResultDto("agent", e.WorkItemTitle,
-                    $"{e.Status} \u00b7 {(int)(e.Progress * 100)}% complete",
-                    $"Work Item #{e.WorkItemId}", e.Project.Slug)));
-        }
-
-        // Apply text filter in memory
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            results = results
-                .Where(r =>
-                    r.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    r.Description.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            results.AddRange(await SearchAgentsAsync(ownerId, normalizedQuery));
         }
 
         logger.SearchCompleted(results.Count);
         return results;
+    }
+
+    private async Task<IReadOnlyList<SearchResultDto>> SearchProjectsAsync(string ownerId, string? query)
+    {
+        var projects = context.Projects
+            .AsNoTracking()
+            .Where(project => project.OwnerId == ownerId);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            projects = projects.Where(project =>
+                project.Title.Contains(query) ||
+                project.Description.Contains(query) ||
+                project.Slug.Contains(query) ||
+                project.Repo.Contains(query));
+        }
+
+        return await projects
+            .OrderBy(project => project.Title)
+            .Take(MaxResultsPerCategory)
+            .Select(project => new SearchResultDto(
+                "project",
+                project.Title,
+                project.Description,
+                $"Last active {project.LastActivity}",
+                project.Slug))
+            .ToListAsync();
+    }
+
+    private async Task<IReadOnlyList<SearchResultDto>> SearchWorkItemsAsync(string ownerId, string? query)
+    {
+        var workItems = context.WorkItems
+            .AsNoTracking()
+            .Where(workItem => workItem.Project.OwnerId == ownerId);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            workItems = workItems.Where(workItem =>
+                workItem.Title.Contains(query) ||
+                workItem.Description.Contains(query) ||
+                workItem.AcceptanceCriteria.Contains(query) ||
+                workItem.Project.Title.Contains(query));
+        }
+
+        return await workItems
+            .OrderBy(workItem => workItem.Title)
+            .Take(MaxResultsPerCategory)
+            .Select(workItem => new SearchResultDto(
+                "workitem",
+                $"#{workItem.WorkItemNumber} \u2014 {workItem.Title}",
+                $"{workItem.State} \u00b7 Priority {workItem.Priority}",
+                workItem.Project.Title,
+                workItem.Project.Slug))
+            .ToListAsync();
+    }
+
+    private async Task<IReadOnlyList<SearchResultDto>> SearchChatsAsync(string ownerId, string? query)
+    {
+        var chats = context.ChatSessions
+            .AsNoTracking()
+            .Where(chat => chat.OwnerId == ownerId);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            chats = chats.Where(chat =>
+                chat.Title.Contains(query) ||
+                chat.LastMessage.Contains(query) ||
+                (chat.Project != null && chat.Project.Title.Contains(query)));
+        }
+
+        return await chats
+            .OrderByDescending(chat => chat.IsActive)
+            .ThenByDescending(chat => chat.GenerationUpdatedAtUtc)
+            .ThenBy(chat => chat.Title)
+            .Take(MaxResultsPerCategory)
+            .Select(chat => new SearchResultDto(
+                "chat",
+                chat.Title,
+                chat.LastMessage,
+                $"{(chat.Project != null ? chat.Project.Title : "Global chat")} \u00b7 {chat.Timestamp}",
+                chat.Project != null ? chat.Project.Slug : null))
+            .ToListAsync();
+    }
+
+    private async Task<IReadOnlyList<SearchResultDto>> SearchAgentsAsync(string ownerId, string? query)
+    {
+        var agents = context.AgentExecutions
+            .AsNoTracking()
+            .Where(agent => agent.Project.OwnerId == ownerId);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            agents = agents.Where(agent =>
+                agent.WorkItemTitle.Contains(query) ||
+                agent.Status.Contains(query) ||
+                (agent.CurrentPhase != null && agent.CurrentPhase.Contains(query)) ||
+                agent.Project.Title.Contains(query));
+        }
+
+        return await agents
+            .OrderByDescending(agent => agent.StartedAtUtc)
+            .ThenBy(agent => agent.WorkItemTitle)
+            .Take(MaxResultsPerCategory)
+            .Select(agent => new SearchResultDto(
+                "agent",
+                agent.WorkItemTitle,
+                $"{agent.Status} \u00b7 {(int)(agent.Progress * 100)}% complete",
+                $"Work Item #{agent.WorkItemId}",
+                agent.Project.Slug))
+            .ToListAsync();
     }
 
     private static string NormalizeType(string? type) => type?.Trim().ToLowerInvariant() switch
