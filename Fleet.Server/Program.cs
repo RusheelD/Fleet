@@ -24,6 +24,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -310,7 +311,14 @@ builder.Services.AddHttpClient("LLM")
         options.CircuitBreaker.SamplingDuration = llmCircuitBreakerSamplingDuration;
     });
 
-builder.Services.AddSingleton<ILLMClient, AzureOpenAiClient>();
+builder.Services.AddSingleton<AzureOpenAiClient>();
+builder.Services.AddSingleton<ILLMClient>(sp =>
+{
+    var inner = sp.GetRequiredService<AzureOpenAiClient>();
+    var options = sp.GetRequiredService<IOptions<LLMOptions>>();
+    var logger = sp.GetRequiredService<ILogger<ResilientLLMClient>>();
+    return new ResilientLLMClient(inner, options, logger);
+});
 
 // Chat tools (registered individually, collected by ChatToolRegistry)
 builder.Services.AddScoped<IChatTool, GetProjectInfoTool>();

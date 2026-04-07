@@ -26,5 +26,7 @@ public class LLMOptions
     public int ContextWindowTokens { get; set; } = 200000;
     /// <summary>Tokens reserved for model output when computing compression budget.</summary>
     public int ReservedOutputTokens { get; set; } = 16384;
+    /// <summary>Fallback model to use when the primary model fails with a retryable error (429, 500+).</summary>
+    public string? FallbackModel { get; set; }
 }
 
