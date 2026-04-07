@@ -95,7 +95,9 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
 
                 var request = new Models.CreateWorkItemRequest(
                     Title: title,
-                    Description: UpdateWorkItemTool.GetString(item, "description") ?? "",
+                    Description: UpdateWorkItemTool.MergeAttachmentReferencesIntoDescription(
+                        UpdateWorkItemTool.GetString(item, "description"),
+                        context.CurrentMessageAttachments),
                     Priority: UpdateWorkItemTool.GetInt(item, "priority") ?? 3,
                     Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty") ?? 3,
                     State: UpdateWorkItemTool.GetString(item, "state") ?? "New",

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.ComponentModel;
 using System.Text;
@@ -14,6 +15,7 @@ namespace Fleet.Server.Agents;
 /// </summary>
 public class RepoSandbox : IRepoSandbox
 {
+    private static readonly ConcurrentDictionary<string, byte> ActiveSandboxRoots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<RepoSandbox> _logger;
     private readonly string _sandboxRoot;
     private readonly string _gitExecutable;
@@ -44,6 +46,7 @@ public class RepoSandbox : IRepoSandbox
     [
         ".venv/",
         "node_modules/",
+        ".fleet-assets/",
     ];
 
     private const string PythonVirtualEnvironmentDirectoryName = ".venv";
@@ -77,6 +80,7 @@ public class RepoSandbox : IRepoSandbox
         // Create a unique repo directory underneath the configured sandbox root.
         _repoRoot = Path.Combine(_sandboxRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repoRoot);
+        TrackActiveSandboxRoot(_repoRoot);
 
         _logger.LogInformation("Cloning {Repo} into {Path}", repoFullName, _repoRoot);
 
@@ -210,6 +214,26 @@ public class RepoSandbox : IRepoSandbox
                 Directory.CreateDirectory(dir);
 
             File.WriteAllText(fullPath, content);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public void WriteBinaryFile(string relativePath, byte[] content)
+    {
+        EnsureInitialized();
+        _writeLock.Wait();
+        try
+        {
+            var fullPath = ResolveSafePath(relativePath);
+
+            var dir = Path.GetDirectoryName(fullPath);
+            if (dir is not null && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllBytes(fullPath, content);
         }
         finally
         {
@@ -551,22 +575,22 @@ public class RepoSandbox : IRepoSandbox
         if (_disposed) return;
         _disposed = true;
 
-        if (!string.IsNullOrEmpty(_repoRoot) && Directory.Exists(_repoRoot))
+        if (!string.IsNullOrEmpty(_repoRoot))
         {
-            _logger.LogInformation("Cleaning up sandbox: {Path}", _repoRoot);
-            try
+            if (Directory.Exists(_repoRoot))
             {
-                // Git makes files read-only; reset attributes before delete
-                foreach (var file in Directory.EnumerateFiles(_repoRoot, "*", SearchOption.AllDirectories))
+                _logger.LogInformation("Cleaning up sandbox: {Path}", _repoRoot);
+                try
                 {
-                    File.SetAttributes(file, FileAttributes.Normal);
+                    DeleteSandboxDirectory(_repoRoot);
                 }
-                Directory.Delete(_repoRoot, recursive: true);
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to clean up sandbox directory: {Path}", _repoRoot);
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to clean up sandbox directory: {Path}", _repoRoot);
-            }
+
+            ReleaseActiveSandboxRoot(_repoRoot);
         }
 
         GC.SuppressFinalize(this);
@@ -985,6 +1009,76 @@ public class RepoSandbox : IRepoSandbox
 
         Directory.CreateDirectory(effectiveWorkingDir);
         return effectiveWorkingDir;
+    }
+
+    internal static void TrackActiveSandboxRoot(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var fullPath = Path.GetFullPath(path);
+        ActiveSandboxRoots[fullPath] = 0;
+    }
+
+    internal static void ReleaseActiveSandboxRoot(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var fullPath = Path.GetFullPath(path);
+        ActiveSandboxRoots.TryRemove(fullPath, out _);
+    }
+
+    internal static int CleanupStaleSandboxes(string sandboxRoot, TimeSpan staleAfter, ILogger? logger = null)
+    {
+        if (string.IsNullOrWhiteSpace(sandboxRoot) || !Directory.Exists(sandboxRoot))
+            return 0;
+
+        var cutoffUtc = DateTime.UtcNow - (staleAfter <= TimeSpan.Zero ? TimeSpan.FromHours(12) : staleAfter);
+        var deleted = 0;
+
+        foreach (var directory in Directory.EnumerateDirectories(sandboxRoot))
+        {
+            var fullPath = Path.GetFullPath(directory);
+            if (ActiveSandboxRoots.ContainsKey(fullPath))
+                continue;
+
+            DateTime lastWriteUtc;
+            try
+            {
+                lastWriteUtc = Directory.GetLastWriteTimeUtc(fullPath);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(ex, "Skipping sandbox cleanup for {SandboxPath} because its age could not be determined", fullPath);
+                continue;
+            }
+
+            if (lastWriteUtc > cutoffUtc)
+                continue;
+
+            try
+            {
+                DeleteSandboxDirectory(fullPath);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to delete stale sandbox directory: {SandboxPath}", fullPath);
+            }
+        }
+
+        return deleted;
+    }
+
+    private static void DeleteSandboxDirectory(string path)
+    {
+        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+
+        Directory.Delete(path, recursive: true);
     }
 
     private static InvalidOperationException CreateGitStartException(

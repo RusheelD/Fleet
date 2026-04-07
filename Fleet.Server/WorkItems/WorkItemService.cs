@@ -5,6 +5,7 @@ namespace Fleet.Server.WorkItems;
 
 public class WorkItemService(
     IWorkItemRepository workItemRepository,
+    IWorkItemAttachmentService workItemAttachmentService,
     ILogger<WorkItemService> logger) : IWorkItemService
 {
     public async Task<IReadOnlyList<WorkItemDto>> GetByProjectIdAsync(string projectId)
@@ -53,7 +54,7 @@ public class WorkItemService(
         return await workItemRepository.UpdateAsync(projectId, workItemNumber, request);
     }
 
-    public async Task<bool> DeleteAsync(string projectId, int workItemNumber)
+    public async Task<bool> DeleteAsync(string projectId, int workItemNumber, CancellationToken cancellationToken = default)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
@@ -62,6 +63,7 @@ public class WorkItemService(
         });
 
         logger.WorkItemsDeleting(projectId.SanitizeForLogging(), workItemNumber);
+        await workItemAttachmentService.DeleteAllAsync(projectId, workItemNumber, cancellationToken);
         return await workItemRepository.DeleteAsync(projectId, workItemNumber);
     }
 }

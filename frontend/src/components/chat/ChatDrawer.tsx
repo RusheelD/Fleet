@@ -454,35 +454,45 @@ export function ChatDrawer({
         [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating],
     )
 
-    const handleFileSelect = (file: File) => {
+    const handleFileSelect = (files: File[]) => {
+        if (files.length === 0) {
+            return
+        }
+
         const resolvedSessionId = activeSession && sessions.some((session) => session.id === activeSession)
             ? activeSession
             : undefined
 
         const uploadToSession = (sessionId: string) => {
-            const optimisticId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
-            setPendingAttachments((current) => [
-                ...current,
-                {
-                    id: optimisticId,
-                    fileName: file.name,
-                    contentLength: file.size,
-                    uploadedAt: new Date().toISOString(),
-                    isUploading: true,
-                },
-            ])
+            files.forEach((file, index) => {
+                const optimisticId = `pending-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`
+                setPendingAttachments((current) => [
+                    ...current,
+                    {
+                        id: optimisticId,
+                        fileName: file.name,
+                        contentLength: file.size,
+                        uploadedAt: new Date().toISOString(),
+                        contentType: file.type || 'application/octet-stream',
+                        contentUrl: '',
+                        markdownReference: '',
+                        isImage: file.type.startsWith('image/'),
+                        isUploading: true,
+                    },
+                ])
 
-            uploadMutation.mutate(
-                { sessionId, file },
-                {
-                    onSuccess: () => {
-                        setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
+                uploadMutation.mutate(
+                    { sessionId, file },
+                    {
+                        onSuccess: () => {
+                            setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
+                        },
+                        onError: () => {
+                            setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
+                        },
                     },
-                    onError: () => {
-                        setPendingAttachments((current) => current.filter((attachment) => attachment.id !== optimisticId))
-                    },
-                },
-            )
+                )
+            })
         }
 
         if (resolvedSessionId) {

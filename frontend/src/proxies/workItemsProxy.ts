@@ -1,5 +1,5 @@
-import { get, post, put, del, fetchWithAuth, ApiError } from './'
-import type { WorkItem } from '../models'
+import { get, post, put, del, postForm, fetchWithAuth, ApiError } from './'
+import type { WorkItem, WorkItemAttachment } from '../models'
 
 export function getWorkItems(projectId: string): Promise<WorkItem[]> {
   return get<WorkItem[]>(`/api/projects/${projectId}/work-items`)
@@ -59,6 +59,24 @@ export async function bulkDeleteWorkItems(projectId: string, workItemNumbers: nu
 
 export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {
   return del<void>(`/api/projects/${projectId}/work-items/${workItemNumber}`)
+}
+
+function buildWorkItemAttachmentsPath(projectId: string, workItemNumber: number): string {
+  return `/api/projects/${projectId}/work-items/${workItemNumber}/attachments`
+}
+
+export function getWorkItemAttachments(projectId: string, workItemNumber: number): Promise<WorkItemAttachment[]> {
+  return get<WorkItemAttachment[]>(buildWorkItemAttachmentsPath(projectId, workItemNumber))
+}
+
+export function uploadWorkItemAttachment(projectId: string, workItemNumber: number, file: File): Promise<WorkItemAttachment> {
+  const formData = new FormData()
+  formData.append('file', file)
+  return postForm<WorkItemAttachment>(buildWorkItemAttachmentsPath(projectId, workItemNumber), formData)
+}
+
+export function deleteWorkItemAttachment(projectId: string, workItemNumber: number, attachmentId: string): Promise<void> {
+  return del<void>(`${buildWorkItemAttachmentsPath(projectId, workItemNumber)}/${attachmentId}`)
 }
 
 export interface WorkItemsImportResult {

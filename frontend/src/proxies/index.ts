@@ -13,8 +13,11 @@ export {
 export type { CreateProjectRequest, UpdateProjectRequest, ProjectsImportResult } from './projectsProxy'
 export {
   getWorkItems,
+  getWorkItemAttachments,
   createWorkItem,
   updateWorkItem,
+  uploadWorkItemAttachment,
+  deleteWorkItemAttachment,
   bulkUpdateWorkItems,
   bulkDeleteWorkItems,
   deleteWorkItem,
@@ -96,6 +99,9 @@ export {
   useGitHubRepos,
   useCreateGitHubRepo,
   useCreateWorkItem,
+  useWorkItemAttachments,
+  useUploadWorkItemAttachment,
+  useDeleteWorkItemAttachment,
   useUpdateWorkItem,
   useBulkUpdateWorkItems,
   useBulkDeleteWorkItems,

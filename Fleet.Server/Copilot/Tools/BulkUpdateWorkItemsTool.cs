@@ -68,9 +68,20 @@ public class BulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                 if (!string.IsNullOrWhiteSpace(levelName))
                     levelId = levels.FirstOrDefault(l => l.Name.Equals(levelName, StringComparison.OrdinalIgnoreCase))?.Id;
 
+                var existing = context.CurrentMessageAttachments.Count > 0
+                    ? await workItemService.GetByWorkItemNumberAsync(projectId, id)
+                    : null;
+                var description = UpdateWorkItemTool.GetString(item, "description");
+                if (context.CurrentMessageAttachments.Count > 0)
+                {
+                    description = UpdateWorkItemTool.MergeAttachmentReferencesIntoDescription(
+                        description ?? existing?.Description,
+                        context.CurrentMessageAttachments);
+                }
+
                 var request = new Models.UpdateWorkItemRequest(
                     Title: UpdateWorkItemTool.GetString(item, "title"),
-                    Description: UpdateWorkItemTool.GetString(item, "description"),
+                    Description: description,
                     Priority: UpdateWorkItemTool.GetInt(item, "priority"),
                     Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty"),
                     State: UpdateWorkItemTool.GetString(item, "state"),

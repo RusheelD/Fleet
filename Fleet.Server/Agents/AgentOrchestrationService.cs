@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Threading.Channels;
 using System.Net;
 using System.Net.Http.Headers;
@@ -7,6 +8,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Fleet.Server.Auth;
 using Fleet.Server.Connections;
+using Fleet.Server.Copilot;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.LLM;
@@ -28,6 +30,9 @@ public class AgentOrchestrationService(
     IAgentTaskRepository agentTaskRepository,
     IConnectionService connectionService,
     IWorkItemRepository workItemRepository,
+    IWorkItemAttachmentService workItemAttachmentService,
+    IChatSessionRepository chatSessionRepository,
+    IChatAttachmentStorage chatAttachmentStorage,
     IServiceScopeFactory serviceScopeFactory,
     ILLMClient llmClient,
     IHttpClientFactory httpClientFactory,
@@ -40,6 +45,7 @@ public class AgentOrchestrationService(
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private const int MaxAgentRetries = 2;
     private const int MaxAutomaticReviewLoops = 2;
+    private const double IncompleteProgressCeiling = 0.9995;
     private static readonly HashSet<string> InPrOrBeyondStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "In-PR",
@@ -134,6 +140,13 @@ public class AgentOrchestrationService(
     internal const int MaxSubFlowChildrenPerExecution = 3;
     internal const int MaxSubFlowExecutionDepth = 3;
     private const int MaxParallelSubFlows = MaxSubFlowChildrenPerExecution;
+    private const string StagedChatAssetDirectory = ".fleet-assets";
+    private static readonly Regex ChatAttachmentReferenceRegex = new(
+        @"/api/chat/attachments/(?<id>[A-Za-z0-9\-]+)/content",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex WorkItemAttachmentReferenceRegex = new(
+        @"/api/projects/[^/\s]+/work-items/\d+/attachments/(?<id>[A-Za-z0-9\-]+)/content",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Uses a cheap LLM call to determine which agent roles are needed for the work item.
@@ -536,7 +549,7 @@ public class AgentOrchestrationService(
                         retryPlan.PriorProgressEstimate,
                         totalRoles == 0 ? 0 : (double)carriedRoleCount / totalRoles),
                     0,
-                    0.99);
+                    IncompleteProgressCeiling);
             var execution = new AgentExecution
             {
                 Id = executionId,
@@ -603,7 +616,7 @@ public class AgentOrchestrationService(
             if (retryPlan is not null)
             {
                 var retrySummary = $"Retry context loaded from execution {retryPlan.SourceExecutionId} " +
-                                   $"(status: {retryPlan.SourceStatus ?? "unknown"}, prior progress: {(int)Math.Round(retryPlan.PriorProgressEstimate * 100)}%)";
+                                   $"(status: {retryPlan.SourceStatus ?? "unknown"}, prior progress: {FormatProgressPercent(retryPlan.PriorProgressEstimate * 100)}%)";
                 await WriteLogEntryAsync(
                     db,
                     projectId,
@@ -865,7 +878,7 @@ public class AgentOrchestrationService(
                 Math.Clamp(pausedExecution.Progress, 0, 1),
                 totalRoles == 0 ? 0 : (double)carriedRoleCount / totalRoles),
             0,
-            0.99);
+            IncompleteProgressCeiling);
 
         var trackedExecution = await db.AgentExecutions
             .FirstOrDefaultAsync(
@@ -1759,8 +1772,20 @@ public class AgentOrchestrationService(
                 draftPullRequestReady = false;
             }
 
+            var stagedChatAssets = await StageReferencedChatAttachmentsAsync(
+                sandbox,
+                projectId,
+                userId.ToString(),
+                workItem,
+                childWorkItems,
+                externalCancellation);
+
             // Build the initial user message with work item context (includes children)
             var workItemContext = BuildWorkItemContext(workItem, childWorkItems);
+            if (stagedChatAssets.Count > 0)
+            {
+                workItemContext = $"{workItemContext}\n\n{BuildStagedChatAssetContext(stagedChatAssets)}";
+            }
             if (retryPlan is not null && !string.IsNullOrWhiteSpace(retryPlan.RetryContextMarkdown))
             {
                 workItemContext = $"{workItemContext}\n\n{retryPlan.RetryContextMarkdown}";
@@ -2076,11 +2101,13 @@ public class AgentOrchestrationService(
                 {
                     var isRetry = attempt > 1;
                     var retryProgressFloorPercent = priorAttempts.LastOrDefault()?.EstimatedCompletionPercent ?? 0;
-                    var lastLoggedPercent = retryProgressFloorPercent > 0 ? retryProgressFloorPercent : -1;
+                    var lastLoggedPercent = retryProgressFloorPercent > 0
+                        ? (int)Math.Floor(Math.Clamp(retryProgressFloorPercent, 0, 99.999))
+                        : -1;
                     var lastLoggedSummary = string.Empty;
                     var initialProgressSummary = isRetry
                         ? retryProgressFloorPercent > 0
-                            ? $"Retrying phase (attempt {attempt}/{maxAttempts}, resuming from {retryProgressFloorPercent}%)"
+                            ? $"Retrying phase (attempt {attempt}/{maxAttempts}, resuming from {FormatProgressPercent(retryProgressFloorPercent)}%)"
                             : $"Retrying phase (attempt {attempt}/{maxAttempts})"
                         : $"Starting phase: {GetPhaseTaskDescription(role)}";
 
@@ -2120,7 +2147,7 @@ public class AgentOrchestrationService(
                             var exec = await scopedDb.AgentExecutions.FindAsync(executionId);
                             if (exec is null) return;
 
-                            var clampedOverall = Math.Clamp(overallProgress, 0, 0.99);
+                            var clampedOverall = Math.Clamp(overallProgress, 0, IncompleteProgressCeiling);
                             exec.Progress = Math.Max(exec.Progress, clampedOverall);
 
                             var agent = exec.Agents.FirstOrDefault(a => a.Role == role.ToString());
@@ -2131,7 +2158,7 @@ public class AgentOrchestrationService(
                                 if (!string.IsNullOrWhiteSpace(summary))
                                     agent.CurrentTask = summary;
 
-                                var clampedRoleProgress = Math.Clamp(estimatedProgress, 0, 0.99);
+                                var clampedRoleProgress = Math.Clamp(estimatedProgress, 0, IncompleteProgressCeiling);
                                 agent.Progress = Math.Max(agent.Progress, clampedRoleProgress);
                             }
 
@@ -2152,7 +2179,7 @@ public class AgentOrchestrationService(
                                 lastLoggedSummary = summary;
                             }
 
-                            var pct = (int)Math.Round(estimatedProgress * 100);
+                            var pct = (int)Math.Floor(Math.Clamp(estimatedProgress * 100, 0, 99.999));
                             if (pct != lastLoggedPercent)
                             {
                                 await WriteLogEntryAsync(
@@ -2240,7 +2267,7 @@ public class AgentOrchestrationService(
                             role.ToString(),
                             result.Success ? "completed" : "failed",
                             result.ToolCallCount,
-                            Math.Clamp(result.EstimatedCompletionPercent / 100.0, 0, 0.99),
+                            Math.Clamp(result.EstimatedCompletionPercent / 100.0, 0, IncompleteProgressCeiling),
                             result.Success
                                 ? null
                                 : BuildRetryFailureTask(result.EstimatedCompletionPercent, result.LastProgressSummary));
@@ -2760,7 +2787,7 @@ public class AgentOrchestrationService(
         if (HasNodeExceedingGeneratedChildLimit(generatedPlan.SubFlows))
             return false;
 
-        if (flattenedSubFlows.Any(subFlow => subFlow.Difficulty > workItem.Difficulty))
+        if (flattenedSubFlows.Any(subFlow => subFlow.Difficulty > workItem.Difficulty + 1))
             return false;
 
         if (CountGeneratedLeafSubFlows(generatedPlan.SubFlows) < 2)
@@ -2796,7 +2823,10 @@ public class AgentOrchestrationService(
         if (substantialDirectBranches < 2)
             return false;
 
-        var materiallyReducesComplexity = flattenedSubFlows.Any(subFlow => subFlow.Difficulty < workItem.Difficulty);
+        var materiallyReducesComplexity =
+            flattenedSubFlows.Any(subFlow => subFlow.Difficulty < workItem.Difficulty) ||
+            (generatedPlan.SubFlows.Count >= 3 &&
+             branchAnalyses.Count(branch => branch.SubFlow.Difficulty >= workItem.Difficulty) >= 2);
         if (!materiallyReducesComplexity)
             return false;
 
@@ -3118,6 +3148,215 @@ public class AgentOrchestrationService(
     private static bool IsInPrOrBeyond(string? state)
         => !string.IsNullOrWhiteSpace(state) && InPrOrBeyondStates.Contains(state);
 
+    private sealed record StagedChatAsset(
+        string AttachmentId,
+        string FileName,
+        string RelativePath,
+        string ContentType,
+        IReadOnlyList<int> ReferencedByWorkItemNumbers);
+
+    private async Task<IReadOnlyList<StagedChatAsset>> StageReferencedChatAttachmentsAsync(
+        IRepoSandbox sandbox,
+        string projectId,
+        string ownerId,
+        Models.WorkItemDto workItem,
+        List<Models.WorkItemDto> allDescendants,
+        CancellationToken cancellationToken)
+    {
+        var chatReferences = CollectReferencedChatAttachments(workItem, allDescendants);
+        var workItemReferences = CollectReferencedWorkItemAttachments(workItem, allDescendants);
+        if (chatReferences.Count == 0 && workItemReferences.Count == 0)
+            return [];
+
+        var stagedAssets = new List<StagedChatAsset>();
+        foreach (var (attachmentId, workItemNumbers) in chatReferences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var attachment = await chatSessionRepository.GetAttachmentRecordAsync(attachmentId, ownerId);
+            if (attachment is null)
+            {
+                logger.LogWarning(
+                    "Execution asset staging skipped unknown chat attachment {AttachmentId} for work item #{WorkItemNumber}",
+                    attachmentId,
+                    workItem.WorkItemNumber);
+                continue;
+            }
+
+            byte[]? content = null;
+            if (!string.IsNullOrWhiteSpace(attachment.StoragePath))
+                content = await chatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
+
+            if (content is null)
+                content = Encoding.UTF8.GetBytes(attachment.Content ?? string.Empty);
+
+            if (content.Length == 0)
+                continue;
+
+            var safeFileName = SanitizeAttachmentFileName(attachment.FileName);
+            var relativePath = $"{StagedChatAssetDirectory}/{attachmentId}-{safeFileName}";
+            sandbox.WriteBinaryFile(relativePath, content);
+            stagedAssets.Add(new StagedChatAsset(
+                attachmentId,
+                attachment.FileName,
+                relativePath.Replace('\\', '/'),
+                attachment.ContentType,
+                workItemNumbers));
+        }
+
+        foreach (var (attachmentId, workItemNumbers) in workItemReferences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var attachment = await workItemAttachmentService.GetAttachmentRecordAsync(projectId, attachmentId, cancellationToken);
+            if (attachment is null)
+            {
+                logger.LogWarning(
+                    "Execution asset staging skipped unknown work item attachment {AttachmentId} for work item #{WorkItemNumber}",
+                    attachmentId,
+                    workItem.WorkItemNumber);
+                continue;
+            }
+
+            var content = string.IsNullOrWhiteSpace(attachment.StoragePath)
+                ? null
+                : await chatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
+
+            if (content is null || content.Length == 0)
+                continue;
+
+            var safeFileName = SanitizeAttachmentFileName(attachment.FileName);
+            var relativePath = $"{StagedChatAssetDirectory}/{attachmentId}-{safeFileName}";
+            sandbox.WriteBinaryFile(relativePath, content);
+            stagedAssets.Add(new StagedChatAsset(
+                attachmentId,
+                attachment.FileName,
+                relativePath.Replace('\\', '/'),
+                attachment.ContentType,
+                workItemNumbers));
+        }
+
+        return stagedAssets;
+    }
+
+    private static string BuildStagedChatAssetContext(IReadOnlyList<StagedChatAsset> stagedAssets)
+    {
+        if (stagedAssets.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## Attached Assets");
+        sb.AppendLine("The following user-uploaded assets were staged locally for this execution. Use these local files instead of the original remote attachment URLs when you need the asset contents.");
+        sb.AppendLine();
+
+        foreach (var asset in stagedAssets)
+        {
+            var referencedBy = string.Join(", ", asset.ReferencedByWorkItemNumbers.Select(number => $"#{number}"));
+            sb.AppendLine($"- `{asset.RelativePath}` ({asset.ContentType}) from `{asset.FileName}`; referenced by {referencedBy}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static Dictionary<string, IReadOnlyList<int>> CollectReferencedChatAttachments(
+        Models.WorkItemDto workItem,
+        List<Models.WorkItemDto> allDescendants)
+    {
+        var references = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+
+        void AddReferences(int workItemNumber, string? markdown)
+        {
+            if (string.IsNullOrWhiteSpace(markdown))
+                return;
+
+            foreach (Match match in ChatAttachmentReferenceRegex.Matches(markdown))
+            {
+                if (!match.Success)
+                    continue;
+
+                var attachmentId = match.Groups["id"].Value;
+                if (string.IsNullOrWhiteSpace(attachmentId))
+                    continue;
+
+                if (!references.TryGetValue(attachmentId, out var workItemNumbers))
+                {
+                    workItemNumbers = [];
+                    references[attachmentId] = workItemNumbers;
+                }
+
+                workItemNumbers.Add(workItemNumber);
+            }
+        }
+
+        AddReferences(workItem.WorkItemNumber, workItem.Description);
+        AddReferences(workItem.WorkItemNumber, workItem.AcceptanceCriteria);
+        foreach (var descendant in allDescendants)
+        {
+            AddReferences(descendant.WorkItemNumber, descendant.Description);
+            AddReferences(descendant.WorkItemNumber, descendant.AcceptanceCriteria);
+        }
+
+        return references.ToDictionary(
+            entry => entry.Key,
+            entry => (IReadOnlyList<int>)entry.Value.OrderBy(number => number).ToArray(),
+            StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, IReadOnlyList<int>> CollectReferencedWorkItemAttachments(
+        Models.WorkItemDto workItem,
+        List<Models.WorkItemDto> allDescendants)
+    {
+        var references = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+
+        void AddReferences(int workItemNumber, string? markdown)
+        {
+            if (string.IsNullOrWhiteSpace(markdown))
+                return;
+
+            foreach (Match match in WorkItemAttachmentReferenceRegex.Matches(markdown))
+            {
+                if (!match.Success)
+                    continue;
+
+                var attachmentId = match.Groups["id"].Value;
+                if (string.IsNullOrWhiteSpace(attachmentId))
+                    continue;
+
+                if (!references.TryGetValue(attachmentId, out var workItemNumbers))
+                {
+                    workItemNumbers = [];
+                    references[attachmentId] = workItemNumbers;
+                }
+
+                workItemNumbers.Add(workItemNumber);
+            }
+        }
+
+        AddReferences(workItem.WorkItemNumber, workItem.Description);
+        AddReferences(workItem.WorkItemNumber, workItem.AcceptanceCriteria);
+        foreach (var descendant in allDescendants)
+        {
+            AddReferences(descendant.WorkItemNumber, descendant.Description);
+            AddReferences(descendant.WorkItemNumber, descendant.AcceptanceCriteria);
+        }
+
+        return references.ToDictionary(
+            entry => entry.Key,
+            entry => (IReadOnlyList<int>)entry.Value.OrderBy(number => number).ToArray(),
+            StringComparer.Ordinal);
+    }
+
+    private static string SanitizeAttachmentFileName(string fileName)
+    {
+        var leafName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(leafName))
+            leafName = "attachment.bin";
+
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var sanitized = new string(leafName.Select(ch => invalidCharacters.Contains(ch) ? '-' : ch).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(sanitized) ? "attachment.bin" : sanitized;
+    }
+
     /// <summary>
     /// Builds the work item context string that serves as the base input for all phases.
     /// Includes the parent work item and all included descendants with full details.
@@ -3136,6 +3375,13 @@ public class AgentOrchestrationService(
         {
             sb.AppendLine("## Description");
             sb.AppendLine(workItem.Description);
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(workItem.AcceptanceCriteria))
+        {
+            sb.AppendLine("## Acceptance Criteria");
+            sb.AppendLine(workItem.AcceptanceCriteria);
             sb.AppendLine();
         }
 
@@ -3182,6 +3428,8 @@ public class AgentOrchestrationService(
                 sb.AppendLine($"{indent}- **Tags**: {string.Join(", ", child.Tags)}");
             if (!string.IsNullOrWhiteSpace(child.Description))
                 sb.AppendLine($"{indent}- **Description**: {child.Description}");
+            if (!string.IsNullOrWhiteSpace(child.AcceptanceCriteria))
+                sb.AppendLine($"{indent}- **Acceptance Criteria**: {child.AcceptanceCriteria}");
             sb.AppendLine();
 
             // Recurse into this child's children
@@ -3240,8 +3488,10 @@ public class AgentOrchestrationService(
         sb.AppendLine();
         sb.AppendLine("**Progress Reporting Requirements:**");
         sb.AppendLine("- Call `report_progress` frequently with `percent_complete` and `summary`.");
-        sb.AppendLine("- Send a progress update after every meaningful tool call while working.");
+        sb.AppendLine("- Send a progress update after every meaningful tool call and during longer thinking stretches.");
+        sb.AppendLine("- `percent_complete` may be fractional. Prefer smaller realistic increments (for example 12.35, 48.7, 83.15) instead of whole-percent jumps.");
         sb.AppendLine("- Include clear milestones (for example: analysis done, implementation started, tests passing).");
+        sb.AppendLine("- Do not jump to 99-100% early. Reserve 100% for true completion.");
         sb.AppendLine("- Send a final `report_progress` update at 100% when your phase is complete.");
         sb.AppendLine();
         sb.AppendLine("**Speed & Cost Constraints:**");
@@ -3518,7 +3768,7 @@ public class AgentOrchestrationService(
         execution.CurrentPhase = $"Auto-remediation: {reviewDecision.RecommendationLabel} (cycle {cycleNumber})";
         execution.Progress = totalRoleCount == 0
             ? execution.Progress
-            : Math.Clamp((double)preservedRoleCount / totalRoleCount, 0, 0.99);
+            : Math.Clamp((double)preservedRoleCount / totalRoleCount, 0, IncompleteProgressCeiling);
 
         foreach (var agent in execution.Agents)
         {
@@ -3587,7 +3837,7 @@ public class AgentOrchestrationService(
                 var retrySummary = string.IsNullOrWhiteSpace(attempt.LastProgressSummary)
                     ? "No summary captured"
                     : attempt.LastProgressSummary;
-                sb.AppendLine($"- Last estimated completion: {attempt.EstimatedCompletionPercent}% ({retrySummary})");
+                sb.AppendLine($"- Last estimated completion: {FormatProgressPercent(attempt.EstimatedCompletionPercent)}% ({retrySummary})");
             }
             if (!string.IsNullOrWhiteSpace(attempt.Output))
             {
@@ -3609,7 +3859,7 @@ public class AgentOrchestrationService(
         sb.AppendLine("## Previous Execution Context");
         sb.AppendLine($"- Previous execution id: {priorExecution.Id}");
         sb.AppendLine($"- Previous status: {priorExecution.Status}");
-        sb.AppendLine($"- Last recorded completion: {(int)Math.Round(Math.Clamp(priorExecution.Progress, 0, 1) * 100)}%");
+        sb.AppendLine($"- Last recorded completion: {FormatProgressPercent(Math.Clamp(priorExecution.Progress, 0, 1) * 100)}%");
         if (!string.IsNullOrWhiteSpace(priorExecution.BranchName))
             sb.AppendLine($"- Reused branch: {priorExecution.BranchName}");
         if (!string.IsNullOrWhiteSpace(priorExecution.PullRequestUrl))
@@ -3656,7 +3906,7 @@ public class AgentOrchestrationService(
         sb.AppendLine("## Paused Execution Context");
         sb.AppendLine($"- Execution id: {pausedExecution.Id}");
         sb.AppendLine($"- Last known status: {pausedExecution.Status}");
-        sb.AppendLine($"- Last recorded completion: {(int)Math.Round(Math.Clamp(pausedExecution.Progress, 0, 1) * 100)}%");
+        sb.AppendLine($"- Last recorded completion: {FormatProgressPercent(Math.Clamp(pausedExecution.Progress, 0, 1) * 100)}%");
         if (!string.IsNullOrWhiteSpace(pausedExecution.CurrentPhase))
             sb.AppendLine($"- Paused while: {pausedExecution.CurrentPhase}");
         if (!string.IsNullOrWhiteSpace(pausedExecution.BranchName))
@@ -3713,7 +3963,7 @@ public class AgentOrchestrationService(
     private static string IndentBlock(string text, string prefix) =>
         string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(line => $"{prefix}{line}"));
 
-    private static string BuildRetryFailureTask(int estimatedCompletionPercent, string? lastProgressSummary)
+    private static string BuildRetryFailureTask(double estimatedCompletionPercent, string? lastProgressSummary)
     {
         if (estimatedCompletionPercent <= 0)
             return "Failed";
@@ -3723,8 +3973,19 @@ public class AgentOrchestrationService(
             : lastProgressSummary.Trim();
 
         return string.IsNullOrWhiteSpace(summary)
-            ? $"Failed at {estimatedCompletionPercent}%"
-            : $"Failed at {estimatedCompletionPercent}%: {summary}";
+            ? $"Failed at {FormatProgressPercent(estimatedCompletionPercent)}%"
+            : $"Failed at {FormatProgressPercent(estimatedCompletionPercent)}%: {summary}";
+    }
+
+    private static string FormatProgressPercent(double percent)
+    {
+        var rounded = Math.Round(Math.Clamp(percent, 0, 100), 2, MidpointRounding.AwayFromZero);
+        var format = rounded % 1 == 0
+            ? "0"
+            : rounded % 0.1 == 0
+                ? "0.0"
+                : "0.##";
+        return rounded.ToString(format, CultureInfo.InvariantCulture);
     }
 
     private static string BuildAutomaticReviewLoopLogMessage(
@@ -3865,7 +4126,7 @@ public class AgentOrchestrationService(
             else
             {
                 agent.CurrentTask = taskOverride ?? "Failed";
-                agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, 0.99);
+                agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, IncompleteProgressCeiling);
             }
         }
 
@@ -3893,7 +4154,7 @@ public class AgentOrchestrationService(
         {
             agent.Status = "running";
             agent.CurrentTask = taskDescription;
-            agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, 0.99);
+            agent.Progress = Math.Clamp(Math.Max(agent.Progress, preservedProgress), 0, IncompleteProgressCeiling);
         }
 
         await scopedDb.SaveChangesAsync();

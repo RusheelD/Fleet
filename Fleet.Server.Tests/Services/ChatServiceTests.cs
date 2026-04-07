@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Reflection;
 
 namespace Fleet.Server.Tests.Services;
@@ -18,6 +19,7 @@ namespace Fleet.Server.Tests.Services;
 public class ChatServiceTests
 {
     private Mock<IChatSessionRepository> _chatRepo = null!;
+    private Mock<IChatAttachmentStorage> _attachmentStorage = null!;
     private Mock<ILLMClient> _llmClient = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IUsageLedgerService> _usageLedgerService = null!;
@@ -35,6 +37,7 @@ public class ChatServiceTests
     public void Setup()
     {
         _chatRepo = new Mock<IChatSessionRepository>();
+        _attachmentStorage = new Mock<IChatAttachmentStorage>();
         _llmClient = new Mock<ILLMClient>();
         _authService = new Mock<IAuthService>();
         _usageLedgerService = new Mock<IUsageLedgerService>();
@@ -74,11 +77,18 @@ public class ChatServiceTests
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.GetAttachmentsByMessageIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.RenameSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
             .ReturnsAsync(true);
+        _attachmentStorage.Setup(s => s.DeleteAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _attachmentStorage.Setup(s => s.ReadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
 
         _sut = new ChatService(
             _chatRepo.Object,
+            _attachmentStorage.Object,
             _llmClient.Object,
             _toolRegistry,
             _authService.Object,
@@ -450,8 +460,13 @@ public class ChatServiceTests
 
         var toolRegistryWithTools = new ChatToolRegistry([mockTool.Object]);
         var sut = new ChatService(
-            _chatRepo.Object, _llmClient.Object, toolRegistryWithTools,
-            _authService.Object, _llmOptions, _logger.Object);
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object);
 
         var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "now");
         var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Here's what I found", "now");
@@ -527,6 +542,7 @@ public class ChatServiceTests
         var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
         var sut = new ChatService(
             _chatRepo.Object,
+            _attachmentStorage.Object,
             _llmClient.Object,
             toolRegistryWithTools,
             _authService.Object,
@@ -722,11 +738,27 @@ public class ChatServiceTests
     [TestMethod]
     public async Task UploadAttachmentAsync_DelegatesToRepo()
     {
-        var expected = new ChatAttachmentDto("att-1", "doc.md", 100, "2024-01-01");
-        _chatRepo.Setup(r => r.AddAttachmentAsync(ProjectId, SessionId, "doc.md", "# Content"))
+        var expected = CreateAttachment("att-1", "doc.md");
+        var contentBytes = Encoding.UTF8.GetBytes("# Content");
+        _attachmentStorage.Setup(s => s.SaveAsync(
+                It.IsAny<string>(),
+                "doc.md",
+                "text/markdown",
+                contentBytes,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredChatAttachment("ab\\att-1\\doc.md", contentBytes.Length, "text/markdown", "# Content"));
+        _chatRepo.Setup(r => r.AddAttachmentAsync(
+                It.IsAny<string>(),
+                ProjectId,
+                SessionId,
+                "doc.md",
+                "# Content",
+                "text/markdown",
+                contentBytes.Length,
+                "ab\\att-1\\doc.md"))
             .ReturnsAsync(expected);
 
-        var result = await _sut.UploadAttachmentAsync(ProjectId, SessionId, "doc.md", "# Content");
+        var result = await _sut.UploadAttachmentAsync(ProjectId, SessionId, "doc.md", "text/markdown", contentBytes);
 
         Assert.AreEqual("att-1", result.Id);
         Assert.AreEqual("doc.md", result.FileName);
@@ -737,7 +769,7 @@ public class ChatServiceTests
     {
         var attachments = new List<ChatAttachmentDto>
         {
-            new("att-1", "doc.md", 100, "2024-01-01"),
+            CreateAttachment("att-1", "doc.md"),
         };
         _chatRepo.Setup(r => r.GetAttachmentsBySessionIdAsync(ProjectId, SessionId)).ReturnsAsync(attachments);
 
@@ -750,10 +782,13 @@ public class ChatServiceTests
     public async Task DeleteAttachmentAsync_Found_ReturnsTrue()
     {
         _chatRepo.Setup(r => r.DeleteAttachmentAsync(ProjectId, SessionId, "att-1")).ReturnsAsync(true);
+        _chatRepo.Setup(r => r.GetAttachmentRecordAsync("att-1", It.IsAny<string?>()))
+            .ReturnsAsync(new ChatAttachmentRecord("att-1", "doc.md", 100, "2024-01-01", "text/markdown", "# Content", "stored/doc.md", SessionId, null));
 
         var result = await _sut.DeleteAttachmentAsync(ProjectId, SessionId, "att-1");
 
         Assert.IsTrue(result);
+        _attachmentStorage.Verify(s => s.DeleteAsync("stored/doc.md", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]
@@ -781,7 +816,7 @@ public class ChatServiceTests
         _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
             .ReturnsAsync(new List<ChatAttachmentDto>
             {
-                new("att-1", "spec.md", 50, "2024-01-01"),
+                CreateAttachment("att-1", "spec.md", contentType: "text/markdown", contentUrl: "/api/chat/attachments/att-1/content", markdownReference: "[spec.md](/api/chat/attachments/att-1/content)"),
             });
         _chatRepo.Setup(r => r.GetAttachmentContentAsync(ProjectId, "att-1"))
             .ReturnsAsync("# Specification\nBuild authentication module.");
@@ -812,6 +847,7 @@ public class ChatServiceTests
         var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
         var sut = new ChatService(
             _chatRepo.Object,
+            _attachmentStorage.Object,
             _llmClient.Object,
             toolRegistryWithTools,
             _authService.Object,
@@ -905,6 +941,7 @@ public class ChatServiceTests
         var services = new ServiceCollection();
         services.AddScoped<ChatService>();
         services.AddScoped<IChatSessionRepository>(_ => _chatRepo.Object);
+        services.AddScoped<IChatAttachmentStorage>(_ => _attachmentStorage.Object);
         services.AddScoped<ILLMClient>(_ => _llmClient.Object);
         services.AddScoped(_ => registry);
         services.AddScoped<IAuthService>(_ => _authService.Object);
@@ -918,6 +955,7 @@ public class ChatServiceTests
 
         return new ChatService(
             _chatRepo.Object,
+            _attachmentStorage.Object,
             _llmClient.Object,
             registry,
             _authService.Object,
@@ -936,5 +974,24 @@ public class ChatServiceTests
         Assert.IsNotNull(requests);
         return requests;
     }
+
+    private static ChatAttachmentDto CreateAttachment(
+        string id,
+        string fileName,
+        int contentLength = 100,
+        string uploadedAt = "2024-01-01",
+        string contentType = "application/octet-stream",
+        string? contentUrl = null,
+        string? markdownReference = null,
+        bool isImage = false)
+        => new(
+            id,
+            fileName,
+            contentLength,
+            uploadedAt,
+            contentType,
+            contentUrl ?? $"/api/chat/attachments/{id}/content",
+            markdownReference ?? $"[{fileName}]({contentUrl ?? $"/api/chat/attachments/{id}/content"})",
+            isImage);
 }
 

@@ -62,6 +62,10 @@ export interface ChatAttachment {
   fileName: string
   contentLength: number
   uploadedAt: string
+  contentType: string
+  contentUrl: string
+  markdownReference: string
+  isImage: boolean
 }
 
 function normalizeActivityKind(kind: unknown): ChatSessionActivity['kind'] {

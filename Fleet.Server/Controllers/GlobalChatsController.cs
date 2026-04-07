@@ -16,6 +16,7 @@ public class GlobalChatsController(
     IServerEventPublisher eventPublisher) : ControllerBase
 {
     private const string GlobalProjectScope = "";
+    private const int MaxChatAttachmentBytes = 10 * 1024 * 1024;
 
     [HttpGet]
     public async Task<IActionResult> GetChatData()
@@ -126,22 +127,25 @@ public class GlobalChatsController(
     }
 
     [HttpPost("sessions/{sessionId}/attachments")]
-    [RequestSizeLimit(1_048_576)]
+    [RequestSizeLimit(MaxChatAttachmentBytes)]
     public async Task<IActionResult> UploadAttachment(string sessionId, IFormFile file)
     {
         if (file is null || file.Length == 0)
             return BadRequest("No file provided.");
 
-        if (!file.FileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-            return BadRequest("Only .md (Markdown) files are supported.");
+        if (file.Length > MaxChatAttachmentBytes)
+            return BadRequest($"File exceeds the {MaxChatAttachmentBytes / (1024 * 1024)} MB limit.");
 
-        if (file.Length > 512_000)
-            return BadRequest("File exceeds the 500 KB limit.");
+        await using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer);
 
-        using var reader = new StreamReader(file.OpenReadStream());
-        var content = await reader.ReadToEndAsync();
-
-        var attachment = await chatService.UploadAttachmentAsync(GlobalProjectScope, sessionId, file.FileName, content);
+        var attachment = await chatService.UploadAttachmentAsync(
+            GlobalProjectScope,
+            sessionId,
+            file.FileName,
+            file.ContentType,
+            buffer.ToArray(),
+            HttpContext?.RequestAborted ?? CancellationToken.None);
         var userId = await authService.GetCurrentUserIdAsync();
         await eventPublisher.PublishUserEventAsync(
             userId,

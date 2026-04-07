@@ -3,10 +3,9 @@ import {
     mergeClasses,
     Avatar,
     Text,
-    Link,
     Tooltip,
 } from '@fluentui/react-components'
-import { BotRegular, DocumentRegular, PersonRegular } from '@fluentui/react-icons'
+import { BotRegular, DocumentRegular, ImageRegular, PersonRegular } from '@fluentui/react-icons'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessageData } from '../../models'
@@ -14,6 +13,7 @@ import { formatInitials } from './initials'
 import { usePreferences } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../shared/InfoBadge'
+import { AuthorizedAttachmentImage, AuthorizedAttachmentLink } from '../shared/AuthorizedAttachment'
 
 const useStyles = makeStyles({
     messageRow: {
@@ -131,6 +131,13 @@ const useStyles = makeStyles({
         paddingBottom: appTokens.space.xxxs,
         paddingLeft: appTokens.space.xs,
         paddingRight: appTokens.space.xs,
+    },
+    attachmentPreview: {
+        width: '2.25rem',
+        height: '2.25rem',
+        borderRadius: appTokens.radius.md,
+        objectFit: 'cover',
+        flexShrink: 0,
     },
     attachmentName: {
         minWidth: 0,
@@ -337,7 +344,10 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                             <Markdown remarkPlugins={[remarkGfm]}
                                 components={{
                                     a: ({ children, href }) => (
-                                        <Link href={href ?? '#'} target="_blank" rel="noopener noreferrer" inline>{children}</Link>
+                                        <AuthorizedAttachmentLink href={href}>{children}</AuthorizedAttachmentLink>
+                                    ),
+                                    img: ({ src, alt }) => (
+                                        <AuthorizedAttachmentImage src={src} alt={alt ?? ''} />
                                     ),
                                 }}
                             >
@@ -349,7 +359,10 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                             <Markdown remarkPlugins={[remarkGfm]}
                                 components={{
                                     a: ({ children, href }) => (
-                                        <Link href={href ?? '#'} target="_blank" rel="noopener noreferrer" inline>{children}</Link>
+                                        <AuthorizedAttachmentLink href={href}>{children}</AuthorizedAttachmentLink>
+                                    ),
+                                    img: ({ src, alt }) => (
+                                        <AuthorizedAttachmentImage src={src} alt={alt ?? ''} />
                                     ),
                                 }}
                             >
@@ -369,7 +382,19 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                                     isCompact && styles.attachmentChipCompact,
                                 )}
                             >
-                                <DocumentRegular fontSize={isCompact ? 12 : 14} />
+                                {attachment.isImage ? (
+                                    attachment.contentUrl ? (
+                                        <AuthorizedAttachmentImage
+                                            src={attachment.contentUrl}
+                                            alt={attachment.fileName}
+                                            className={styles.attachmentPreview}
+                                        />
+                                    ) : (
+                                        <ImageRegular fontSize={isCompact ? 12 : 14} />
+                                    )
+                                ) : (
+                                    <DocumentRegular fontSize={isCompact ? 12 : 14} />
+                                )}
                                 <Tooltip
                                     content={`${attachment.fileName} (${formatSize(attachment.contentLength)})`}
                                     relationship="description"
@@ -381,7 +406,13 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
                                             isCompact && styles.attachmentNameCompact,
                                         )}
                                     >
-                                        {attachment.fileName}
+                                        {attachment.contentUrl ? (
+                                            <AuthorizedAttachmentLink href={attachment.contentUrl}>
+                                                {attachment.fileName}
+                                            </AuthorizedAttachmentLink>
+                                        ) : (
+                                            attachment.fileName
+                                        )}
                                     </Text>
                                 </Tooltip>
                                 <InfoBadge appearance="filled" size={isCompact ? 'tiny' : 'small'}>
@@ -406,6 +437,7 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
 }
 
 function formatSize(chars: number): string {
-    if (chars < 1024) return `${chars} chars`
-    return `${(chars / 1024).toFixed(1)} KB`
+    if (chars < 1024) return `${chars} B`
+    if (chars < 1024 * 1024) return `${(chars / 1024).toFixed(1)} KB`
+    return `${(chars / (1024 * 1024)).toFixed(1)} MB`
 }

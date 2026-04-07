@@ -57,6 +57,13 @@ public interface IRepoSandbox : IAsyncDisposable
     void WriteFile(string relativePath, string content);
 
     /// <summary>
+    /// Writes binary content to a file, creating directories as needed.
+    /// </summary>
+    /// <param name="relativePath">File path relative to the repo root.</param>
+    /// <param name="content">Binary content to write.</param>
+    void WriteBinaryFile(string relativePath, byte[] content);
+
+    /// <summary>
     /// Deletes a file relative to the repo root.
     /// </summary>
     /// <param name="relativePath">File path relative to the repo root.</param>

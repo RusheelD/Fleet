@@ -306,10 +306,25 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         await context.SaveChangesAsync();
     }
 
-    public Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content)
-        => AddAttachmentAsync(string.Empty, sessionId, fileName, content);
+    public Task<ChatAttachmentDto> AddAttachmentAsync(
+        string attachmentId,
+        string sessionId,
+        string fileName,
+        string content,
+        string contentType,
+        int contentLength,
+        string? storagePath)
+        => AddAttachmentAsync(attachmentId, string.Empty, sessionId, fileName, content, contentType, contentLength, storagePath);
 
-    public async Task<ChatAttachmentDto> AddAttachmentAsync(string projectId, string sessionId, string fileName, string content)
+    public async Task<ChatAttachmentDto> AddAttachmentAsync(
+        string attachmentId,
+        string projectId,
+        string sessionId,
+        string fileName,
+        string content,
+        string contentType,
+        int contentLength,
+        string? storagePath)
     {
         var ownerId = await GetCurrentOwnerIdAsync();
         var scopeProjectId = NormalizeProjectId(projectId);
@@ -322,9 +337,12 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
         var entity = new ChatAttachment
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = attachmentId,
             FileName = fileName,
             Content = content,
+            ContentType = NormalizeContentType(contentType),
+            ContentLength = contentLength > 0 ? contentLength : content.Length,
+            StoragePath = storagePath,
             UploadedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             ChatSessionId = sessionId
         };
@@ -332,7 +350,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         context.ChatAttachments.Add(entity);
         await context.SaveChangesAsync();
 
-        return new ChatAttachmentDto(entity.Id, entity.FileName, entity.Content.Length, entity.UploadedAt);
+        return ToAttachmentDto(entity);
     }
 
     public Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId)
@@ -358,6 +376,25 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         return entities.Select(ToAttachmentDto).ToList();
     }
 
+    public async Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsByMessageIdAsync(string projectId, string messageId, string? ownerId = null)
+    {
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
+        var scopeProjectId = NormalizeProjectId(projectId);
+
+        var entities = await context.ChatAttachments
+            .AsNoTracking()
+            .Where(a =>
+                a.ChatMessageId == messageId &&
+                a.ChatSession.OwnerId == effectiveOwnerId &&
+                (scopeProjectId == null
+                    ? a.ChatSession.ProjectId == null
+                    : a.ChatSession.ProjectId == scopeProjectId))
+            .OrderBy(a => a.UploadedAt)
+            .ToListAsync();
+
+        return entities.Select(ToAttachmentDto).ToList();
+    }
+
     public async Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId, string? ownerId = null)
     {
         var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
@@ -375,6 +412,41 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             .ToListAsync();
 
         return entities.Select(ToAttachmentDto).ToList();
+    }
+
+    public async Task<IReadOnlyList<ChatAttachmentRecord>> GetAttachmentRecordsBySessionIdAsync(
+        string projectId,
+        string sessionId,
+        string? ownerId = null)
+    {
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
+        var scopeProjectId = NormalizeProjectId(projectId);
+
+        var entities = await context.ChatAttachments
+            .AsNoTracking()
+            .Where(a =>
+                a.ChatSessionId == sessionId &&
+                a.ChatSession.OwnerId == effectiveOwnerId &&
+                (scopeProjectId == null
+                    ? a.ChatSession.ProjectId == null
+                    : a.ChatSession.ProjectId == scopeProjectId))
+            .OrderBy(a => a.UploadedAt)
+            .ToListAsync();
+
+        return entities.Select(ToAttachmentRecord).ToList();
+    }
+
+    public async Task<ChatAttachmentRecord?> GetAttachmentRecordAsync(string attachmentId, string? ownerId = null)
+    {
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
+
+        var entity = await context.ChatAttachments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a =>
+                a.Id == attachmentId &&
+                a.ChatSession.OwnerId == effectiveOwnerId);
+
+        return entity is null ? null : ToAttachmentRecord(entity);
     }
 
     public Task<string?> GetAttachmentContentAsync(string attachmentId)
@@ -455,7 +527,32 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
     }
 
     private static ChatAttachmentDto ToAttachmentDto(ChatAttachment entity)
-        => new(entity.Id, entity.FileName, entity.Content.Length, entity.UploadedAt);
+    {
+        var contentType = NormalizeContentType(entity.ContentType);
+        var contentUrl = BuildAttachmentContentUrl(entity.Id);
+        var isImage = IsImageContentType(contentType);
+        return new(
+            entity.Id,
+            entity.FileName,
+            entity.ContentLength > 0 ? entity.ContentLength : entity.Content.Length,
+            entity.UploadedAt,
+            contentType,
+            contentUrl,
+            BuildAttachmentMarkdownReference(entity.FileName, contentUrl, isImage),
+            isImage);
+    }
+
+    private static ChatAttachmentRecord ToAttachmentRecord(ChatAttachment entity)
+        => new(
+            entity.Id,
+            entity.FileName,
+            entity.ContentLength > 0 ? entity.ContentLength : entity.Content.Length,
+            entity.UploadedAt,
+            NormalizeContentType(entity.ContentType),
+            entity.Content,
+            entity.StoragePath,
+            entity.ChatSessionId,
+            entity.ChatMessageId);
 
     private static ChatSessionActivityDto[] DeserializeRecentActivity(string? recentActivityJson)
     {
@@ -521,6 +618,28 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
 
     private static string? NormalizeProjectId(string projectId)
         => IsGlobalScope(projectId) ? null : projectId.Trim();
+
+    private static string BuildAttachmentContentUrl(string attachmentId)
+        => $"/api/chat/attachments/{Uri.EscapeDataString(attachmentId)}/content";
+
+    private static string BuildAttachmentMarkdownReference(string fileName, string contentUrl, bool isImage)
+    {
+        var safeLabel = fileName
+            .Replace("[", "\\[", StringComparison.Ordinal)
+            .Replace("]", "\\]", StringComparison.Ordinal);
+
+        return isImage
+            ? $"![{safeLabel}]({contentUrl})"
+            : $"[{safeLabel}]({contentUrl})";
+    }
+
+    private static bool IsImageContentType(string contentType)
+        => contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeContentType(string? contentType)
+        => string.IsNullOrWhiteSpace(contentType)
+            ? "application/octet-stream"
+            : contentType.Trim();
 
     private static bool IsGlobalScope(string projectId)
         => string.IsNullOrWhiteSpace(projectId);

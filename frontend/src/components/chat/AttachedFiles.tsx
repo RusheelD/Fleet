@@ -9,11 +9,13 @@ import {
 import {
     DocumentRegular,
     DismissRegular,
+    ImageRegular,
 } from '@fluentui/react-icons'
 import type { ChatAttachment } from '../../models'
 import { usePreferences } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../shared/InfoBadge'
+import { AuthorizedAttachmentImage, AuthorizedAttachmentLink } from '../shared/AuthorizedAttachment'
 
 type AttachmentListItem = ChatAttachment & {
     isUploading?: boolean
@@ -62,6 +64,13 @@ const useStyles = makeStyles({
         paddingLeft: appTokens.space.xs,
         paddingRight: appTokens.space.xxs,
     },
+    preview: {
+        width: '2rem',
+        height: '2rem',
+        borderRadius: appTokens.radius.md,
+        objectFit: 'cover',
+        flexShrink: 0,
+    },
     fileName: {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -97,9 +106,25 @@ export function AttachedFiles({ attachments, onDelete, deleting }: AttachedFiles
                         isCompact && styles.chipCompact,
                     )}
                 >
-                    <DocumentRegular fontSize={isCompact ? 12 : 14} />
+                    {a.isImage && a.contentUrl ? (
+                        <AuthorizedAttachmentImage
+                            src={a.contentUrl}
+                            alt={a.fileName}
+                            className={styles.preview}
+                        />
+                    ) : a.isImage ? (
+                        <ImageRegular fontSize={isCompact ? 12 : 14} />
+                    ) : (
+                        <DocumentRegular fontSize={isCompact ? 12 : 14} />
+                    )}
                     <Tooltip content={`${a.fileName} (${formatSize(a.contentLength)})`} relationship="description">
-                        <Text size={200} className={mergeClasses(styles.fileName, isCompact && styles.fileNameCompact)}>{a.fileName}</Text>
+                        <Text size={200} className={mergeClasses(styles.fileName, isCompact && styles.fileNameCompact)}>
+                            {a.isUploading || !a.contentUrl ? (
+                                a.fileName
+                            ) : (
+                                <AuthorizedAttachmentLink href={a.contentUrl}>{a.fileName}</AuthorizedAttachmentLink>
+                            )}
+                        </Text>
                     </Tooltip>
                     {a.isUploading ? (
                         <Badge
@@ -129,6 +154,7 @@ export function AttachedFiles({ attachments, onDelete, deleting }: AttachedFiles
 }
 
 function formatSize(chars: number): string {
-    if (chars < 1024) return `${chars} chars`
-    return `${(chars / 1024).toFixed(1)} KB`
+    if (chars < 1024) return `${chars} B`
+    if (chars < 1024 * 1024) return `${(chars / 1024).toFixed(1)} KB`
+    return `${(chars / (1024 * 1024)).toFixed(1)} MB`
 }

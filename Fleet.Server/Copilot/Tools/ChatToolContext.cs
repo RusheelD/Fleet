@@ -1,11 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
+using Fleet.Server.Models;
 
 namespace Fleet.Server.Copilot.Tools;
 
 /// <summary>Runtime context passed to every chat tool invocation.</summary>
-public record ChatToolContext(string? ProjectId, string UserId)
+public record ChatToolContext(string? ProjectId, string UserId, IReadOnlyList<ChatAttachmentDto>? MessageAttachments = null)
 {
     public bool IsProjectScoped => !string.IsNullOrWhiteSpace(ProjectId);
+    public IReadOnlyList<ChatAttachmentDto> CurrentMessageAttachments => MessageAttachments ?? [];
 
     public static string ProjectScopeRequiredMessage =>
         "Error: this tool requires a project-scoped chat session. Open the project chat and try again.";

@@ -197,37 +197,51 @@ public class ChatsControllerTests
     }
 
     [TestMethod]
-    public async Task UploadAttachment_NonMarkdownFile_ReturnsBadRequest()
+    public async Task UploadAttachment_AllowsNonMarkdownFileTypes()
     {
         var file = CreateFormFile("test.txt", "content");
+        var attachment = CreateAttachment("att-1", "test.txt", "text/plain");
+        _chatService.Setup(s => s.UploadAttachmentAsync(
+                ProjectId,
+                SessionId,
+                "test.txt",
+                "text/plain",
+                It.Is<byte[]>(bytes => System.Text.Encoding.UTF8.GetString(bytes) == "content"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(attachment);
 
         var result = await _sut.UploadAttachment(ProjectId, SessionId, file);
 
-        var bad = result as BadRequestObjectResult;
-        Assert.IsNotNull(bad);
-        Assert.IsTrue(bad.Value!.ToString()!.Contains(".md"));
+        var created = result as CreatedResult;
+        Assert.IsNotNull(created);
+        Assert.AreSame(attachment, created.Value);
     }
 
     [TestMethod]
     public async Task UploadAttachment_FileTooLarge_ReturnsBadRequest()
     {
-        // Create a file over 500 KB
-        var bigContent = new string('x', 512_001);
+        var bigContent = new string('x', 10 * 1024 * 1024 + 1);
         var file = CreateFormFile("test.md", bigContent);
 
         var result = await _sut.UploadAttachment(ProjectId, SessionId, file);
 
         var bad = result as BadRequestObjectResult;
         Assert.IsNotNull(bad);
-        Assert.IsTrue(bad.Value!.ToString()!.Contains("500 KB"));
+        Assert.IsTrue(bad.Value!.ToString()!.Contains("10 MB"));
     }
 
     [TestMethod]
     public async Task UploadAttachment_ValidFile_ReturnsCreated()
     {
         var file = CreateFormFile("readme.md", "# Hello");
-        var attachment = new ChatAttachmentDto("att-1", "readme.md", 7, "2025-01-01");
-        _chatService.Setup(s => s.UploadAttachmentAsync(ProjectId, SessionId, "readme.md", "# Hello"))
+        var attachment = CreateAttachment("att-1", "readme.md", "text/markdown");
+        _chatService.Setup(s => s.UploadAttachmentAsync(
+                ProjectId,
+                SessionId,
+                "readme.md",
+                "text/markdown",
+                It.Is<byte[]>(bytes => System.Text.Encoding.UTF8.GetString(bytes) == "# Hello"),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(attachment);
 
         var result = await _sut.UploadAttachment(ProjectId, SessionId, file);
@@ -263,11 +277,39 @@ public class ChatsControllerTests
 
     private static IFormFile CreateFormFile(string fileName, string content)
     {
-        var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         var file = new Mock<IFormFile>();
         file.Setup(f => f.FileName).Returns(fileName);
-        file.Setup(f => f.Length).Returns(stream.Length);
-        file.Setup(f => f.OpenReadStream()).Returns(stream);
+        file.Setup(f => f.ContentType).Returns(GetContentType(fileName));
+        file.Setup(f => f.Length).Returns(bytes.Length);
+        file.Setup(f => f.CopyToAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Returns<Stream, CancellationToken>(async (target, _) =>
+            {
+                await target.WriteAsync(bytes);
+                target.Position = 0;
+            });
         return file.Object;
     }
+
+    private static string GetContentType(string fileName)
+        => Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".md" => "text/markdown",
+            ".txt" => "text/plain",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".svg" => "image/svg+xml",
+            _ => "application/octet-stream",
+        };
+
+    private static ChatAttachmentDto CreateAttachment(string id, string fileName, string contentType)
+        => new(
+            id,
+            fileName,
+            7,
+            "2025-01-01",
+            contentType,
+            $"/api/chat/attachments/{id}/content",
+            $"[{fileName}](/api/chat/attachments/{id}/content)",
+            contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase));
 }

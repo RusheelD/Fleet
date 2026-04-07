@@ -9,6 +9,7 @@ namespace Fleet.Server.Tests.Services;
 public class WorkItemServiceTests
 {
     private Mock<IWorkItemRepository> _repo = null!;
+    private Mock<IWorkItemAttachmentService> _attachmentService = null!;
     private Mock<ILogger<WorkItemService>> _logger = null!;
     private WorkItemService _sut = null!;
 
@@ -18,8 +19,9 @@ public class WorkItemServiceTests
     public void Setup()
     {
         _repo = new Mock<IWorkItemRepository>();
+        _attachmentService = new Mock<IWorkItemAttachmentService>();
         _logger = new Mock<ILogger<WorkItemService>>();
-        _sut = new WorkItemService(_repo.Object, _logger.Object);
+        _sut = new WorkItemService(_repo.Object, _attachmentService.Object, _logger.Object);
     }
 
     [TestMethod]
@@ -104,6 +106,7 @@ public class WorkItemServiceTests
         var result = await _sut.DeleteAsync(ProjectId, 1);
 
         Assert.IsTrue(result);
+        _attachmentService.Verify(s => s.DeleteAllAsync(ProjectId, 1, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]

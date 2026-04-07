@@ -16,10 +16,13 @@ namespace Fleet.Server.Controllers;
 [ServiceFilter(typeof(ProjectOwnershipFilter))]
 public class WorkItemsController(
     IWorkItemService workItemService,
+    IWorkItemAttachmentService workItemAttachmentService,
     IProjectImportExportService projectImportExportService,
     IAuthService authService,
     IServerEventPublisher eventPublisher) : ControllerBase
 {
+    private const int MaxWorkItemAttachmentBytes = 10 * 1024 * 1024;
+
     [HttpGet]
     public async Task<IActionResult> GetByProject(string projectId)
     {
@@ -72,9 +75,9 @@ public class WorkItemsController(
     }
 
     [HttpDelete("{workItemNumber:int}")]
-    public async Task<IActionResult> Delete(string projectId, int workItemNumber)
+    public async Task<IActionResult> Delete(string projectId, int workItemNumber, CancellationToken cancellationToken = default)
     {
-        var deleted = await workItemService.DeleteAsync(projectId, workItemNumber);
+        var deleted = await workItemService.DeleteAsync(projectId, workItemNumber, cancellationToken);
         if (!deleted) return NotFound();
 
         var userId = await authService.GetCurrentUserIdAsync();
@@ -88,6 +91,77 @@ public class WorkItemsController(
             ServerEventTopics.ProjectsUpdated,
             new { projectId });
         return NoContent();
+    }
+
+    [HttpGet("{workItemNumber:int}/attachments")]
+    public async Task<IActionResult> GetAttachments(string projectId, int workItemNumber, CancellationToken cancellationToken = default)
+    {
+        var attachments = await workItemAttachmentService.GetByWorkItemNumberAsync(projectId, workItemNumber, cancellationToken);
+        return Ok(attachments);
+    }
+
+    [HttpPost("{workItemNumber:int}/attachments")]
+    [RequestSizeLimit(MaxWorkItemAttachmentBytes)]
+    public async Task<IActionResult> UploadAttachment(string projectId, int workItemNumber, IFormFile file, CancellationToken cancellationToken = default)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("No file provided.");
+
+        if (file.Length > MaxWorkItemAttachmentBytes)
+            return BadRequest($"File exceeds the {MaxWorkItemAttachmentBytes / (1024 * 1024)} MB limit.");
+
+        await using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer, cancellationToken);
+
+        var attachment = await workItemAttachmentService.UploadAsync(
+            projectId,
+            workItemNumber,
+            file.FileName,
+            file.ContentType,
+            buffer.ToArray(),
+            cancellationToken);
+
+        if (attachment is null)
+            return NotFound();
+
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.WorkItemsUpdated,
+            new { projectId, workItemNumber, attachmentId = attachment.Id },
+            cancellationToken);
+
+        return Created($"/api/projects/{projectId}/work-items/{workItemNumber}/attachments/{attachment.Id}", attachment);
+    }
+
+    [HttpDelete("{workItemNumber:int}/attachments/{attachmentId}")]
+    public async Task<IActionResult> DeleteAttachment(string projectId, int workItemNumber, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var deleted = await workItemAttachmentService.DeleteAsync(projectId, workItemNumber, attachmentId, cancellationToken);
+        if (!deleted)
+            return NotFound();
+
+        var userId = await authService.GetCurrentUserIdAsync();
+        await eventPublisher.PublishProjectEventAsync(
+            userId,
+            projectId,
+            ServerEventTopics.WorkItemsUpdated,
+            new { projectId, workItemNumber, attachmentId },
+            cancellationToken);
+
+        return NoContent();
+    }
+
+    [HttpGet("{workItemNumber:int}/attachments/{attachmentId}/content")]
+    public async Task<IActionResult> GetAttachmentContent(string projectId, int workItemNumber, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var attachment = await workItemAttachmentService.GetContentAsync(projectId, workItemNumber, attachmentId, cancellationToken);
+        if (attachment is null)
+            return NotFound();
+
+        Response.Headers.ContentDisposition = $"inline; filename*=UTF-8''{Uri.EscapeDataString(attachment.FileName)}";
+        return File(attachment.Content, attachment.ContentType);
     }
 
     [HttpGet("export")]

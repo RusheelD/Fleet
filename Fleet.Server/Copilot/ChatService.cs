@@ -14,6 +14,7 @@ namespace Fleet.Server.Copilot;
 
 public class ChatService(
     IChatSessionRepository chatSessionRepository,
+    IChatAttachmentStorage chatAttachmentStorage,
     ILLMClient llmClient,
     ChatToolRegistry toolRegistry,
     IAuthService authService,
@@ -126,7 +127,13 @@ public class ChatService(
 
         logger.CopilotSessionDeleting(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging());
         CancelInFlightRequest(projectId, sessionId);
-        return await chatSessionRepository.DeleteSessionAsync(projectId, sessionId);
+        var attachments = await chatSessionRepository.GetAttachmentRecordsBySessionIdAsync(projectId, sessionId);
+        var deleted = await chatSessionRepository.DeleteSessionAsync(projectId, sessionId);
+        if (!deleted)
+            return false;
+
+        await DeleteStoredAttachmentsAsync(attachments);
+        return true;
     }
 
     public async Task<bool> CancelGenerationAsync(string projectId, string sessionId)
@@ -252,11 +259,12 @@ public class ChatService(
         var requestCancellation = linkedCts.Token;
         CancellationTokenSource? heartbeatCts = null;
         var heartbeatTask = Task.CompletedTask;
+        IReadOnlyList<ChatAttachmentDto> messageAttachments = [];
 
         try
         {
             // 1. Persist the user message and claim any pending attachments for it.
-            await PersistUserMessageAsync(projectId, sessionId, content);
+            messageAttachments = await PersistUserMessageAsync(projectId, sessionId, content);
 
             // 1a. Mark session as generating so the UI shows a spinner on refresh
             if (generateWorkItems)
@@ -338,7 +346,7 @@ public class ChatService(
             }
 
             // 5. Run the tool-calling loop with safety limits
-            var toolContext = new ChatToolContext(projectId, userId.ToString());
+            var toolContext = new ChatToolContext(projectId, userId.ToString(), messageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
 
@@ -627,12 +635,13 @@ public class ChatService(
         CancellationTokenSource? sessionCts = null;
         var userId = 0;
         var chargedWorkItemRun = false;
+        IReadOnlyList<ChatAttachmentDto> messageAttachments = [];
 
         try
         {
             userId = await authService.GetCurrentUserIdAsync();
             sessionCts = RegisterInFlightRequest(requestKey);
-            await PersistUserMessageAsync(projectId, sessionId, content);
+            messageAttachments = await PersistUserMessageAsync(projectId, sessionId, content);
             await chatSessionRepository.UpdateSessionGenerationStateAsync(
                 projectId,
                 sessionId,
@@ -663,7 +672,8 @@ public class ChatService(
                     userId,
                     requestKey,
                     backgroundSessionCts,
-                    chargedWorkItemRun),
+                    chargedWorkItemRun,
+                    messageAttachments),
                 CancellationToken.None);
 
             return new SendMessageResponseDto(sessionId, null, [], null, true);
@@ -698,7 +708,8 @@ public class ChatService(
         int userId,
         string requestKey,
         CancellationTokenSource sessionCts,
-        bool chargedWorkItemRun)
+        bool chargedWorkItemRun,
+        IReadOnlyList<ChatAttachmentDto> currentMessageAttachments)
     {
         if (_serviceScopeFactory is null)
         {
@@ -720,7 +731,8 @@ public class ChatService(
                 userId,
                 requestKey,
                 sessionCts,
-                chargedWorkItemRun);
+                chargedWorkItemRun,
+                currentMessageAttachments);
         }
         catch (OperationCanceledException)
         {
@@ -750,7 +762,8 @@ public class ChatService(
         int userId,
         string requestKey,
         CancellationTokenSource sessionCts,
-        bool chargedWorkItemRun)
+        bool chargedWorkItemRun,
+        IReadOnlyList<ChatAttachmentDto> currentMessageAttachments)
     {
         var ownerId = userId.ToString();
         logger.LogInformation(
@@ -810,7 +823,7 @@ public class ChatService(
                 ownerId: ownerId);
             await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation, ownerId);
 
-            var toolContext = new ChatToolContext(projectId, userId.ToString());
+            var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
 
@@ -1084,10 +1097,11 @@ public class ChatService(
         }
     }
 
-    private async Task PersistUserMessageAsync(string projectId, string sessionId, string content)
+    private async Task<IReadOnlyList<ChatAttachmentDto>> PersistUserMessageAsync(string projectId, string sessionId, string content)
     {
         var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
         await chatSessionRepository.AssignPendingAttachmentsToMessageAsync(projectId, sessionId, userMessage.Id);
+        return await chatSessionRepository.GetAttachmentsByMessageIdAsync(projectId, userMessage.Id);
     }
 
     private async Task HandleDeferredGenerationFailureAsync(
@@ -1688,14 +1702,23 @@ public class ChatService(
         builder.AppendLine(scopePrompt);
         builder.AppendLine();
         builder.AppendLine();
-        builder.AppendLine("## Uploaded Reference Documents");
-        builder.AppendLine("The user has uploaded the following documents for you to reference:");
+        builder.AppendLine("## Uploaded References And Assets");
+        builder.AppendLine("The user has uploaded the following references and assets for you to use.");
+        builder.AppendLine("When an uploaded image or binary asset is relevant to a work item, preserve its provided markdown reference directly inside that work item's description or acceptance criteria so downstream builders can stage and use it.");
+        builder.AppendLine("Never invent attachment URLs. Only use the exact markdown reference provided below.");
 
         var totalLength = 0;
         foreach (var attachment in attachments)
         {
             var content = await chatSessionRepository.GetAttachmentContentAsync(projectId, attachment.Id, ownerId);
-            if (content is null) continue;
+            if (attachment.IsImage || string.IsNullOrWhiteSpace(content))
+            {
+                builder.AppendLine();
+                builder.AppendLine($"### {attachment.FileName}");
+                builder.AppendLine($"- Content type: {attachment.ContentType}");
+                builder.AppendLine($"- Markdown reference: {attachment.MarkdownReference}");
+                continue;
+            }
 
             if (totalLength + content.Length > MaxAttachmentContextLength)
             {
@@ -1706,6 +1729,8 @@ public class ChatService(
 
             builder.AppendLine();
             builder.AppendLine($"### {attachment.FileName}");
+            builder.AppendLine($"- Content type: {attachment.ContentType}");
+            builder.AppendLine($"- Markdown reference: {attachment.MarkdownReference}");
             builder.AppendLine("```markdown");
             builder.AppendLine(content);
             builder.AppendLine("```");
@@ -1757,10 +1782,40 @@ public class ChatService(
 
     // ── Attachment CRUD ───────────────────────────────────────
 
-    public async Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content)
+    public async Task<ChatAttachmentDto> UploadAttachmentAsync(
+        string projectId,
+        string sessionId,
+        string fileName,
+        string? contentType,
+        byte[] content,
+        CancellationToken cancellationToken = default)
     {
         logger.CopilotAttachmentUploading(sessionId.SanitizeForLogging(), fileName.SanitizeForLogging(), content.Length);
-        return await chatSessionRepository.AddAttachmentAsync(projectId, sessionId, fileName, content);
+        var attachmentId = Guid.NewGuid().ToString();
+        var storedAttachment = await chatAttachmentStorage.SaveAsync(
+            attachmentId,
+            fileName,
+            contentType,
+            content,
+            cancellationToken);
+
+        try
+        {
+            return await chatSessionRepository.AddAttachmentAsync(
+                attachmentId,
+                projectId,
+                sessionId,
+                fileName,
+                storedAttachment.ExtractedText,
+                storedAttachment.ContentType,
+                storedAttachment.ContentLength,
+                storedAttachment.StoragePath);
+        }
+        catch
+        {
+            await chatAttachmentStorage.DeleteAsync(storedAttachment.StoragePath, cancellationToken);
+            throw;
+        }
     }
 
     private async Task RefundIfNeededAsync(bool isGenerateRequest, bool chargedRun, int userId)
@@ -1792,6 +1847,27 @@ public class ChatService(
         return await chatSessionRepository.GetAttachmentsBySessionIdAsync(projectId, sessionId);
     }
 
+    public async Task<ChatAttachmentContentResult?> GetAttachmentContentAsync(string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var attachment = await chatSessionRepository.GetAttachmentRecordAsync(attachmentId);
+        if (attachment is null)
+            return null;
+
+        byte[]? content = null;
+        if (!string.IsNullOrWhiteSpace(attachment.StoragePath))
+            content = await chatAttachmentStorage.ReadAsync(attachment.StoragePath, cancellationToken);
+
+        if (content is null)
+        {
+            content = Encoding.UTF8.GetBytes(attachment.Content ?? string.Empty);
+        }
+
+        return new ChatAttachmentContentResult(
+            attachment.FileName,
+            string.IsNullOrWhiteSpace(attachment.ContentType) ? "application/octet-stream" : attachment.ContentType,
+            content);
+    }
+
     public Task<bool> DeleteAttachmentAsync(string attachmentId)
     {
         // Backward-compatible overload for existing tests/callers.
@@ -1801,9 +1877,25 @@ public class ChatService(
     public async Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId)
     {
         logger.CopilotAttachmentDeleting(attachmentId.SanitizeForLogging());
-        return await chatSessionRepository.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
+        var attachment = await chatSessionRepository.GetAttachmentRecordAsync(attachmentId);
+        var deleted = await chatSessionRepository.DeleteAttachmentAsync(projectId, sessionId, attachmentId);
+        if (deleted)
+            await chatAttachmentStorage.DeleteAsync(attachment?.StoragePath);
+
+        return deleted;
     }
 
     private static bool IsGlobalScope(string projectId)
         => string.IsNullOrWhiteSpace(projectId);
+
+    private async Task DeleteStoredAttachmentsAsync(IReadOnlyList<ChatAttachmentRecord> attachments)
+    {
+        if (attachments is null || attachments.Count == 0)
+            return;
+
+        foreach (var attachment in attachments)
+        {
+            await chatAttachmentStorage.DeleteAsync(attachment.StoragePath);
+        }
+    }
 }

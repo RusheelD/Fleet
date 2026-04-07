@@ -5,5 +5,9 @@ public record ChatAttachmentDto(
     string Id,
     string FileName,
     int ContentLength,
-    string UploadedAt
+    string UploadedAt,
+    string ContentType,
+    string ContentUrl,
+    string MarkdownReference,
+    bool IsImage
 );

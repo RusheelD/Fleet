@@ -18,9 +18,16 @@ public interface IChatService
         CancellationToken cancellationToken = default);
 
     // Attachments
-    Task<ChatAttachmentDto> UploadAttachmentAsync(string projectId, string sessionId, string fileName, string content);
+    Task<ChatAttachmentDto> UploadAttachmentAsync(
+        string projectId,
+        string sessionId,
+        string fileName,
+        string? contentType,
+        byte[] content,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string sessionId);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsAsync(string projectId, string sessionId);
+    Task<ChatAttachmentContentResult?> GetAttachmentContentAsync(string attachmentId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string attachmentId);
     Task<bool> DeleteAttachmentAsync(string projectId, string sessionId, string attachmentId);
 }

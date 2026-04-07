@@ -4,6 +4,7 @@ import { normalizeChatSessionActivities } from '../models/chat'
 import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
   getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, bulkDeleteWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
+  getWorkItemAttachments, uploadWorkItemAttachment, deleteWorkItemAttachment,
   getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
   getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
   getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration,
@@ -18,7 +19,7 @@ import type {
   CreateWorkItemRequest, UpdateWorkItemRequest,
   CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest,
 } from './'
-import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences } from '../models'
+import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
@@ -41,8 +42,10 @@ export const useDataQuery = <TData>(
     staleTime?: number
     refetchOnMount?: boolean | 'always'
     refetchOnWindowFocus?: boolean | 'always'
+    refetchOnReconnect?: boolean | 'always'
     enableFetch?: boolean
     refetchInterval?: number | false
+    refetchIntervalInBackground?: boolean
   }
 ) => {
   const queryClient = useQueryClient()
@@ -68,7 +71,9 @@ export const useDataQuery = <TData>(
     staleTime: queryOptions?.staleTime ?? FIVE_MINUTES_IN_MILLISECONDS,
     refetchOnMount: queryOptions?.refetchOnMount,
     refetchOnWindowFocus: queryOptions?.refetchOnWindowFocus ?? false,
+    refetchOnReconnect: queryOptions?.refetchOnReconnect ?? true,
     refetchInterval: queryOptions?.refetchInterval,
+    refetchIntervalInBackground: queryOptions?.refetchIntervalInBackground ?? false,
   })
 
   const setQueryData = (data: TData) => queryClient.setQueryData(queryKey, data)
@@ -198,9 +203,14 @@ export function useWorkItemLevels(projectId: string | undefined) {
 
 // ── Agents ────────────────────────────────────────────────
 
-export function useExecutions(projectId: string | undefined) {
+export function useExecutions(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], {
-    refetchInterval: EXECUTIONS_POLL_MS,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+    refetchInterval: options?.pollingInterval ?? EXECUTIONS_POLL_MS,
+    refetchIntervalInBackground: true,
   })
 }
 
@@ -717,6 +727,48 @@ export function useDeleteWorkItem(projectId: string | undefined) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['work-items'] })
       void queryClient.invalidateQueries({ queryKey: ['project-dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-item-attachments'] })
+    },
+  })
+}
+
+export function useWorkItemAttachments(projectId: string | undefined, workItemNumber: number | undefined) {
+  return useDataQuery(
+    'work-item-attachments',
+    () => getWorkItemAttachments(projectId!, workItemNumber!),
+    [projectId, workItemNumber],
+  )
+}
+
+function buildWorkItemAttachmentsQueryKey(projectId: string | undefined, workItemNumber: number) {
+  return ['work-item-attachments', JSON.stringify([projectId, workItemNumber])]
+}
+
+export function useUploadWorkItemAttachment(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workItemNumber, file }: { workItemNumber: number; file: File }) =>
+      uploadWorkItemAttachment(projectId!, workItemNumber, file),
+    onSuccess: (attachment, variables) => {
+      queryClient.setQueryData<WorkItemAttachment[]>(
+        buildWorkItemAttachmentsQueryKey(projectId, variables.workItemNumber),
+        (current) => {
+          const existing = current ?? []
+          return [attachment, ...existing.filter((item) => item.id !== attachment.id)]
+        },
+      )
+      void queryClient.invalidateQueries({ queryKey: ['work-item-attachments'] })
+      void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+    },
+  })
+}
+
+export function useDeleteWorkItemAttachment(projectId: string | undefined, workItemNumber: number | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (attachmentId: string) => deleteWorkItemAttachment(projectId!, workItemNumber!, attachmentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['work-item-attachments'] })
     },
   })
 }

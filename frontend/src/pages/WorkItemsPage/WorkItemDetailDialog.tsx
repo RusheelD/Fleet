@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -22,13 +22,24 @@ import {
     PersonRegular,
     ChevronRightRegular,
 } from '@fluentui/react-icons'
-import { useUpdateWorkItem, useDeleteWorkItem, resolveLevelIcon } from '../../proxies'
-import type { WorkItem, WorkItemLevel } from '../../models'
+import {
+    useUpdateWorkItem,
+    useDeleteWorkItem,
+    useWorkItemAttachments,
+    useUploadWorkItemAttachment,
+    useDeleteWorkItemAttachment,
+    getApiErrorMessage,
+    resolveLevelIcon,
+} from '../../proxies'
+import type { WorkItem, WorkItemAttachment, WorkItemLevel } from '../../models'
 import { useIsMobile } from '../../hooks'
 import { StateDot } from './StateDot'
 import { PriorityDot } from './PriorityDot'
 import { formatWorkItemState } from './stateLabel'
 import { appTokens } from '../../styles/appTokens'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { AuthorizedAttachmentImage, AuthorizedAttachmentLink } from '../../components/shared/AuthorizedAttachment'
 import {
     AUTO_ASSIGNMENT_LABEL,
     MANUAL_ASSIGNMENT_LABEL,
@@ -249,6 +260,107 @@ const useStyles = makeStyles({
             minHeight: '140px',
         },
     },
+    markdownPreview: {
+        marginTop: appTokens.space.sm,
+        padding: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
+        minHeight: '3rem',
+        '& p': {
+            marginTop: 0,
+            marginBottom: appTokens.space.sm,
+        },
+        '& p:last-child': {
+            marginBottom: 0,
+        },
+        '& ul, & ol': {
+            marginTop: 0,
+            marginBottom: appTokens.space.sm,
+            paddingLeft: '1.25rem',
+        },
+        '& li': {
+            marginBottom: appTokens.space.xxs,
+        },
+        '& code': {
+            fontFamily: appTokens.fontFamily.monospace,
+            fontSize: appTokens.fontSize.sm,
+            padding: '0.1rem 0.35rem',
+            borderRadius: appTokens.radius.sm,
+            backgroundColor: appTokens.color.surfaceRaised,
+        },
+        '& pre': {
+            overflowX: 'auto',
+            padding: appTokens.space.sm,
+            borderRadius: appTokens.radius.md,
+            backgroundColor: appTokens.color.surfaceRaised,
+        },
+        '& img': {
+            maxWidth: '100%',
+            height: 'auto',
+            borderRadius: appTokens.radius.md,
+        },
+    },
+    assetsSection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.md,
+        borderBottom: appTokens.border.subtleAlt,
+    },
+    assetsHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: appTokens.space.sm,
+        flexWrap: 'wrap',
+    },
+    assetList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+    },
+    assetCard: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        gap: appTokens.space.sm,
+        padding: appTokens.space.md,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
+    },
+    assetPreview: {
+        maxWidth: 'min(320px, 100%)',
+    },
+    assetMeta: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxs,
+        minWidth: 0,
+    },
+    assetFileName: {
+        fontWeight: appTokens.fontWeight.semibold,
+        overflowWrap: 'anywhere',
+    },
+    assetActions: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.xs,
+        alignItems: 'center',
+    },
+    assetLink: {
+        color: appTokens.color.brand,
+    },
+    hiddenInput: {
+        display: 'none',
+    },
+    emptyAssets: {
+        color: appTokens.color.textMuted,
+    },
+    assetError: {
+        color: appTokens.color.danger,
+    },
 
     /* Section headers */
     sectionTitle: {
@@ -349,6 +461,10 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const isMobile = useIsMobile()
     const updateMutation = useUpdateWorkItem(projectId)
     const deleteMutation = useDeleteWorkItem(projectId)
+    const attachmentsQuery = useWorkItemAttachments(projectId, item?.workItemNumber)
+    const uploadAttachmentMutation = useUploadWorkItemAttachment(projectId)
+    const deleteAttachmentMutation = useDeleteWorkItemAttachment(projectId, item?.workItemNumber)
+    const fileInputRef = useRef<HTMLInputElement | null>(null)
 
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
@@ -361,6 +477,10 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
     const [agentLabel, setAgentLabel] = useState(AUTO_ASSIGNMENT_LABEL)
     const [parentLabel, setParentLabel] = useState(NONE_PARENT)
     const [levelLabel, setLevelLabel] = useState(NONE_LEVEL)
+    const attachments = attachmentsQuery.data ?? []
+    const attachmentError = attachmentsQuery.error
+        ?? uploadAttachmentMutation.error
+        ?? deleteAttachmentMutation.error
 
     const sortedLevels = useMemo(() => [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal), [levels])
 
@@ -458,6 +578,55 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
         if (!item) return
         deleteMutation.mutate(item.workItemNumber, { onSuccess: () => onClose() })
     }
+
+    const appendMarkdownReference = useCallback((currentValue: string, attachment: WorkItemAttachment) => {
+        const trimmedValue = currentValue.trimEnd()
+        if (!trimmedValue) {
+            return attachment.markdownReference
+        }
+
+        if (trimmedValue.includes(attachment.markdownReference)) {
+            return currentValue
+        }
+
+        return `${trimmedValue}\n\n${attachment.markdownReference}`
+    }, [])
+
+    const formatAttachmentSize = useCallback((contentLength: number) => {
+        if (contentLength < 1024) {
+            return `${contentLength} B`
+        }
+
+        if (contentLength < 1024 * 1024) {
+            return `${(contentLength / 1024).toFixed(1)} KB`
+        }
+
+        return `${(contentLength / (1024 * 1024)).toFixed(1)} MB`
+    }, [])
+
+    const handleUploadClick = useCallback(() => {
+        fileInputRef.current?.click()
+    }, [])
+
+    const handleAssetInputChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!item) {
+            return
+        }
+
+        const files = Array.from(event.target.files ?? [])
+        if (files.length === 0) {
+            return
+        }
+
+        for (const file of files) {
+            await uploadAttachmentMutation.mutateAsync({
+                workItemNumber: item.workItemNumber,
+                file,
+            })
+        }
+
+        event.target.value = ''
+    }, [item, uploadAttachmentMutation])
 
     if (!item) return null
 
@@ -711,6 +880,102 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                         </div>
                     </div>
 
+                    <div className={styles.assetsSection}>
+                        <div className={styles.assetsHeader}>
+                            <div>
+                                <Text className={styles.sectionTitle}>Assets</Text>
+                                <Caption1>
+                                    Upload images, documents, or other files here, then reference them in the description or acceptance criteria so Fleet builders can use them during runs.
+                                </Caption1>
+                            </div>
+                            <Button
+                                appearance="secondary"
+                                onClick={handleUploadClick}
+                                disabled={uploadAttachmentMutation.isPending}
+                            >
+                                {uploadAttachmentMutation.isPending ? 'Uploading...' : 'Upload assets'}
+                            </Button>
+                            <input
+                                ref={fileInputRef}
+                                className={styles.hiddenInput}
+                                type="file"
+                                multiple
+                                onChange={(event) => {
+                                    void handleAssetInputChange(event)
+                                }}
+                            />
+                        </div>
+                        {attachmentError ? (
+                            <Caption1 className={styles.assetError}>
+                                {getApiErrorMessage(attachmentError)}
+                            </Caption1>
+                        ) : null}
+                        {attachmentsQuery.isLoading ? (
+                            <Caption1 className={styles.emptyAssets}>
+                                Loading assets...
+                            </Caption1>
+                        ) : null}
+
+                        {!attachmentsQuery.isLoading && attachments.length === 0 ? (
+                            <Caption1 className={styles.emptyAssets}>
+                                No assets uploaded to this work item yet.
+                            </Caption1>
+                        ) : (
+                            <div className={styles.assetList}>
+                                {attachments.map((attachment) => (
+                                    <div key={attachment.id} className={styles.assetCard}>
+                                        {attachment.isImage && attachment.contentUrl ? (
+                                            <AuthorizedAttachmentImage
+                                                src={attachment.contentUrl}
+                                                alt={attachment.fileName}
+                                                className={styles.assetPreview}
+                                            />
+                                        ) : null}
+                                        <div className={styles.assetMeta}>
+                                            <Text className={styles.assetFileName}>{attachment.fileName}</Text>
+                                            <Caption1>
+                                                {formatAttachmentSize(attachment.contentLength)} · {attachment.contentType || 'application/octet-stream'}
+                                            </Caption1>
+                                        </div>
+                                        <div className={styles.assetActions}>
+                                            <Button
+                                                size="small"
+                                                appearance="secondary"
+                                                onClick={() => setDescription((current) => appendMarkdownReference(current, attachment))}
+                                            >
+                                                Insert in Description
+                                            </Button>
+                                            <Button
+                                                size="small"
+                                                appearance="secondary"
+                                                onClick={() => setAcceptanceCriteria((current) => appendMarkdownReference(current, attachment))}
+                                            >
+                                                Insert in Criteria
+                                            </Button>
+                                            <AuthorizedAttachmentLink
+                                                className={styles.assetLink}
+                                                href={attachment.contentUrl}
+                                                downloadName={attachment.fileName}
+                                                mode="open"
+                                            >
+                                                Open
+                                            </AuthorizedAttachmentLink>
+                                            <Button
+                                                size="small"
+                                                appearance="subtle"
+                                                icon={<DeleteRegular />}
+                                                disabled={deleteAttachmentMutation.isPending}
+                                                onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
+                                            >
+                                                Delete
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Full-width description */}
                     <div className={mergeClasses(styles.descriptionSection, isMobile && styles.descriptionSectionMobile)}>
                         <Text className={styles.sectionTitle}>Acceptance Criteria</Text>
@@ -719,16 +984,50 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
                             onChange={(_e, data) => setAcceptanceCriteria(data.value)}
                             resize="vertical"
                             rows={4}
-                            placeholder="Define what must be true for this work item to be done..."
+                            placeholder="Define what must be true for this work item to be done. Markdown and uploaded asset images are supported."
                         />
+                        {acceptanceCriteria.trim().length > 0 && (
+                            <div className={styles.markdownPreview}>
+                                <Markdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                        a: ({ children, href }) => (
+                                            <AuthorizedAttachmentLink href={href}>{children}</AuthorizedAttachmentLink>
+                                        ),
+                                        img: ({ src, alt }) => (
+                                            <AuthorizedAttachmentImage src={src} alt={alt ?? ''} />
+                                        ),
+                                    }}
+                                >
+                                    {acceptanceCriteria}
+                                </Markdown>
+                            </div>
+                        )}
                         <Text className={styles.sectionTitle}>Description</Text>
                         <Textarea
                             className={mergeClasses(styles.descriptionTextarea, isMobile && styles.descriptionTextareaMobile)}
                             value={description}
                             onChange={(_e, data) => setDescription(data.value)}
                             resize="vertical"
-                            placeholder="Add a description..."
+                            placeholder="Add a description. Markdown and uploaded asset images are supported."
                         />
+                        {description.trim().length > 0 && (
+                            <div className={styles.markdownPreview}>
+                                <Markdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                        a: ({ children, href }) => (
+                                            <AuthorizedAttachmentLink href={href}>{children}</AuthorizedAttachmentLink>
+                                        ),
+                                        img: ({ src, alt }) => (
+                                            <AuthorizedAttachmentImage src={src} alt={alt ?? ''} />
+                                        ),
+                                    }}
+                                >
+                                    {description}
+                                </Markdown>
+                            </div>
+                        )}
                     </div>
 
                     {/* Children */}

@@ -231,4 +231,55 @@ public class RepoSandboxTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [TestMethod]
+    public void CleanupStaleSandboxes_RemovesOldDirectories()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var staleSandbox = Path.Combine(root, "old-sandbox");
+
+        try
+        {
+            Directory.CreateDirectory(staleSandbox);
+            File.WriteAllText(Path.Combine(staleSandbox, "file.txt"), "test");
+            Directory.SetLastWriteTimeUtc(staleSandbox, DateTime.UtcNow.AddHours(-24));
+
+            var deleted = RepoSandbox.CleanupStaleSandboxes(root, TimeSpan.FromHours(6));
+
+            Assert.AreEqual(1, deleted);
+            Assert.IsFalse(Directory.Exists(staleSandbox));
+        }
+        finally
+        {
+            RepoSandbox.ReleaseActiveSandboxRoot(staleSandbox);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void CleanupStaleSandboxes_SkipsActiveDirectories()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var activeSandbox = Path.Combine(root, "active-sandbox");
+
+        try
+        {
+            Directory.CreateDirectory(activeSandbox);
+            File.WriteAllText(Path.Combine(activeSandbox, "file.txt"), "test");
+            Directory.SetLastWriteTimeUtc(activeSandbox, DateTime.UtcNow.AddHours(-24));
+            RepoSandbox.TrackActiveSandboxRoot(activeSandbox);
+
+            var deleted = RepoSandbox.CleanupStaleSandboxes(root, TimeSpan.FromHours(6));
+
+            Assert.AreEqual(0, deleted);
+            Assert.IsTrue(Directory.Exists(activeSandbox));
+        }
+        finally
+        {
+            RepoSandbox.ReleaseActiveSandboxRoot(activeSandbox);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
 }

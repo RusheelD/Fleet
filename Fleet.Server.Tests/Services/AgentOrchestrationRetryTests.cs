@@ -419,6 +419,45 @@ public class AgentOrchestrationRetryTests
             executionDepth: 0));
     }
 
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsTrue_ForThreeParallelLeafBranchesEvenWhenParentIsD4()
+    {
+        var workItem = CreateWorkItem(91, "Chess game feature", 4);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Split engine, AI, and UI work into separate branches",
+            [
+                new GeneratedSubFlowSpec(
+                    "Engine core",
+                    "Implement state, move generation, and legality.",
+                    1,
+                    5,
+                    ["engine"],
+                    "Engine tests pass.",
+                    []),
+                new GeneratedSubFlowSpec(
+                    "AI engine",
+                    "Implement evaluation and search.",
+                    1,
+                    4,
+                    ["ai"],
+                    "AI returns legal moves.",
+                    []),
+                new GeneratedSubFlowSpec(
+                    "UI + Hosting + Docs",
+                    "Implement UI and deployment docs.",
+                    2,
+                    4,
+                    ["ui"],
+                    "UI works and docs are updated.",
+                    []),
+            ]);
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            executionDepth: 0));
+    }
+
     private static Models.WorkItemDto CreateWorkItem(
         int number,
         string title,

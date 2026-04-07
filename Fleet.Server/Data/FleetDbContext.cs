@@ -16,6 +16,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<WorkItemAttachment> WorkItemAttachments => Set<WorkItemAttachment>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
@@ -65,7 +66,18 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .HasForeignKey(w => w.LevelId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            builder.HasMany(w => w.Attachments)
+                .WithOne(a => a.WorkItem)
+                .HasForeignKey(a => a.WorkItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // Tags stored as PostgreSQL text[] (native array support via Npgsql)
+        });
+
+        modelBuilder.Entity<WorkItemAttachment>(builder =>
+        {
+            builder.HasKey(a => a.Id);
+            builder.HasIndex(a => new { a.WorkItemId, a.UploadedAt });
         });
 
         // ── WorkItemLevel ──────────────────────────────────────────

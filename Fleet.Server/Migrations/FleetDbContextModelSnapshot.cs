@@ -155,8 +155,18 @@ namespace Fleet.Server.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("ContentLength")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("FileName")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StoragePath")
                         .HasColumnType("text");
 
                     b.Property<string>("UploadedAt")
@@ -671,6 +681,39 @@ namespace Fleet.Server.Migrations
                     b.ToTable("WorkItems");
                 });
 
+            modelBuilder.Entity("Fleet.Server.Data.Entities.WorkItemAttachment", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ContentLength")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StoragePath")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UploadedAt")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("WorkItemId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkItemId", "UploadedAt");
+
+                    b.ToTable("WorkItemAttachments");
+                });
+
             modelBuilder.Entity("Fleet.Server.Data.Entities.WorkItemLevel", b =>
                 {
                     b.Property<int>("Id")
@@ -1050,6 +1093,17 @@ namespace Fleet.Server.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Fleet.Server.Data.Entities.WorkItemAttachment", b =>
+                {
+                    b.HasOne("Fleet.Server.Data.Entities.WorkItem", "WorkItem")
+                        .WithMany("Attachments")
+                        .HasForeignKey("WorkItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("WorkItem");
+                });
+
             modelBuilder.Entity("Fleet.Server.Data.Entities.WorkItemLevel", b =>
                 {
                     b.HasOne("Fleet.Server.Data.Entities.Project", "Project")
@@ -1102,6 +1156,8 @@ namespace Fleet.Server.Migrations
 
             modelBuilder.Entity("Fleet.Server.Data.Entities.WorkItem", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("Children");
                 });
 

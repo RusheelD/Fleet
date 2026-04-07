@@ -20,11 +20,14 @@ public interface IChatSessionRepository
     Task AppendSessionActivityAsync(string projectId, string sessionId, ChatSessionActivityDto activity, string? ownerId = null);
 
     // Attachments
-    Task<ChatAttachmentDto> AddAttachmentAsync(string sessionId, string fileName, string content);
-    Task<ChatAttachmentDto> AddAttachmentAsync(string projectId, string sessionId, string fileName, string content);
+    Task<ChatAttachmentDto> AddAttachmentAsync(string attachmentId, string sessionId, string fileName, string content, string contentType, int contentLength, string? storagePath);
+    Task<ChatAttachmentDto> AddAttachmentAsync(string attachmentId, string projectId, string sessionId, string fileName, string content, string contentType, int contentLength, string? storagePath);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string sessionId);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsBySessionIdAsync(string projectId, string sessionId);
+    Task<IReadOnlyList<ChatAttachmentDto>> GetAttachmentsByMessageIdAsync(string projectId, string messageId, string? ownerId = null);
     Task<IReadOnlyList<ChatAttachmentDto>> GetAllAttachmentsBySessionIdAsync(string projectId, string sessionId, string? ownerId = null);
+    Task<IReadOnlyList<ChatAttachmentRecord>> GetAttachmentRecordsBySessionIdAsync(string projectId, string sessionId, string? ownerId = null);
+    Task<ChatAttachmentRecord?> GetAttachmentRecordAsync(string attachmentId, string? ownerId = null);
     Task<string?> GetAttachmentContentAsync(string attachmentId);
     Task<string?> GetAttachmentContentAsync(string projectId, string attachmentId, string? ownerId = null);
     Task AssignPendingAttachmentsToMessageAsync(string projectId, string sessionId, string messageId);

@@ -80,6 +80,19 @@ function formatTimestamp(iso: string): string {
     }
 }
 
+function formatRunningProgressPercent(progress: number): string {
+    const clampedPercent = Math.min(99.95, Math.max(0, progress * 100))
+    const precision = clampedPercent < 1 ? 2 : 1
+    const multiplier = precision === 2 ? 100 : 10
+    const flooredPercent = Math.floor(clampedPercent * multiplier) / multiplier
+
+    if (Math.abs(flooredPercent - Math.round(flooredPercent)) < 0.001) {
+        return `${Math.round(flooredPercent)}%`
+    }
+
+    return `${flooredPercent.toFixed(precision)}%`
+}
+
 const useStyles = makeStyles({
     executionCard: {
         paddingTop: appTokens.space.md,
@@ -1145,7 +1158,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                             <div className={styles.stepTrailing}>
                                 {isRunning && agent.progress > 0 && agent.progress < 1 && (
                                     <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
-                                        {Math.round(agent.progress * 100)}%
+                                        {formatRunningProgressPercent(agent.progress)}
                                     </Text>
                                 )}
                             </div>
@@ -1211,7 +1224,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                             <div className={styles.stepTrailing}>
                                 {isRunning && subFlowStep.progress > 0 && subFlowStep.progress < 1 && (
                                     <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
-                                        {Math.round(subFlowStep.progress * 100)}%
+                                        {formatRunningProgressPercent(subFlowStep.progress)}
                                     </Text>
                                 )}
                             </div>

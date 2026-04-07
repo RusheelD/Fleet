@@ -245,7 +245,7 @@ interface ChatInputProps {
   onGenerate?: () => void
   onCancelGeneration?: () => void
   allowGenerate?: boolean
-  onFileSelect?: (file: File) => void
+  onFileSelect?: (files: File[]) => void
   disabled?: boolean
   uploading?: boolean
   forceStackedLayout?: boolean
@@ -326,9 +326,9 @@ export function ChatInput({
     }, [value, autoResize])
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (file && onFileSelect) {
-            onFileSelect(file)
+        const files = Array.from(e.target.files ?? [])
+        if (files.length > 0 && onFileSelect) {
+            onFileSelect(files)
         }
         // Reset so the same file can be re-selected
         if (fileInputRef.current) {
@@ -363,7 +363,7 @@ export function ChatInput({
                     className={mergeClasses(styles.inputTextarea, isCompact && styles.inputTextareaCompact)}
                     disabled={disabled}
                     onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                             e.preventDefault()
                             if (hasText && onSend) onSend()
                         }
@@ -459,7 +459,7 @@ export function ChatInput({
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".md"
+                        multiple
                         className={styles.hiddenInput}
                         onChange={handleFileChange}
                     />
@@ -470,11 +470,11 @@ export function ChatInput({
                         onClick={() => fileInputRef.current?.click()}
                         disabled={disabled || uploading}
                     >
-                        {uploading ? 'Uploading...' : 'Attach .md'}
+                        {uploading ? 'Uploading...' : 'Attach files'}
                     </Button>
                 </div>
                 <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, shouldStackLayout && styles.inputHintMobile)}>
-                    Attach .md files for AI context
+                    Enter adds a new line. Ctrl/Cmd+Enter sends. Upload images, docs, or assets for Fleet to use.
                 </Caption1>
             </div>
         </div>

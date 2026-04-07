@@ -13,6 +13,7 @@ namespace Fleet.Server.Tests.Controllers;
 public class WorkItemsControllerTests
 {
     private Mock<IWorkItemService> _service = null!;
+    private Mock<IWorkItemAttachmentService> _attachmentService = null!;
     private Mock<IProjectImportExportService> _projectImportExportService = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IServerEventPublisher> _eventPublisher = null!;
@@ -24,12 +25,14 @@ public class WorkItemsControllerTests
     public void Setup()
     {
         _service = new Mock<IWorkItemService>();
+        _attachmentService = new Mock<IWorkItemAttachmentService>();
         _projectImportExportService = new Mock<IProjectImportExportService>();
         _authService = new Mock<IAuthService>();
         _eventPublisher = new Mock<IServerEventPublisher>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
         _sut = new WorkItemsController(
             _service.Object,
+            _attachmentService.Object,
             _projectImportExportService.Object,
             _authService.Object,
             _eventPublisher.Object);
@@ -108,7 +111,7 @@ public class WorkItemsControllerTests
     [TestMethod]
     public async Task Delete_Found_ReturnsNoContent()
     {
-        _service.Setup(s => s.DeleteAsync(ProjectId, 1)).ReturnsAsync(true);
+        _service.Setup(s => s.DeleteAsync(ProjectId, 1, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var result = await _sut.Delete(ProjectId, 1);
 
@@ -118,11 +121,25 @@ public class WorkItemsControllerTests
     [TestMethod]
     public async Task Delete_NotFound_Returns404()
     {
-        _service.Setup(s => s.DeleteAsync(ProjectId, 99)).ReturnsAsync(false);
+        _service.Setup(s => s.DeleteAsync(ProjectId, 99, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var result = await _sut.Delete(ProjectId, 99);
 
         Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
+    public async Task GetAttachments_ReturnsOk()
+    {
+        _attachmentService
+            .Setup(s => s.GetByWorkItemNumberAsync(ProjectId, 7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new WorkItemAttachmentDto("asset-1", "mock.png", 123, DateTime.UtcNow.ToString("o"), "image/png", "/content", "![mock](/content)", true),
+            ]);
+
+        var result = await _sut.GetAttachments(ProjectId, 7, CancellationToken.None);
+
+        Assert.IsInstanceOfType<OkObjectResult>(result);
     }
 
     [TestMethod]

@@ -31,6 +31,9 @@ ApplyEnvironmentAliases(builder.Configuration);
 
 var repoSandboxRoot = RepoSandboxOptions.ResolveRootPath(builder.Configuration);
 Directory.CreateDirectory(repoSandboxRoot);
+var repoSandboxCleanupOptions = RepoSandboxCleanupOptions.Resolve(builder.Configuration, repoSandboxRoot);
+var chatAttachmentStorageRoot = ChatAttachmentStorageOptions.ResolveRootPath(builder.Configuration);
+Directory.CreateDirectory(chatAttachmentStorageRoot);
 var cacheConnectionString = ResolveCacheConnectionString(builder.Configuration);
 var dataProtectionKeysPath = ResolveDataProtectionKeysPath(builder.Configuration, builder.Environment);
 
@@ -71,7 +74,18 @@ builder.Services.Configure<RepoSandboxOptions>(options =>
 {
     options.RootPath = repoSandboxRoot;
 });
+builder.Services.Configure<RepoSandboxCleanupOptions>(options =>
+{
+    options.RootPath = repoSandboxCleanupOptions.RootPath;
+    options.StaleAfter = repoSandboxCleanupOptions.StaleAfter;
+    options.Interval = repoSandboxCleanupOptions.Interval;
+});
+builder.Services.Configure<ChatAttachmentStorageOptions>(options =>
+{
+    options.RootPath = chatAttachmentStorageRoot;
+});
 builder.Services.AddHostedService<GitStartupProbeHostedService>();
+builder.Services.AddHostedService<RepoSandboxCleanupService>();
 builder.Services.AddHealthChecks()
     .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
 builder.Services.AddSingleton<ServiceStats>();
@@ -347,10 +361,12 @@ builder.Services.AddScoped<IGitHubApiService, GitHubApiService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
+builder.Services.AddScoped<IWorkItemAttachmentService, WorkItemAttachmentService>();
 builder.Services.AddScoped<IWorkItemLevelService, WorkItemLevelService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
 builder.Services.AddScoped<ChatService>();
 builder.Services.AddScoped<IChatService>(serviceProvider => serviceProvider.GetRequiredService<ChatService>());
+builder.Services.AddSingleton<IChatAttachmentStorage, FileSystemChatAttachmentStorage>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IUsageLedgerService, UsageLedgerService>();

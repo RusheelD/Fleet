@@ -16,6 +16,8 @@ public class ChatsController(
     IAuthService authService,
     IServerEventPublisher eventPublisher) : ControllerBase
 {
+    private const int MaxChatAttachmentBytes = 10 * 1024 * 1024;
+
     [HttpGet]
     public async Task<IActionResult> GetChatData(string projectId)
     {
@@ -165,22 +167,25 @@ public class ChatsController(
     }
 
     [HttpPost("sessions/{sessionId}/attachments")]
-    [RequestSizeLimit(1_048_576)] // 1 MB per upload
+    [RequestSizeLimit(MaxChatAttachmentBytes)]
     public async Task<IActionResult> UploadAttachment(string projectId, string sessionId, IFormFile file)
     {
         if (file is null || file.Length == 0)
             return BadRequest("No file provided.");
 
-        if (!file.FileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-            return BadRequest("Only .md (Markdown) files are supported.");
+        if (file.Length > MaxChatAttachmentBytes)
+            return BadRequest($"File exceeds the {MaxChatAttachmentBytes / (1024 * 1024)} MB limit.");
 
-        if (file.Length > 512_000) // 500 KB limit for a single markdown file
-            return BadRequest("File exceeds the 500 KB limit.");
+        await using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer);
 
-        using var reader = new StreamReader(file.OpenReadStream());
-        var content = await reader.ReadToEndAsync();
-
-        var attachment = await chatService.UploadAttachmentAsync(projectId, sessionId, file.FileName, content);
+        var attachment = await chatService.UploadAttachmentAsync(
+            projectId,
+            sessionId,
+            file.FileName,
+            file.ContentType,
+            buffer.ToArray(),
+            HttpContext?.RequestAborted ?? CancellationToken.None);
         var userId = await authService.GetCurrentUserIdAsync();
         await eventPublisher.PublishProjectEventAsync(
             userId,

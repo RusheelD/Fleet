@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Text;
 using Fleet.Server.WorkItems;
+using Fleet.Server.Models;
 
 namespace Fleet.Server.Copilot.Tools;
 
@@ -71,6 +73,10 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
         var id = GetInt(args, "id") ?? 0;
         if (id <= 0) return "Error: 'id' (work-item number) is required.";
 
+        var existing = context.CurrentMessageAttachments.Count > 0
+            ? await workItemService.GetByWorkItemNumberAsync(projectId, id)
+            : null;
+
         int? levelId = null;
         if (args.TryGetProperty("level", out var lvProp) && lvProp.GetString() is string lvName)
         {
@@ -78,9 +84,17 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             levelId = levels.FirstOrDefault(l => l.Name.Equals(lvName, StringComparison.OrdinalIgnoreCase))?.Id;
         }
 
+        var description = GetString(args, "description");
+        if (context.CurrentMessageAttachments.Count > 0)
+        {
+            description = MergeAttachmentReferencesIntoDescription(
+                description ?? existing?.Description,
+                context.CurrentMessageAttachments);
+        }
+
         var request = new Models.UpdateWorkItemRequest(
             Title: GetString(args, "title"),
-            Description: GetString(args, "description"),
+            Description: description,
             Priority: GetInt(args, "priority"),
             Difficulty: GetInt(args, "difficulty"),
             State: GetString(args, "state"),
@@ -130,6 +144,44 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             .ToArray();
     }
 
+    internal static string MergeAttachmentReferencesIntoDescription(
+        string? description,
+        IReadOnlyList<ChatAttachmentDto> attachments)
+    {
+        if (attachments.Count == 0)
+            return description?.Trim() ?? string.Empty;
+
+        var autoReferencedAttachments = attachments
+            .Where(ShouldAutoReferenceAttachment)
+            .Where(attachment => !string.IsNullOrWhiteSpace(attachment.MarkdownReference))
+            .ToArray();
+        if (autoReferencedAttachments.Length == 0)
+            return description?.Trim() ?? string.Empty;
+
+        var trimmedDescription = description?.Trim() ?? string.Empty;
+        var missingReferences = autoReferencedAttachments
+            .Where(attachment =>
+                !trimmedDescription.Contains(attachment.ContentUrl, StringComparison.OrdinalIgnoreCase) &&
+                !trimmedDescription.Contains(attachment.MarkdownReference, StringComparison.Ordinal))
+            .ToArray();
+
+        if (missingReferences.Length == 0)
+            return trimmedDescription;
+
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(trimmedDescription))
+        {
+            builder.AppendLine(trimmedDescription);
+            builder.AppendLine();
+        }
+
+        builder.AppendLine("## Related assets");
+        foreach (var attachment in missingReferences)
+            builder.AppendLine($"- {attachment.MarkdownReference}");
+
+        return builder.ToString().Trim();
+    }
+
     /// <summary>
     /// Resolves a parent_id value that may be an integer (existing WIT number)
     /// or a string like "@2" referencing the item at index 2 in the current batch.
@@ -157,4 +209,8 @@ public class UpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
         if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
         return null;
     }
+
+    private static bool ShouldAutoReferenceAttachment(ChatAttachmentDto attachment)
+        => attachment.IsImage ||
+           !attachment.ContentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase);
 }

@@ -32,6 +32,7 @@ public class WorkItem
     public int? ParentId { get; set; }
     public WorkItem? Parent { get; set; }
     public List<WorkItem> Children { get; set; } = [];
+    public List<WorkItemAttachment> Attachments { get; set; } = [];
 
     // Foreign key
     public string ProjectId { get; set; } = string.Empty;

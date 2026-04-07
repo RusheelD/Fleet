@@ -63,7 +63,10 @@ public class AgentPhaseRunner(
     /// chat limit to keep context windows lean and inference fast.
     /// </summary>
     private const int AgentMaxToolOutputLength = 12_000;
-    private const int EstimatedProgressCeilingPercent = 100;
+    private const double EstimatedProgressCeilingPercent = 100.0;
+    private const double EstimatedProgressSoftCeilingPercent = 99.95;
+    private const double MinimumProgressIncrementPercent = 0.05;
+    private const double ProgressComparisonEpsilon = 0.0001;
     private const int FallbackProgressCadenceToolCalls = 1;
     private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
 
@@ -93,14 +96,14 @@ public class AgentPhaseRunner(
         var maxToolCalls = GetMaxToolCalls(role);
         var maxToolLoops = GetMaxToolLoops(role);
         var phaseTimeout = GetPhaseTimeout(role);
-        var lastReportedPercent = 0;
+        var lastReportedPercent = 0.0;
         var lastProgressSummary = "Starting phase";
         var nonProgressToolCallsSinceLastReport = 0;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(phaseTimeout);
 
-        async Task ReportProgressAsync(int percent, string summary, bool force = false)
+        async Task ReportProgressAsync(double percent, string summary, bool force = false)
         {
             if (onProgress is null)
             {
@@ -110,7 +113,7 @@ public class AgentPhaseRunner(
             var normalizedSummary = string.IsNullOrWhiteSpace(summary)
                 ? "Working"
                 : summary.Trim();
-            var clampedPercent = Math.Clamp(percent, 0, 100);
+            var clampedPercent = NormalizeProgressPercent(percent);
             if (force)
             {
                 if (clampedPercent < lastReportedPercent)
@@ -120,17 +123,17 @@ public class AgentPhaseRunner(
             }
             else
             {
-                if (lastReportedPercent >= EstimatedProgressCeilingPercent)
+                if (lastReportedPercent >= EstimatedProgressSoftCeilingPercent - ProgressComparisonEpsilon)
                 {
                     return;
                 }
 
-                var nextMinimum = lastReportedPercent + 1;
-                var safeMinimum = Math.Min(nextMinimum, EstimatedProgressCeilingPercent);
-                clampedPercent = ClampWithinProgressWindow(clampedPercent, safeMinimum, EstimatedProgressCeilingPercent);
+                var nextMinimum = lastReportedPercent + MinimumProgressIncrementPercent;
+                var safeMinimum = Math.Min(nextMinimum, EstimatedProgressSoftCeilingPercent);
+                clampedPercent = ClampWithinProgressWindow(clampedPercent, safeMinimum, EstimatedProgressSoftCeilingPercent);
             }
 
-            if (!force && clampedPercent <= lastReportedPercent)
+            if (!force && clampedPercent <= lastReportedPercent + ProgressComparisonEpsilon)
             {
                 return;
             }
@@ -147,35 +150,35 @@ public class AgentPhaseRunner(
             }
         }
 
-        int EstimateProgressPercentFromToolCalls()
+        double EstimateProgressPercentFromToolCalls()
         {
-            if (lastReportedPercent >= EstimatedProgressCeilingPercent)
+            if (lastReportedPercent >= EstimatedProgressSoftCeilingPercent - ProgressComparisonEpsilon)
             {
-                return EstimatedProgressCeilingPercent;
+                return EstimatedProgressSoftCeilingPercent;
             }
 
-            var nextMinimum = lastReportedPercent + 1;
-            if (nextMinimum >= EstimatedProgressCeilingPercent)
+            var nextMinimum = lastReportedPercent + MinimumProgressIncrementPercent;
+            if (nextMinimum >= EstimatedProgressSoftCeilingPercent)
             {
-                return EstimatedProgressCeilingPercent;
+                return EstimatedProgressSoftCeilingPercent;
             }
 
             if (maxToolCalls <= 0)
             {
-                return ClampWithinProgressWindow(nextMinimum, 1, EstimatedProgressCeilingPercent);
+                return ClampWithinProgressWindow(nextMinimum, MinimumProgressIncrementPercent, EstimatedProgressSoftCeilingPercent);
             }
 
-            var estimated = (int)Math.Round((double)totalToolCalls / maxToolCalls * 100.0);
-            var minAllowed = Math.Max(1, nextMinimum);
-            if (minAllowed >= EstimatedProgressCeilingPercent)
+            var estimated = (double)totalToolCalls / maxToolCalls * 100.0;
+            var minAllowed = Math.Max(MinimumProgressIncrementPercent, nextMinimum);
+            if (minAllowed >= EstimatedProgressSoftCeilingPercent)
             {
-                return EstimatedProgressCeilingPercent;
+                return EstimatedProgressSoftCeilingPercent;
             }
 
-            return ClampWithinProgressWindow(estimated, minAllowed, EstimatedProgressCeilingPercent);
+            return ClampWithinProgressWindow(estimated, minAllowed, EstimatedProgressSoftCeilingPercent);
         }
 
-        static int ClampWithinProgressWindow(int value, int min, int max)
+        static double ClampWithinProgressWindow(double value, double min, double max)
         {
             // Defensive bound clamp that never throws when min/max are inconsistent.
             if (min > max)
@@ -191,9 +194,20 @@ public class AgentPhaseRunner(
             return value > max ? max : value;
         }
 
+        static double NormalizeProgressPercent(double value)
+        {
+            var clamped = Math.Clamp(value, 0, EstimatedProgressCeilingPercent);
+            var snapped = Math.Round(clamped / MinimumProgressIncrementPercent, MidpointRounding.AwayFromZero)
+                          * MinimumProgressIncrementPercent;
+            return Math.Round(
+                Math.Clamp(snapped, 0, EstimatedProgressCeilingPercent),
+                2,
+                MidpointRounding.AwayFromZero);
+        }
+
         try
         {
-            await ReportProgressAsync(1, "Starting phase", force: true);
+            await ReportProgressAsync(MinimumProgressIncrementPercent, "Starting phase", force: true);
             for (var loop = 0; loop < maxToolLoops; loop++)
             {
                 // Use the selected model for agent work (opus for complex, sonnet otherwise)
@@ -430,12 +444,20 @@ public class AgentPhaseRunner(
         }
     }
 
-    private static int ParseProgressPercent(string argumentsJson)
+    private static double ParseProgressPercent(string argumentsJson)
     {
         try
         {
             var args = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(argumentsJson);
-            return args.TryGetProperty("percent_complete", out var pct) ? Math.Clamp(pct.GetInt32(), 0, 100) : 0;
+            if (!args.TryGetProperty("percent_complete", out var pct) || pct.ValueKind != System.Text.Json.JsonValueKind.Number)
+            {
+                return 0;
+            }
+
+            var value = pct.GetDouble();
+            var snapped = Math.Round(value / MinimumProgressIncrementPercent, MidpointRounding.AwayFromZero)
+                          * MinimumProgressIncrementPercent;
+            return Math.Round(Math.Clamp(snapped, 0, EstimatedProgressCeilingPercent), 2, MidpointRounding.AwayFromZero);
         }
         catch { return 0; }
     }

@@ -81,7 +81,9 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
 
         var request = new Models.CreateWorkItemRequest(
             Title: args.Title,
-            Description: args.Description ?? "",
+            Description: UpdateWorkItemTool.MergeAttachmentReferencesIntoDescription(
+                args.Description,
+                context.CurrentMessageAttachments),
             Priority: args.Priority,
             Difficulty: args.Difficulty,
             State: args.State,

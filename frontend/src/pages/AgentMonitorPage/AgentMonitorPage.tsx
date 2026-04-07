@@ -34,6 +34,9 @@ import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 
+const LIVE_EXECUTIONS_POLL_MS = 4000
+const IDLE_EXECUTIONS_POLL_MS = 10000
+
 const useStyles = makeStyles({
     page: {
         paddingTop: appTokens.space.xl,
@@ -259,7 +262,12 @@ export function AgentMonitorPage() {
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const isDense = isCompact || isMobile
-    const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId)
+    const [tab, setTab] = useState<string>('active')
+    const isLiveRunTab = tab === 'active' || tab === 'paused' || tab === 'all'
+    const executionsPollingInterval = isLiveRunTab ? LIVE_EXECUTIONS_POLL_MS : IDLE_EXECUTIONS_POLL_MS
+    const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId, {
+        pollingInterval: executionsPollingInterval,
+    })
     const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
     const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
     const startExecution = useStartExecution(projectId)
@@ -271,7 +279,6 @@ export function AgentMonitorPage() {
     const clearLogs = useClearLogs(projectId)
     const clearExecutionLogs = useClearExecutionLogs(projectId)
     const deleteExecution = useDeleteExecution(projectId)
-    const [tab, setTab] = useState<string>('active')
     const [dialogOpen, setDialogOpen] = useState(false)
     const [selectedDocumentation, setSelectedDocumentation] = useState<ExecutionDocumentation | null>(null)
     const [searchQuery, setSearchQuery] = useState('')

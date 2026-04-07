@@ -69,6 +69,58 @@ public class SubFlowPlannerTests
     }
 
     [TestMethod]
+    public void Parse_ReturnsPlan_WhenSubflowMarkerIsFollowedByBareJson()
+    {
+        const string output = """
+            G. Sub-Flow Decision
+            Large scope; split into 3 parallel child work items.
+
+            SUBFLOW_PLAN_JSON
+            {
+              "split": true,
+              "reason": "Parallel branches are worthwhile.",
+              "subflows": [
+                {
+                  "title": "Engine core",
+                  "description": "Implement engine state and rules.",
+                  "priority": 1,
+                  "difficulty": 5,
+                  "tags": ["engine"],
+                  "acceptance_criteria": "Engine tests pass.",
+                  "subflows": []
+                },
+                {
+                  "title": "AI engine",
+                  "description": "Implement evaluation and search.",
+                  "priority": 1,
+                  "difficulty": 4,
+                  "tags": ["ai"],
+                  "acceptance_criteria": "AI returns legal moves.",
+                  "subflows": []
+                },
+                {
+                  "title": "UI + Hosting + Docs",
+                  "description": "Implement UI and docs.",
+                  "priority": 2,
+                  "difficulty": 4,
+                  "tags": ["ui"],
+                  "acceptance_criteria": "UI works and docs are updated.",
+                  "subflows": []
+                }
+              ]
+            }
+            """;
+
+        var parsed = SubFlowPlanner.Parse(output);
+
+        Assert.IsNotNull(parsed);
+        Assert.AreEqual(3, parsed.SubFlows.Count);
+        Assert.AreEqual("Engine core", parsed.SubFlows[0].Title);
+        Assert.AreEqual("AI engine", parsed.SubFlows[1].Title);
+        Assert.AreEqual("UI + Hosting + Docs", parsed.SubFlows[2].Title);
+    }
+
+    [TestMethod]
     public void Parse_ReturnsNull_WhenPlanDepthExceedsLimit()
     {
         const string output = """

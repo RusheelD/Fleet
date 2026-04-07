@@ -15,6 +15,14 @@ internal static partial class SubFlowPlanner
         if (string.IsNullOrWhiteSpace(output))
             return null;
 
+        var markerJson = ExtractJsonAfterMarker(output, "SUBFLOW_PLAN_JSON");
+        if (!string.IsNullOrWhiteSpace(markerJson))
+        {
+            var parsedFromMarker = TryParse(markerJson);
+            if (parsedFromMarker is not null)
+                return parsedFromMarker;
+        }
+
         foreach (Match match in JsonFencePattern().Matches(output))
         {
             var json = match.Groups["json"].Value.Trim();
@@ -24,6 +32,67 @@ internal static partial class SubFlowPlanner
             var parsed = TryParse(json);
             if (parsed is not null)
                 return parsed;
+        }
+
+        return null;
+    }
+
+    private static string? ExtractJsonAfterMarker(string output, string marker)
+    {
+        var markerIndex = output.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        var jsonStart = output.IndexOf('{', markerIndex + marker.Length);
+        if (jsonStart < 0)
+            return null;
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var i = jsonStart; i < output.Length; i++)
+        {
+            var ch = output[i];
+
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (ch == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (ch == '"')
+                    inString = false;
+
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (ch == '{')
+            {
+                depth++;
+                continue;
+            }
+
+            if (ch != '}')
+                continue;
+
+            depth--;
+            if (depth == 0)
+                return output.Substring(jsonStart, i - jsonStart + 1);
         }
 
         return null;
