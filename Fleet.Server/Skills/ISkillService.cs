@@ -14,4 +14,5 @@ public interface ISkillService
     Task<PromptSkillDto> UpdateProjectSkillAsync(int userId, string projectId, int skillId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default);
     Task DeleteProjectSkillAsync(int userId, string projectId, int skillId, CancellationToken cancellationToken = default);
     Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default);
+    Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, IReadOnlyList<string>? conversationContext, CancellationToken cancellationToken = default);
 }

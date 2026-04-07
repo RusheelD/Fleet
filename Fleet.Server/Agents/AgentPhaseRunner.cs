@@ -676,5 +676,8 @@ public class AgentPhaseRunner(
 
         public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
             => Task.FromResult(string.Empty);
+
+        public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, IReadOnlyList<string>? conversationContext, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
     }
 }

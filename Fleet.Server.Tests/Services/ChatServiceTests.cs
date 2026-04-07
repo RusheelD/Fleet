@@ -883,7 +883,7 @@ public class ChatServiceTests
     public async Task SendMessageAsync_WithSkillPrompt_IncludesPlaybookInSystemPrompt()
     {
         var skillService = new Mock<ISkillService>();
-        skillService.Setup(service => service.BuildPromptBlockAsync(UserId, ProjectId, "Hello", It.IsAny<CancellationToken>()))
+        skillService.Setup(service => service.BuildPromptBlockAsync(UserId, ProjectId, "Hello", It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("## Playbooks\nUse the bug triage playbook.");
 
         var sut = new ChatService(

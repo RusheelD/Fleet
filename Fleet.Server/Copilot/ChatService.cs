@@ -333,7 +333,7 @@ public class ChatService(
             }
 
             // 2b. Build system prompt with any uploaded documents
-            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, userId, content, requestCancellation);
+            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, userId, content, requestCancellation, conversationHistory: llmMessages);
 
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
@@ -914,7 +914,8 @@ public class ChatService(
                 userId,
                 "Generate work-items based on provided context",
                 requestCancellation,
-                ownerId);
+                ownerId,
+                conversationHistory: llmMessages);
             await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
                 userId,
                 includeWriteTools: true,
@@ -2034,7 +2035,8 @@ public class ChatService(
         int userId,
         string? latestUserMessage,
         CancellationToken cancellationToken = default,
-        string? ownerId = null)
+        string? ownerId = null,
+        IReadOnlyList<LLMMessage>? conversationHistory = null)
     {
         var scopePrompt = IsGlobalScope(projectId)
             ? """
@@ -2065,10 +2067,18 @@ public class ChatService(
             builder.AppendLine(memoryPrompt);
         }
 
+        // Extract recent conversation text for skill context matching
+        var conversationContext = conversationHistory?
+            .Where(m => m.Role is "user" or "assistant" && !string.IsNullOrWhiteSpace(m.Content))
+            .Select(m => m.Content!)
+            .TakeLast(8)
+            .ToList();
+
         var skillPrompt = await _skillService.BuildPromptBlockAsync(
             userId,
             IsGlobalScope(projectId) ? null : projectId,
             latestUserMessage,
+            conversationContext,
             cancellationToken);
         if (!string.IsNullOrWhiteSpace(skillPrompt))
         {
@@ -2371,6 +2381,9 @@ public class ChatService(
             => throw new NotSupportedException();
 
         public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
+
+        public Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, IReadOnlyList<string>? conversationContext, CancellationToken cancellationToken = default)
             => Task.FromResult(string.Empty);
     }
 }

@@ -147,6 +147,9 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
     }
 
     public async Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
+        => await BuildPromptBlockAsync(userId, projectId, query, conversationContext: null, cancellationToken);
+
+    public async Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, IReadOnlyList<string>? conversationContext, CancellationToken cancellationToken = default)
     {
         var customSkills = await repository.GetEnabledPromptSkillsAsync(userId, projectId, cancellationToken);
         var candidates = BuiltInTemplates.Select(template => CreateCandidate(template))
@@ -174,7 +177,7 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
             builder.AppendLine($"- ... and {candidates.Count - CatalogLimit} more playbooks.");
         }
 
-        var selected = SelectRelevantSkills(candidates, query, projectId)
+        var selected = SelectRelevantSkills(candidates, query, projectId, conversationContext)
             .Take(SelectedSkillLimit)
             .ToList();
         if (selected.Count == 0)
@@ -270,14 +273,20 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
     private static IEnumerable<SkillCandidate> SelectRelevantSkills(
         IReadOnlyList<SkillCandidate> candidates,
         string? query,
-        string? projectId)
+        string? projectId,
+        IReadOnlyList<string>? conversationContext)
     {
-        var tokens = Tokenize(query);
+        // Aggregate tokens from the query AND recent conversation messages.
+        // The latest query tokens get full weight; conversation context tokens
+        // get reduced weight to avoid stale context dominating.
+        var queryTokens = Tokenize(query);
+        var contextTokens = AggregateConversationTokens(conversationContext);
+
         return candidates
             .Select(candidate => new
             {
                 Candidate = candidate,
-                Score = Score(candidate, tokens, projectId),
+                Score = Score(candidate, queryTokens, contextTokens, projectId),
             })
             .Where(item => item.Score > 0)
             .OrderByDescending(item => item.Score)
@@ -286,24 +295,56 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
             .Select(item => item.Candidate);
     }
 
-    private static int Score(SkillCandidate candidate, HashSet<string> queryTokens, string? projectId)
+    private static int Score(SkillCandidate candidate, HashSet<string> queryTokens, HashSet<string> contextTokens, string? projectId)
     {
         var score = candidate.Scope == "project" && !string.IsNullOrWhiteSpace(projectId) ? 20 : 0;
-        if (queryTokens.Count == 0)
-        {
-            return score;
-        }
 
         var searchable = $"{candidate.Name} {candidate.Description} {candidate.WhenToUse} {candidate.Content}";
-        var matchedTokens = queryTokens.Count(token => searchable.Contains(token, StringComparison.OrdinalIgnoreCase));
-        score += matchedTokens * 25;
 
-        if (matchedTokens > 0 && searchable.Contains(queryTokens.First(), StringComparison.OrdinalIgnoreCase))
+        // Full-weight matches from the current query
+        if (queryTokens.Count > 0)
         {
-            score += 10;
+            var matchedTokens = queryTokens.Count(token => searchable.Contains(token, StringComparison.OrdinalIgnoreCase));
+            score += matchedTokens * 25;
+
+            if (matchedTokens > 0 && searchable.Contains(queryTokens.First(), StringComparison.OrdinalIgnoreCase))
+            {
+                score += 10;
+            }
+        }
+
+        // Reduced-weight matches from conversation context (10 points each instead of 25)
+        // This lets skills activate based on accumulated conversation topics
+        if (contextTokens.Count > 0)
+        {
+            // Only count context tokens that weren't already counted in the query
+            var uniqueContextTokens = contextTokens.Except(queryTokens, StringComparer.OrdinalIgnoreCase);
+            var contextMatches = uniqueContextTokens.Count(token => searchable.Contains(token, StringComparison.OrdinalIgnoreCase));
+            score += contextMatches * 10;
         }
 
         return score;
+    }
+
+    /// <summary>
+    /// Aggregate keywords from the last N conversation messages.
+    /// Limited to recent history to avoid stale context dominating.
+    /// </summary>
+    private static HashSet<string> AggregateConversationTokens(IReadOnlyList<string>? messages)
+    {
+        if (messages is null || messages.Count == 0)
+            return [];
+
+        var combined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var message in messages.TakeLast(8))
+        {
+            foreach (var token in Tokenize(message))
+            {
+                combined.Add(token);
+            }
+        }
+
+        return combined;
     }
 
     private static HashSet<string> Tokenize(string? text)
