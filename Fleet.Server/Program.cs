@@ -320,6 +320,10 @@ builder.Services.AddSingleton<ILLMClient>(sp =>
     return new ResilientLLMClient(inner, options, logger);
 });
 
+// Tool lifecycle hooks
+builder.Services.AddScoped<IToolLifecycleHook, AuditToolHook>();
+builder.Services.AddScoped<ToolLifecycleRunner>();
+
 // Chat tools (registered individually, collected by ChatToolRegistry)
 builder.Services.AddScoped<IChatTool, GetProjectInfoTool>();
 builder.Services.AddScoped<IChatTool, ListProjectsTool>();

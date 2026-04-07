@@ -31,7 +31,8 @@ public class ChatService(
     IMcpToolSessionFactory? mcpToolSessionFactory = null,
     IMemoryService? memoryService = null,
     ISkillService? skillService = null,
-    ITokenTracker? tokenTracker = null) : IChatService
+    ITokenTracker? tokenTracker = null,
+    ToolLifecycleRunner? lifecycleRunner = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
@@ -1913,6 +1914,15 @@ public class ChatService(
             return $"Error: tool '{toolCall.Name}' is not available. Do not call it. Use only the tools provided in your tool definitions.";
         }
 
+        // Run lifecycle hooks — BeforeExecute can veto a tool call
+        if (lifecycleRunner is not null)
+        {
+            var hookContext = new ToolHookContext(toolCall.Name, toolCall.ArgumentsJson, context.ProjectId, context.UserId);
+            var hookOverride = await lifecycleRunner.RunBeforeExecuteAsync(hookContext, ct);
+            if (hookOverride is not null)
+                return hookOverride;
+        }
+
         var tool = toolRegistry.Get(toolCall.Name);
         if (tool is null && mcpToolSession.HasTool(toolCall.Name))
         {
@@ -1924,7 +1934,7 @@ public class ChatService(
                     result = result[..config.MaxToolOutputLength] + "\n... (truncated)";
                 }
 
-                return result;
+                return await RunAfterHookAsync(toolCall, context, result, ct);
             }
             catch (Exception ex)
             {
@@ -1957,13 +1967,23 @@ public class ChatService(
                 result = result[..config.MaxToolOutputLength] + "\n... (truncated)";
             }
 
-            return result;
+            return await RunAfterHookAsync(toolCall, context, result, ct);
         }
         catch (Exception ex)
         {
             logger.CopilotToolExecutionFailed(ex, toolCall.Name.SanitizeForLogging());
             return $"Error executing tool '{toolCall.Name}': {ex.Message}";
         }
+    }
+
+    private async Task<string> RunAfterHookAsync(
+        LLMToolCall toolCall, ChatToolContext context, string result, CancellationToken ct)
+    {
+        if (lifecycleRunner is null)
+            return result;
+
+        var hookContext = new ToolHookContext(toolCall.Name, toolCall.ArgumentsJson, context.ProjectId, context.UserId);
+        return await lifecycleRunner.RunAfterExecuteAsync(hookContext, result, ct);
     }
 
     private static LLMMessage ToLLMMessage(ChatMessageDto msg) => new()
