@@ -91,7 +91,10 @@ public class UsageLedgerService(FleetDbContext dbContext) : IUsageLedgerService
             workItemUsed,
             codingUsed,
             workItemRemaining,
-            codingRemaining);
+            codingRemaining,
+            ledger.InputTokens,
+            ledger.OutputTokens,
+            ledger.CachedInputTokens);
     }
 
     private async Task<MonthlyUsageLedger> GetOrCreateCurrentLedgerAsync(int userId, CancellationToken cancellationToken)

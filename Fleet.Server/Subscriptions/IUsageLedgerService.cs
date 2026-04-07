@@ -11,7 +11,10 @@ public sealed record TierUsageSnapshot(
     int WorkItemRunsUsed,
     int CodingRunsUsed,
     int? WorkItemRunsRemaining,
-    int? CodingRunsRemaining);
+    int? CodingRunsRemaining,
+    long InputTokensUsed = 0,
+    long OutputTokensUsed = 0,
+    long CachedInputTokens = 0);
 
 public interface IUsageLedgerService
 {

@@ -58,6 +58,9 @@ public class SubscriptionService(
                 0,
                 "brand",
                 $"Window: {usage.UtcMonth} UTC"),
+            BuildTokenUsageMeter("Input Tokens", usage.InputTokensUsed),
+            BuildTokenUsageMeter("Output Tokens", usage.OutputTokensUsed),
+            BuildTokenUsageMeter("Cached Tokens", usage.CachedInputTokens),
         };
 
         var plans = TierPolicyCatalog.All
@@ -89,6 +92,18 @@ public class SubscriptionService(
             value,
             color,
             $"{remaining ?? Math.Max(limit.Value - clampedUsed, 0)} remaining");
+    }
+
+    private static UsageMeterDto BuildTokenUsageMeter(string label, long tokens)
+    {
+        var formatted = tokens switch
+        {
+            >= 1_000_000 => $"{tokens / 1_000_000.0:F1}M",
+            >= 1_000 => $"{tokens / 1_000.0:F1}K",
+            _ => tokens.ToString(),
+        };
+
+        return new UsageMeterDto(label, formatted, 0, "brand", "This month");
     }
 
     private static PlanDto ToPlan(TierPolicy policy, string currentRole)
