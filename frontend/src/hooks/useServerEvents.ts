@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
-import type { AgentExecution, ChatData, ChatSessionActivity, ChatSessionData, LogEntry } from '../models'
+import { normalizeLogEntry, type AgentExecution, type ChatData, type ChatSessionActivity, type ChatSessionData, type LogEntry } from '../models'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
 
 interface ServerEventMessage {
@@ -623,7 +623,7 @@ export function useServerEvents(projectId?: string) {
         return false
       }
 
-      const logEntry = payload.logEntry
+      const logEntry = normalizeLogEntry(payload.logEntry)
       const logQueries = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
       for (const [queryKey, snapshot] of logQueries) {
         if (!Array.isArray(snapshot)) {

@@ -1,6 +1,7 @@
 export type { WorkItem, WorkItemState, WorkItemLevel } from './work-item'
 export type { WorkItemAttachment } from './work-item-attachment'
 export type { AgentExecution, AgentInfo, LogEntry } from './agent'
+export { compareLogEntriesByTime, normalizeLogEntries, normalizeLogEntry } from './agent'
 export type { ProjectData, SlugCheckResult } from './project'
 export type {
   ChatAttachment,

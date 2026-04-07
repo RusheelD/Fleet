@@ -1,12 +1,12 @@
 import { del, get, post } from './'
-import type { AgentExecution, LogEntry } from '../models'
+import { normalizeLogEntries, type AgentExecution, type LogEntry } from '../models'
 
 export function getExecutions(projectId: string): Promise<AgentExecution[]> {
   return get<AgentExecution[]>(`/api/projects/${projectId}/agents/executions`)
 }
 
 export function getLogs(projectId: string): Promise<LogEntry[]> {
-  return get<LogEntry[]>(`/api/projects/${projectId}/agents/logs`)
+  return get<LogEntry[]>(`/api/projects/${projectId}/agents/logs`).then(normalizeLogEntries)
 }
 
 export function clearLogs(projectId: string): Promise<{ deletedCount: number }> {

@@ -58,6 +58,14 @@ function normalizeOptionalValue(value: string | undefined): string | undefined {
   return normalized && normalized.length > 0 ? normalized : undefined
 }
 
+function shouldWarnRedirectUriMismatch(runtimeUrl: URL | null): boolean {
+  const hostname = runtimeUrl?.hostname.trim().toLowerCase() ?? ''
+  return hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.startsWith('app-dev.') ||
+    hostname.startsWith('app-staging.')
+}
+
 export function resolveKnownAuthorities(
   configuredKnownAuthorities: string | undefined,
   authority: string | undefined,
@@ -97,10 +105,13 @@ export function resolveRedirectUri(
       runtimeUrl &&
       configuredUrl.origin !== runtimeUrl.origin
     ) {
-      logger.warn(
-        `Configured VITE_ENTRA_REDIRECT_URI (${normalizedConfiguredRedirectUri}) does not match the current origin (${normalizedRuntimeOrigin}). ` +
-        'Using the current origin to avoid Entra redirect URI mismatches.',
-      )
+      if (shouldWarnRedirectUriMismatch(runtimeUrl)) {
+        logger.warn(
+          `Configured VITE_ENTRA_REDIRECT_URI (${normalizedConfiguredRedirectUri}) does not match the current origin (${normalizedRuntimeOrigin}). ` +
+          'Using the current origin to avoid Entra redirect URI mismatches.',
+        )
+      }
+
       return normalizedRuntimeOrigin ?? LOCALHOST_REDIRECT_URI
     }
 

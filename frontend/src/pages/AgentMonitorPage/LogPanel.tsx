@@ -11,7 +11,7 @@ import {
 } from '@fluentui/react-components'
 import { ArrowClockwiseRegular, CodeRegular, DeleteRegular } from '@fluentui/react-icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentExecution, LogEntry } from '../../models'
+import { compareLogEntriesByTime, normalizeLogEntries, type AgentExecution, type LogEntry } from '../../models'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
@@ -25,8 +25,16 @@ const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLe
 
 /** Format an ISO string to HH:MM:SS (24-hour) for the log gutter. */
 function formatLogTime(iso: string): string {
+    if (!iso) {
+        return '--:--:--'
+    }
+
     try {
         const d = new Date(iso)
+        if (Number.isNaN(d.getTime())) {
+            return iso
+        }
+
         return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
     } catch {
         return iso
@@ -308,22 +316,18 @@ export function LogPanel({
     const [selectedRun, setSelectedRun] = useState<string>('all')
     const logListRef = useRef<HTMLDivElement | null>(null)
 
+    const normalizedLogs = useMemo(
+        () => normalizeLogEntries(logs),
+        [logs],
+    )
+
     const baseLogs = useMemo(
-        () => showDetailed ? logs : logs.filter((log) => !log.isDetailed),
-        [logs, showDetailed],
+        () => showDetailed ? normalizedLogs : normalizedLogs.filter((log) => !log.isDetailed),
+        [normalizedLogs, showDetailed],
     )
 
     const logsWithResolvedExecutionId = useMemo<LogEntryWithExecutionId[]>(() => {
-        const sortedLogs = [...baseLogs].sort((left, right) => {
-            const leftTime = Date.parse(left.time)
-            const rightTime = Date.parse(right.time)
-
-            if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-                return left.time.localeCompare(right.time)
-            }
-
-            return leftTime - rightTime
-        })
+        const sortedLogs = [...baseLogs].sort(compareLogEntriesByTime)
 
         let activeExecutionId: string | null = null
 
@@ -363,9 +367,15 @@ export function LogPanel({
         const result: RunTabDefinition[] = []
         const seen = new Set<string>()
         const duplicateCounter = new Map<string, number>()
-        const sortedExecutions = [...flattenedExecutionList].sort(
-            (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt),
-        )
+        const sortedExecutions = [...flattenedExecutionList].sort((left, right) => {
+            const leftTime = Date.parse(left.startedAt ?? '')
+            const rightTime = Date.parse(right.startedAt ?? '')
+            if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+                return (right.startedAt ?? '').localeCompare(left.startedAt ?? '')
+            }
+
+            return rightTime - leftTime
+        })
         const logsByExecutionId = new Map<string, LogEntryWithExecutionId[]>()
 
         for (const log of logsWithResolvedExecutionId) {
@@ -454,16 +464,7 @@ export function LogPanel({
     )
 
     const sortedVisibleLogs = useMemo(
-        () => [...visibleLogs].sort((left, right) => {
-            const leftTime = Date.parse(left.time)
-            const rightTime = Date.parse(right.time)
-
-            if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-                return left.time.localeCompare(right.time)
-            }
-
-            return leftTime - rightTime
-        }),
+        () => [...visibleLogs].sort(compareLogEntriesByTime),
         [visibleLogs],
     )
 

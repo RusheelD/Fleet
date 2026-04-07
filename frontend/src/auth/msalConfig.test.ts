@@ -28,6 +28,19 @@ describe('msalConfigUtils', () => {
     expect(warn).toHaveBeenCalledOnce()
   })
 
+  it('silently prefers the runtime origin on production host mismatches', () => {
+    const warn = vi.fn()
+
+    const redirectUri = resolveRedirectUri(
+      'https://app-dev.fleet-ai.dev/',
+      'https://app.fleet-ai.dev',
+      { warn },
+    )
+
+    expect(redirectUri).toBe('https://app.fleet-ai.dev')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('preserves an explicit non-root redirect path', () => {
     const redirectUri = resolveRedirectUri(
       'https://app.fleet-ai.dev/auth/callback',
