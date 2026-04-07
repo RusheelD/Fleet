@@ -44,13 +44,13 @@ public class ClaudeClient(
         // Enable prompt caching — caches system prompt, tool schemas, and marked user content
         httpRequest.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
 
-        using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken);
-        var responseBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
+        var (statusCode, responseBody) = await IdleTimeoutHandler.SendWithIdleTimeoutAsync(
+            httpClient, httpRequest, cancellationToken);
 
-        if (!httpResponse.IsSuccessStatusCode)
+        if ((int)statusCode < 200 || (int)statusCode >= 300)
         {
-            logger.LlmClaudeApiError((int)httpResponse.StatusCode, responseBody.SanitizeForLogging());
-            throw new InvalidOperationException($"Claude API returned {httpResponse.StatusCode}: {responseBody}");
+            logger.LlmClaudeApiError((int)statusCode, responseBody.SanitizeForLogging());
+            throw new InvalidOperationException($"Claude API returned {statusCode}: {responseBody}");
         }
 
         logger.LlmClaudeResponse(responseBody.SanitizeForLogging());

@@ -41,13 +41,13 @@ public class GeminiClient(
             Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json"),
         };
 
-        using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken);
-        var responseBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
+        var (statusCode, responseBody) = await IdleTimeoutHandler.SendWithIdleTimeoutAsync(
+            httpClient, httpRequest, cancellationToken);
 
-        if (!httpResponse.IsSuccessStatusCode)
+        if ((int)statusCode < 200 || (int)statusCode >= 300)
         {
-            logger.LlmGeminiApiError((int)httpResponse.StatusCode, responseBody.SanitizeForLogging());
-            throw new InvalidOperationException($"Gemini API returned {httpResponse.StatusCode}: {responseBody}");
+            logger.LlmGeminiApiError((int)statusCode, responseBody.SanitizeForLogging());
+            throw new InvalidOperationException($"Gemini API returned {statusCode}: {responseBody}");
         }
 
         logger.LlmGeminiResponse(responseBody.SanitizeForLogging());

@@ -42,17 +42,17 @@ public class AzureOpenAiClient(
         };
         httpRequest.Headers.Add("api-key", config.ApiKey);
 
-        using var response = await httpClient.SendAsync(httpRequest, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        var (statusCode, responseBody) = await IdleTimeoutHandler.SendWithIdleTimeoutAsync(
+            httpClient, httpRequest, cancellationToken);
 
-        if (!response.IsSuccessStatusCode)
+        if ((int)statusCode < 200 || (int)statusCode >= 300)
         {
             logger.LogError(
                 "Azure OpenAI API error. status={StatusCode} body={Body}",
-                (int)response.StatusCode,
+                (int)statusCode,
                 responseBody.SanitizeForLogging());
             throw new InvalidOperationException(
-                $"Azure OpenAI Responses API returned {response.StatusCode}: {responseBody}");
+                $"Azure OpenAI Responses API returned {statusCode}: {responseBody}");
         }
 
         logger.LogDebug("Azure OpenAI response body. body={Body}", responseBody.SanitizeForLogging());
