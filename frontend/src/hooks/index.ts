@@ -1,5 +1,5 @@
 export { useCurrentProject } from './useCurrentProject'
-export { useServerEvents } from './useServerEvents'
+export { useServerEvents, useServerEventConnection } from './useServerEvents'
 export { AuthProvider } from './useAuth'
 export { useAuth } from './useAuthHook'
 export type { AuthContextValue } from './AuthContext'

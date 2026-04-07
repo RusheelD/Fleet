@@ -1,8 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
-import type { AgentExecution, ChatData, ChatSessionActivity, ChatSessionData } from '../models'
+import type { AgentExecution, ChatData, ChatSessionActivity, ChatSessionData, LogEntry } from '../models'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
 
 interface ServerEventMessage {
@@ -12,6 +12,7 @@ interface ServerEventMessage {
 
 export const CHAT_TOOL_EVENT_WINDOW_EVENT = 'fleet:chat-tool-event'
 export const CHAT_SESSION_EVENT_WINDOW_EVENT = 'fleet:chat-session-event'
+export const SERVER_EVENT_CONNECTION_WINDOW_EVENT = 'fleet:server-event-connection'
 
 export interface ChatToolEventPayload {
   projectId?: string | null
@@ -33,18 +34,64 @@ export interface ChatSessionEventPayload {
   activity?: ChatSessionActivity | null
 }
 
-const SSE_STALE_AFTER_MS = 45_000
+export type ServerEventConnectionState = 'connecting' | 'live' | 'reconnecting'
+
+export interface ServerEventConnectionDetail {
+  projectId?: string | null
+  state: ServerEventConnectionState
+  updatedAtUtc: string
+}
 
 interface AgentsUpdatedEventPayload {
   projectId?: string | null
   executionId?: string | null
+  status?: string | null
   execution?: AgentExecution | null
 }
+
+interface LogsUpdatedEventPayload {
+  projectId?: string | null
+  executionId?: string | null
+  deletedCount?: number | null
+  logEntry?: LogEntry | null
+}
+
+const SSE_STALE_AFTER_MS = 25_000
+const AGENT_EVENT_REFRESH_DEBOUNCE_MS = 750
+const LOG_EVENT_REFRESH_DEBOUNCE_MS = 1500
+const WORK_ITEM_EVENT_REFRESH_DEBOUNCE_MS = 2000
+const PROJECT_EVENT_REFRESH_DEBOUNCE_MS = 3000
+const DEFAULT_EVENT_REFRESH_DEBOUNCE_MS = 500
+const KNOWN_EXECUTION_STATUSES = new Set<AgentExecution['status']>([
+  'running',
+  'completed',
+  'failed',
+  'queued',
+  'cancelled',
+  'paused',
+])
 
 function normalizeExecutionTree(execution: AgentExecution): AgentExecution {
   return {
     ...execution,
     subFlows: (execution.subFlows ?? []).map(normalizeExecutionTree),
+  }
+}
+
+function mergeExecutionSnapshot(existing: AgentExecution, incoming: AgentExecution): AgentExecution {
+  const incomingChildren = incoming.subFlows ?? []
+  const mergedChildren = incomingChildren.length > 0 ? incomingChildren : existing.subFlows ?? incomingChildren
+
+  return {
+    ...incoming,
+    branchName: incoming.branchName ?? existing.branchName,
+    pullRequestUrl: incoming.pullRequestUrl ?? existing.pullRequestUrl,
+    currentPhase: incoming.currentPhase ?? existing.currentPhase,
+    reviewLoopCount: incoming.reviewLoopCount && incoming.reviewLoopCount > 0
+      ? incoming.reviewLoopCount
+      : existing.reviewLoopCount,
+    lastReviewRecommendation: incoming.lastReviewRecommendation ?? existing.lastReviewRecommendation,
+    subFlows: mergedChildren,
   }
 }
 
@@ -57,7 +104,7 @@ function upsertExecutionCollection(
   const executions = current.map((execution) => {
     if (execution.id === incoming.id) {
       found = true
-      return incoming
+      return mergeExecutionSnapshot(execution, incoming)
     }
 
     if (incoming.parentExecutionId && execution.id === incoming.parentExecutionId) {
@@ -65,7 +112,9 @@ function upsertExecutionCollection(
       const existingChildren = execution.subFlows ?? []
       const existingChildIndex = existingChildren.findIndex((child) => child.id === incoming.id)
       const nextChildren = existingChildIndex >= 0
-        ? existingChildren.map((child, index) => (index === existingChildIndex ? incoming : child))
+        ? existingChildren.map((child, index) => (
+          index === existingChildIndex ? mergeExecutionSnapshot(child, incoming) : child
+        ))
         : [incoming, ...existingChildren]
 
       return {
@@ -86,6 +135,77 @@ function upsertExecutionCollection(
     }
 
     return execution
+  })
+
+  return { executions, found }
+}
+
+function removeExecutionCollection(
+  current: AgentExecution[],
+  executionId: string,
+): { executions: AgentExecution[]; removed: boolean } {
+  let removed = false
+
+  const executions = current
+    .filter((execution) => {
+      if (execution.id === executionId) {
+        removed = true
+        return false
+      }
+
+      return true
+    })
+    .map((execution) => {
+      if ((execution.subFlows?.length ?? 0) === 0) {
+        return execution
+      }
+
+      const nested = removeExecutionCollection(execution.subFlows ?? [], executionId)
+      if (!nested.removed) {
+        return execution
+      }
+
+      removed = true
+      return {
+        ...execution,
+        subFlows: nested.executions,
+      }
+    })
+
+  return { executions, removed }
+}
+
+function patchExecutionCollection(
+  current: AgentExecution[],
+  executionId: string,
+  patch: Partial<AgentExecution>,
+): { executions: AgentExecution[]; found: boolean } {
+  let found = false
+
+  const executions = current.map((execution) => {
+    if (execution.id === executionId) {
+      found = true
+      return {
+        ...execution,
+        ...patch,
+        subFlows: execution.subFlows,
+      }
+    }
+
+    if ((execution.subFlows?.length ?? 0) === 0) {
+      return execution
+    }
+
+    const nested = patchExecutionCollection(execution.subFlows ?? [], executionId, patch)
+    if (!nested.found) {
+      return execution
+    }
+
+    found = true
+    return {
+      ...execution,
+      subFlows: nested.executions,
+    }
   })
 
   return { executions, found }
@@ -227,6 +347,69 @@ async function streamServerEvents(
   }
 }
 
+function isSameLogEntry(left: LogEntry, right: LogEntry): boolean {
+  return left.time === right.time &&
+    left.agent === right.agent &&
+    left.level === right.level &&
+    left.message === right.message &&
+    left.isDetailed === right.isDetailed &&
+    left.executionId === right.executionId
+}
+
+function getExecutionPhaseForStatus(status: string | null | undefined): string | undefined {
+  switch (status?.toLowerCase()) {
+    case 'paused':
+      return 'Paused'
+    case 'cancelled':
+      return 'Cancelled'
+    case 'failed':
+      return 'Failed'
+    case 'completed':
+      return 'Completed'
+    case 'running':
+      return 'Running'
+    default:
+      return undefined
+  }
+}
+
+export function useServerEventConnection(projectId?: string) {
+  const normalizedProjectId = projectId ?? null
+  const [connection, setConnection] = useState<ServerEventConnectionDetail>(() => ({
+    projectId: normalizedProjectId,
+    state: 'connecting',
+    updatedAtUtc: new Date().toISOString(),
+  }))
+
+  useEffect(() => {
+    setConnection({
+      projectId: normalizedProjectId,
+      state: 'connecting',
+      updatedAtUtc: new Date().toISOString(),
+    })
+
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleConnectionUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<ServerEventConnectionDetail>).detail
+      if ((detail.projectId ?? null) !== normalizedProjectId) {
+        return
+      }
+
+      setConnection(detail)
+    }
+
+    window.addEventListener(SERVER_EVENT_CONNECTION_WINDOW_EVENT, handleConnectionUpdate as EventListener)
+    return () => {
+      window.removeEventListener(SERVER_EVENT_CONNECTION_WINDOW_EVENT, handleConnectionUpdate as EventListener)
+    }
+  }, [normalizedProjectId])
+
+  return connection
+}
+
 export function useServerEvents(projectId?: string) {
   const queryClient = useQueryClient()
   const { isAuthenticated } = useAuth()
@@ -238,26 +421,51 @@ export function useServerEvents(projectId?: string) {
 
     let cancelled = false
     let activeController: AbortController | null = null
+    let currentConnectionState: ServerEventConnectionState = 'connecting'
+    let hasConnectedOnce = false
     const lastInvalidationByTopic = new Map<string, number>()
     const pendingInvalidationTimers = new Map<string, number>()
 
+    const emitConnectionState = (state: ServerEventConnectionState) => {
+      if (currentConnectionState === state) {
+        return
+      }
+
+      currentConnectionState = state
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent<ServerEventConnectionDetail>(SERVER_EVENT_CONNECTION_WINDOW_EVENT, {
+          detail: {
+            projectId: projectId ?? null,
+            state,
+            updatedAtUtc: new Date().toISOString(),
+          },
+        }))
+      }
+    }
+
     const getMinIntervalMs = (topic: string): number => {
-      if (topic === 'agents.updated' || topic === 'logs.updated') {
-        return 25
+      if (topic === 'agents.updated') {
+        return AGENT_EVENT_REFRESH_DEBOUNCE_MS
+      }
+
+      if (topic === 'logs.updated') {
+        return LOG_EVENT_REFRESH_DEBOUNCE_MS
       }
 
       if (topic === 'work-items.updated') {
-        return 25
+        return WORK_ITEM_EVENT_REFRESH_DEBOUNCE_MS
       }
 
-      return 100
+      if (topic === 'projects.updated') {
+        return PROJECT_EVENT_REFRESH_DEBOUNCE_MS
+      }
+
+      return DEFAULT_EVENT_REFRESH_DEBOUNCE_MS
     }
 
     const refreshQuery = (queryName: string) => {
       void queryClient.invalidateQueries({ queryKey: [queryName], refetchType: 'active' })
-      // Refetch all matching queries so nested execution trees stay in sync even when the
-      // consuming view is mounted indirectly through shared layout state.
-      void queryClient.refetchQueries({ queryKey: [queryName], type: 'all' })
     }
 
     const refreshMany = (queryNames: readonly string[]) => {
@@ -279,11 +487,11 @@ export function useServerEvents(projectId?: string) {
 
       const last = existing.length > 0 ? existing[existing.length - 1] : undefined
       if (
-        last
-        && last.kind === normalizedActivity.kind
-        && last.message === normalizedActivity.message
-        && last.toolName === normalizedActivity.toolName
-        && last.succeeded === normalizedActivity.succeeded
+        last &&
+        last.kind === normalizedActivity.kind &&
+        last.message === normalizedActivity.message &&
+        last.toolName === normalizedActivity.toolName &&
+        last.succeeded === normalizedActivity.succeeded
       ) {
         return existing
       }
@@ -326,15 +534,98 @@ export function useServerEvents(projectId?: string) {
       )
     }
 
-    const updateExecutionCaches = (payload: AgentsUpdatedEventPayload) => {
-      if (!payload.execution) {
-        return
+    const updateExecutionCaches = (payload: AgentsUpdatedEventPayload): boolean => {
+      if (payload.executionId && payload.status?.toLowerCase() === 'deleted') {
+        const executionQueries = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+
+        for (const [queryKey, snapshot] of executionQueries) {
+          if (!Array.isArray(snapshot)) {
+            continue
+          }
+
+          const queryKeyParts = Array.isArray(queryKey) ? queryKey : [queryKey]
+          if (!queryKeyMatchesProject(queryKeyParts, payload.projectId)) {
+            continue
+          }
+
+          const updated = removeExecutionCollection(snapshot, payload.executionId)
+          if (updated.removed) {
+            queryClient.setQueryData(queryKey, updated.executions)
+          }
+        }
+
+        return true
       }
 
-      const incomingExecution = normalizeExecutionTree(payload.execution)
-      const executionQueries = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+      if (payload.execution) {
+        const incomingExecution = normalizeExecutionTree(payload.execution)
+        const executionQueries = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
 
-      for (const [queryKey, snapshot] of executionQueries) {
+        for (const [queryKey, snapshot] of executionQueries) {
+          if (!Array.isArray(snapshot)) {
+            continue
+          }
+
+          const queryKeyParts = Array.isArray(queryKey) ? queryKey : [queryKey]
+          if (!queryKeyMatchesProject(queryKeyParts, payload.projectId)) {
+            continue
+          }
+
+          const updated = upsertExecutionCollection(snapshot, incomingExecution)
+          if (updated.found) {
+            queryClient.setQueryData(queryKey, updated.executions)
+            continue
+          }
+
+          if (!incomingExecution.parentExecutionId) {
+            queryClient.setQueryData(queryKey, [incomingExecution, ...snapshot])
+          }
+        }
+
+        return true
+      }
+
+      if (payload.executionId && payload.status) {
+        const normalizedStatus = payload.status.toLowerCase()
+        const nextStatus = KNOWN_EXECUTION_STATUSES.has(normalizedStatus as AgentExecution['status'])
+          ? normalizedStatus as AgentExecution['status']
+          : undefined
+        const patch: Partial<AgentExecution> = {
+          status: nextStatus,
+          currentPhase: getExecutionPhaseForStatus(normalizedStatus),
+        }
+
+        const executionQueries = queryClient.getQueriesData<AgentExecution[]>({ queryKey: ['executions'] })
+        for (const [queryKey, snapshot] of executionQueries) {
+          if (!Array.isArray(snapshot)) {
+            continue
+          }
+
+          const queryKeyParts = Array.isArray(queryKey) ? queryKey : [queryKey]
+          if (!queryKeyMatchesProject(queryKeyParts, payload.projectId)) {
+            continue
+          }
+
+          const updated = patchExecutionCollection(snapshot, payload.executionId, patch)
+          if (updated.found) {
+            queryClient.setQueryData(queryKey, updated.executions)
+          }
+        }
+
+        return true
+      }
+
+      return false
+    }
+
+    const updateLogCaches = (payload: LogsUpdatedEventPayload): boolean => {
+      if (!payload.logEntry) {
+        return false
+      }
+
+      const logEntry = payload.logEntry
+      const logQueries = queryClient.getQueriesData<LogEntry[]>({ queryKey: ['logs'] })
+      for (const [queryKey, snapshot] of logQueries) {
         if (!Array.isArray(snapshot)) {
           continue
         }
@@ -344,16 +635,14 @@ export function useServerEvents(projectId?: string) {
           continue
         }
 
-        const updated = upsertExecutionCollection(snapshot, incomingExecution)
-        if (updated.found) {
-          queryClient.setQueryData(queryKey, updated.executions)
+        if (snapshot.some((entry) => isSameLogEntry(entry, logEntry))) {
           continue
         }
 
-        if (!incomingExecution.parentExecutionId) {
-          queryClient.setQueryData(queryKey, [incomingExecution, ...snapshot])
-        }
+        queryClient.setQueryData(queryKey, [...snapshot, logEntry])
       }
+
+      return true
     }
 
     const invalidateForTopicNow = (topic: string) => {
@@ -377,17 +666,17 @@ export function useServerEvents(projectId?: string) {
       }
 
       if (topic === 'logs.updated') {
-        refreshMany(['logs', 'executions'])
+        refreshMany(['logs'])
         return
       }
 
       if (topic === 'agents.updated') {
-        refreshMany(['executions', 'logs', 'work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
+        refreshMany(['executions'])
         return
       }
 
       if (topic === 'work-items.updated') {
-        refreshMany(['work-items', 'executions', 'project-dashboard', 'project-dashboard-slug', 'projects'])
+        refreshMany(['work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
         return
       }
 
@@ -434,6 +723,8 @@ export function useServerEvents(projectId?: string) {
       let reconnectDelayMs = 1000
 
       while (!cancelled) {
+        emitConnectionState(hasConnectedOnce ? 'reconnecting' : 'connecting')
+
         const controller = new AbortController()
         activeController = controller
         let staleTimerId: number | null = null
@@ -458,11 +749,20 @@ export function useServerEvents(projectId?: string) {
           await streamServerEvents(
             streamPath,
             ({ eventName, data }) => {
+              const wasPreviouslyConnected = hasConnectedOnce
+              hasConnectedOnce = true
               reconnectDelayMs = 1000
               resetStaleTimer()
+              emitConnectionState('live')
+
+              let handledByCache = false
 
               if (eventName === 'agents.updated') {
-                updateExecutionCaches(data as AgentsUpdatedEventPayload)
+                handledByCache = updateExecutionCaches(data as AgentsUpdatedEventPayload)
+              }
+
+              if (eventName === 'logs.updated') {
+                handledByCache = updateLogCaches(data as LogsUpdatedEventPayload)
               }
 
               if (eventName === 'chat.session-event') {
@@ -482,12 +782,24 @@ export function useServerEvents(projectId?: string) {
                 }))
               }
 
-              scheduleInvalidateForTopic(eventName)
+              const shouldInvalidate =
+                (eventName === 'connected' && wasPreviouslyConnected) ||
+                eventName === 'chat.updated' ||
+                eventName === 'notifications.updated' ||
+                eventName === 'work-items.updated' ||
+                eventName === 'projects.updated' ||
+                (eventName === 'agents.updated' && !handledByCache) ||
+                (eventName === 'logs.updated' && !handledByCache)
+
+              if (shouldInvalidate) {
+                scheduleInvalidateForTopic(eventName)
+              }
             },
             controller.signal,
           )
         } catch (error) {
           if (!cancelled) {
+            emitConnectionState('reconnecting')
             console.warn('SSE stream disconnected; retrying.', error)
           }
         } finally {

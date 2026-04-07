@@ -30,12 +30,12 @@ import { FleetRocketLogo, PageHeader } from '../../components/shared'
 import { InfoBadge } from '../../components/shared/InfoBadge'
 import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
-import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
+import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 
-const LIVE_EXECUTIONS_POLL_MS = 4000
-const IDLE_EXECUTIONS_POLL_MS = 10000
+const LIVE_FALLBACK_POLL_MS = 5000
+const IDLE_FALLBACK_POLL_MS = 15000
 
 const useStyles = makeStyles({
     page: {
@@ -260,16 +260,25 @@ export function AgentMonitorPage() {
     const { projectId } = useCurrentProject()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
+    const { state: serverEventState } = useServerEventConnection(projectId)
     const isCompact = preferences?.compactMode ?? false
     const isDense = isCompact || isMobile
     const [tab, setTab] = useState<string>('active')
     const isLiveRunTab = tab === 'active' || tab === 'paused' || tab === 'all'
-    const executionsPollingInterval = isLiveRunTab ? LIVE_EXECUTIONS_POLL_MS : IDLE_EXECUTIONS_POLL_MS
+    const sseHealthy = serverEventState === 'live'
+    const fallbackPollingInterval = isLiveRunTab ? LIVE_FALLBACK_POLL_MS : IDLE_FALLBACK_POLL_MS
+    const executionsPollingInterval = sseHealthy ? false : fallbackPollingInterval
+    const logsPollingInterval = sseHealthy ? false : fallbackPollingInterval
+    const workItemsPollingInterval = sseHealthy ? false : IDLE_FALLBACK_POLL_MS
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId, {
         pollingInterval: executionsPollingInterval,
     })
-    const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId)
-    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId)
+    const { data: logs, isLoading: loadingLogs, refetch: refetchLogs } = useLogs(projectId, {
+        pollingInterval: logsPollingInterval,
+    })
+    const { data: workItems, isLoading: loadingWorkItems } = useWorkItems(projectId, {
+        pollingInterval: workItemsPollingInterval,
+    })
     const startExecution = useStartExecution(projectId)
     const cancelExecution = useCancelExecution(projectId)
     const pauseExecution = usePauseExecution(projectId)
@@ -407,8 +416,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Agent execution started (ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchExec()
-                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(
@@ -426,7 +433,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Agent execution stopped</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchExec()
             },
             onError: () => {
                 dispatchToast(
@@ -444,7 +450,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Agent execution paused</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchExec()
             },
             onError: () => {
                 dispatchToast(
@@ -463,8 +468,6 @@ export function AgentMonitorPage() {
                     { intent: 'success' },
                 )
                 setTab('active')
-                void refetchExec()
-                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(
@@ -482,8 +485,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Execution retried (new ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchExec()
-                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(
@@ -523,7 +524,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Cleared {result.deletedCount} log entr{result.deletedCount === 1 ? 'y' : 'ies'}</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchLogs()
             },
             onError: () => {
                 dispatchToast(
@@ -547,7 +547,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Cleared {result.deletedCount} log entr{result.deletedCount === 1 ? 'y' : 'ies'} for this run</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(
@@ -577,8 +576,6 @@ export function AgentMonitorPage() {
                     <Toast><ToastTitle>Deleted run and {result.deletedLogCount} log entr{result.deletedLogCount === 1 ? 'y' : 'ies'}</ToastTitle></Toast>,
                     { intent: 'success' },
                 )
-                void refetchExec()
-                void refetchLogs()
             },
             onError: (error) => {
                 dispatchToast(

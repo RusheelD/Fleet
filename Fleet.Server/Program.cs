@@ -80,12 +80,15 @@ builder.Services.Configure<RepoSandboxCleanupOptions>(options =>
     options.StaleAfter = repoSandboxCleanupOptions.StaleAfter;
     options.Interval = repoSandboxCleanupOptions.Interval;
 });
+builder.Services.Configure<AgentExecutionRecoveryOptions>(
+    builder.Configuration.GetSection(AgentExecutionRecoveryOptions.SectionName));
 builder.Services.Configure<ChatAttachmentStorageOptions>(options =>
 {
     options.RootPath = chatAttachmentStorageRoot;
 });
 builder.Services.AddHostedService<GitStartupProbeHostedService>();
 builder.Services.AddHostedService<RepoSandboxCleanupService>();
+builder.Services.AddHostedService<AgentExecutionRecoveryService>();
 builder.Services.AddHealthChecks()
     .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
 builder.Services.AddSingleton<ServiceStats>();

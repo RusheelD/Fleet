@@ -67,6 +67,16 @@ public interface IAgentOrchestrationService
     Task<bool> ResumeExecutionAsync(string projectId, string executionId, int userId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Recovers an interrupted execution that was still marked as running or queued when the service restarted.
+    /// </summary>
+    Task<bool> RecoverExecutionAsync(string projectId, string executionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recovers top-level interrupted executions after a service restart.
+    /// </summary>
+    Task<int> RecoverInterruptedExecutionsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Adds a steering note for an in-flight execution.
     /// </summary>
     Task<bool> SteerExecutionAsync(string projectId, string executionId, string note);

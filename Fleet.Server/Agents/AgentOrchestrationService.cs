@@ -145,6 +145,10 @@ public class AgentOrchestrationService(
         @"/api/projects/[^/\s]+/work-items/\d+/attachments/(?<id>[A-Za-z0-9\-]+)/content",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static bool IsRecoverableInterruptedExecutionStatus(string? status)
+        => string.Equals(status, "running", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Uses a cheap LLM call to determine which agent roles are needed for the work item.
     /// Returns a pipeline in the standard <c>AgentRole[][]</c> format, arranged in dependency order.
@@ -644,11 +648,25 @@ public class AgentOrchestrationService(
                 }
             }
 
+            var latestExecutionLog = await db.LogEntries
+                .AsNoTracking()
+                .Where(log => log.ProjectId == projectId && log.ExecutionId == executionId)
+                .OrderByDescending(log => log.Time)
+                .ThenByDescending(log => log.Id)
+                .Select(log => new LogEntryDto(
+                    log.Time,
+                    log.Agent,
+                    log.Level,
+                    log.Message,
+                    log.IsDetailed,
+                    log.ExecutionId))
+                .FirstOrDefaultAsync(cancellationToken);
+
             await eventPublisher.PublishProjectEventAsync(
                 userId,
                 projectId,
                 ServerEventTopics.LogsUpdated,
-                new { projectId, executionId },
+                new { projectId, executionId, logEntry = latestExecutionLog },
                 cancellationToken);
 
             // 11. Fire-and-forget the pipeline on a background thread
@@ -757,37 +775,130 @@ public class AgentOrchestrationService(
         return await StopExecutionAsync(executionId, "paused");
     }
 
-    public async Task<bool> ResumeExecutionAsync(
+    public Task<bool> ResumeExecutionAsync(
         string projectId,
         string executionId,
         int userId,
         CancellationToken cancellationToken = default)
+        => ResumeOrRecoverPersistedExecutionAsync(
+            projectId,
+            executionId,
+            requestedUserId: userId,
+            recoveringInterruptedExecution: false,
+            publishLifecycleEvents: false,
+            cancellationToken);
+
+    public Task<bool> RecoverExecutionAsync(
+        string projectId,
+        string executionId,
+        CancellationToken cancellationToken = default)
+        => ResumeOrRecoverPersistedExecutionAsync(
+            projectId,
+            executionId,
+            requestedUserId: null,
+            recoveringInterruptedExecution: true,
+            publishLifecycleEvents: true,
+            cancellationToken);
+
+    public async Task<int> RecoverInterruptedExecutionsAsync(CancellationToken cancellationToken = default)
     {
-        var pausedExecution = await db.AgentExecutions
+        var recoverableExecutions = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(execution =>
+                execution.ParentExecutionId == null &&
+                (execution.Status == "running" || execution.Status == "queued"))
+            .OrderBy(execution => execution.StartedAtUtc)
+            .Select(execution => new
+            {
+                execution.ProjectId,
+                execution.Id,
+            })
+            .ToListAsync(cancellationToken);
+
+        var recoveredCount = 0;
+        foreach (var execution in recoverableExecutions)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var wasAlreadyActive = ActiveExecutions.ContainsKey(execution.Id);
+            try
+            {
+                var recovered = await RecoverExecutionAsync(
+                    execution.ProjectId,
+                    execution.Id,
+                    cancellationToken);
+                if (recovered && !wasAlreadyActive)
+                    recoveredCount++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Execution {ExecutionId}: failed to recover interrupted execution during startup",
+                    execution.Id);
+            }
+        }
+
+        return recoveredCount;
+    }
+
+    private async Task<bool> ResumeOrRecoverPersistedExecutionAsync(
+        string projectId,
+        string executionId,
+        int? requestedUserId,
+        bool recoveringInterruptedExecution,
+        bool publishLifecycleEvents,
+        CancellationToken cancellationToken)
+    {
+        var persistedExecution = await db.AgentExecutions
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                e => e.Id == executionId && e.ProjectId == projectId,
+                execution => execution.Id == executionId && execution.ProjectId == projectId,
                 cancellationToken);
 
-        if (pausedExecution is null)
+        if (persistedExecution is null)
             return false;
 
-        if (!string.Equals(pausedExecution.Status, "paused", StringComparison.OrdinalIgnoreCase))
+        if (recoveringInterruptedExecution)
+        {
+            if (!IsRecoverableInterruptedExecutionStatus(persistedExecution.Status))
+                return false;
+        }
+        else if (!string.Equals(persistedExecution.Status, "paused", StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidOperationException("Only paused executions can be resumed.");
+        }
 
         if (ActiveExecutions.ContainsKey(executionId))
-            throw new InvalidOperationException("Execution is still finishing its pause. Try resuming again in a moment.");
+        {
+            if (recoveringInterruptedExecution)
+                return true;
 
-        var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, pausedExecution.WorkItemId)
+            throw new InvalidOperationException("Execution is still finishing its pause. Try resuming again in a moment.");
+        }
+
+        var userId = requestedUserId;
+        if (userId is null)
+        {
+            if (!int.TryParse(persistedExecution.UserId, out var parsedUserId))
+            {
+                throw new InvalidOperationException(
+                    $"Execution {executionId} has invalid user id '{persistedExecution.UserId}' and cannot be recovered.");
+            }
+
+            userId = parsedUserId;
+        }
+
+        var workItem = await workItemRepository.GetByWorkItemNumberAsync(projectId, persistedExecution.WorkItemId)
             ?? throw new InvalidOperationException(
-                $"Work item #{pausedExecution.WorkItemId} for execution {executionId} could not be found.");
+                $"Work item #{persistedExecution.WorkItemId} for execution {executionId} could not be found.");
 
         var childWorkItems = new List<Models.WorkItemDto>();
         await CollectDescendantsAsync(projectId, workItem.ChildWorkItemNumbers, childWorkItems);
 
         var project = await db.Projects
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken)
+            .FirstOrDefaultAsync(projectEntity => projectEntity.Id == projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
         if (string.IsNullOrWhiteSpace(project.Repo))
@@ -795,57 +906,65 @@ public class AgentOrchestrationService(
 
         var userRole = await db.UserProfiles
             .AsNoTracking()
-            .Where(u => u.Id == userId)
-            .Select(u => u.Role)
+            .Where(profile => profile.Id == userId.Value)
+            .Select(profile => profile.Role)
             .FirstOrDefaultAsync(cancellationToken);
         var normalizedRole = UserRoles.Normalize(userRole);
         var tierPolicy = TierPolicyCatalog.Get(normalizedRole);
 
-        var activeExecutions = await db.AgentExecutions
-            .AsNoTracking()
-            .CountAsync(
-                e => e.UserId == userId.ToString() &&
-                     e.ParentExecutionId == null &&
-                     e.Status == "running" &&
-                     e.Id != executionId,
-                cancellationToken);
-        if (activeExecutions >= tierPolicy.MaxActiveAgentExecutions)
+        if (!recoveringInterruptedExecution)
         {
-            throw new InvalidOperationException(
-                $"Active execution limit reached for the '{tierPolicy.Tier}' tier ({tierPolicy.MaxActiveAgentExecutions}).");
+            var activeExecutions = await db.AgentExecutions
+                .AsNoTracking()
+                .CountAsync(
+                    execution => execution.UserId == userId.Value.ToString() &&
+                                 execution.ParentExecutionId == null &&
+                                 execution.Status == "running" &&
+                                 execution.Id != executionId,
+                    cancellationToken);
+            if (activeExecutions >= tierPolicy.MaxActiveAgentExecutions)
+            {
+                throw new InvalidOperationException(
+                    $"Active execution limit reached for the '{tierPolicy.Tier}' tier ({tierPolicy.MaxActiveAgentExecutions}).");
+            }
         }
 
         var repoFullName = project.Repo;
-        var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId, repoFullName, cancellationToken);
+        var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId.Value, repoFullName, cancellationToken);
         var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
             accessToken,
             repoFullName,
             requestedBranch: null,
             cancellationToken);
 
-        var branchName = string.IsNullOrWhiteSpace(pausedExecution.BranchName)
+        var branchName = string.IsNullOrWhiteSpace(persistedExecution.BranchName)
             ? null
-            : pausedExecution.BranchName.Trim();
+            : persistedExecution.BranchName.Trim();
         if (string.IsNullOrWhiteSpace(branchName))
-            throw new InvalidOperationException("Paused execution is missing its branch name and cannot be resumed.");
+        {
+            throw new InvalidOperationException(
+                recoveringInterruptedExecution
+                    ? "Interrupted execution is missing its branch name and cannot be recovered."
+                    : "Paused execution is missing its branch name and cannot be resumed.");
+        }
 
-        var pipeline = BuildPipelineFromExecutionAgents(pausedExecution.Agents);
+        var pipeline = BuildPipelineFromExecutionAgents(persistedExecution.Agents);
         if (pipeline.Length == 0)
         {
-            pipeline = ResolveDefaultPipeline(pausedExecution.ExecutionMode);
+            pipeline = ResolveDefaultPipeline(persistedExecution.ExecutionMode);
             pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             logger.LogWarning(
-                "Execution {ExecutionId}: paused execution had no reconstructable agent pipeline; falling back to the default pipeline with {PhaseCount} roles",
+                "Execution {ExecutionId}: persisted execution had no reconstructable agent pipeline; falling back to the default pipeline with {PhaseCount} roles",
                 executionId,
                 pipeline.SelectMany(group => group).Count());
         }
 
         var priorPhaseResults = await db.AgentPhaseResults
             .AsNoTracking()
-            .Where(result => result.ExecutionId == pausedExecution.Id)
+            .Where(result => result.ExecutionId == persistedExecution.Id)
             .OrderBy(result => result.PhaseOrder)
             .ToListAsync(cancellationToken);
-        var carryForwardOutputs = BuildResumeCarryForwardOutputs(priorPhaseResults, pausedExecution.Agents);
+        var carryForwardOutputs = BuildResumeCarryForwardOutputs(priorPhaseResults, persistedExecution.Agents);
 
         var client = httpClientFactory.CreateClient("GitHub");
         var resumeFromRemoteBranch = await BranchExistsAsync(
@@ -856,15 +975,15 @@ public class AgentOrchestrationService(
             cancellationToken);
 
         var retryPlan = new RetryExecutionPlan(
-            SourceExecutionId: pausedExecution.Id,
-            SourceStatus: pausedExecution.Status,
+            SourceExecutionId: persistedExecution.Id,
+            SourceStatus: persistedExecution.Status,
             ReuseBranchName: branchName,
-            ReusePullRequestUrl: pausedExecution.PullRequestUrl,
-            ReusePullRequestNumber: TryParsePullRequestNumber(pausedExecution.PullRequestUrl),
-            ReusePullRequestTitle: pausedExecution.PullRequestTitle,
-            PriorProgressEstimate: Math.Clamp(pausedExecution.Progress, 0, 1),
+            ReusePullRequestUrl: persistedExecution.PullRequestUrl,
+            ReusePullRequestNumber: TryParsePullRequestNumber(persistedExecution.PullRequestUrl),
+            ReusePullRequestTitle: persistedExecution.PullRequestTitle,
+            PriorProgressEstimate: Math.Clamp(persistedExecution.Progress, 0, 1),
             CarryForwardOutputs: carryForwardOutputs,
-            RetryContextMarkdown: BuildExecutionResumeContext(pausedExecution, priorPhaseResults),
+            RetryContextMarkdown: BuildExecutionResumeContext(persistedExecution, priorPhaseResults),
             ResumeInPlace: true,
             ResumeFromRemoteBranch: resumeFromRemoteBranch);
 
@@ -872,14 +991,22 @@ public class AgentOrchestrationService(
         var carriedRoleCount = CountCarryForwardRoles(pipeline, carryForwardOutputs);
         var resumedProgress = Math.Clamp(
             Math.Max(
-                Math.Clamp(pausedExecution.Progress, 0, 1),
+                Math.Clamp(persistedExecution.Progress, 0, 1),
                 totalRoles == 0 ? 0 : (double)carriedRoleCount / totalRoles),
             0,
             IncompleteProgressCeiling);
+        var resumedPhaseLabel = carriedRoleCount > 0
+            ? (recoveringInterruptedExecution ? "Recovering prior progress" : "Resuming prior progress")
+            : (recoveringInterruptedExecution ? "Recovering after service restart" : "Resuming paused execution");
+        var lifecycleLogMessage = recoveringInterruptedExecution
+            ? (resumeFromRemoteBranch
+                ? $"Execution {executionId} recovered after service restart and is continuing from the latest pushed branch state."
+                : $"Execution {executionId} recovered after service restart, but branch '{branchName}' was not found remotely; continuing from the current base branch state.")
+            : $"Execution {executionId} resumed from paused state";
 
         var trackedExecution = await db.AgentExecutions
             .FirstOrDefaultAsync(
-                e => e.Id == executionId && e.ProjectId == projectId,
+                execution => execution.Id == executionId && execution.ProjectId == projectId,
                 cancellationToken);
         if (trackedExecution is null)
             return false;
@@ -888,6 +1015,9 @@ public class AgentOrchestrationService(
         if (!ActiveExecutions.TryAdd(executionId, (cts, "cancelled")))
         {
             cts.Dispose();
+            if (recoveringInterruptedExecution)
+                return true;
+
             throw new InvalidOperationException("Execution is already active.");
         }
 
@@ -895,24 +1025,79 @@ public class AgentOrchestrationService(
         {
             trackedExecution.Status = "running";
             trackedExecution.CompletedAtUtc = null;
-            trackedExecution.CurrentPhase = carriedRoleCount > 0 ? "Resuming prior progress" : "Resuming paused execution";
+            trackedExecution.CurrentPhase = resumedPhaseLabel;
             trackedExecution.Progress = resumedProgress;
             trackedExecution.Agents = BuildAgentInfoList(pipeline, carryForwardOutputs);
             await db.SaveChangesAsync(cancellationToken);
 
-            await workItemRepository.UpdateAsync(projectId, workItem.WorkItemNumber,
+            await workItemRepository.UpdateAsync(
+                projectId,
+                workItem.WorkItemNumber,
                 new UpdateWorkItemRequest(
-                    Title: null, Description: null, Priority: null, Difficulty: null,
-                    State: "In Progress (AI)", AssignedTo: null, Tags: null, IsAI: null,
-                    ParentWorkItemNumber: null, LevelId: null));
+                    Title: null,
+                    Description: null,
+                    Priority: null,
+                    Difficulty: null,
+                    State: "In Progress (AI)",
+                    AssignedTo: null,
+                    Tags: null,
+                    IsAI: null,
+                    ParentWorkItemNumber: null,
+                    LevelId: null));
 
             await WriteLogEntryAsync(
                 db,
                 projectId,
                 "System",
                 "info",
-                $"Execution {executionId} resumed from paused state",
+                lifecycleLogMessage,
                 executionId: executionId);
+
+            if (publishLifecycleEvents)
+            {
+                var latestExecutionLog = await db.LogEntries
+                    .AsNoTracking()
+                    .Where(log => log.ProjectId == projectId && log.ExecutionId == executionId)
+                    .OrderByDescending(log => log.Time)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => new LogEntryDto(
+                        log.Time,
+                        log.Agent,
+                        log.Level,
+                        log.Message,
+                        log.IsDetailed,
+                        log.ExecutionId))
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                await eventPublisher.PublishProjectEventAsync(
+                    userId.Value,
+                    projectId,
+                    ServerEventTopics.AgentsUpdated,
+                    new
+                    {
+                        projectId,
+                        executionId,
+                        execution = CreateInitializationExecutionDto(trackedExecution),
+                    },
+                    cancellationToken);
+                await eventPublisher.PublishProjectEventAsync(
+                    userId.Value,
+                    projectId,
+                    ServerEventTopics.WorkItemsUpdated,
+                    new { projectId, workItemNumber = workItem.WorkItemNumber },
+                    cancellationToken);
+                await eventPublisher.PublishUserEventAsync(
+                    userId.Value,
+                    ServerEventTopics.ProjectsUpdated,
+                    new { projectId },
+                    cancellationToken);
+                await eventPublisher.PublishProjectEventAsync(
+                    userId.Value,
+                    projectId,
+                    ServerEventTopics.LogsUpdated,
+                    new { projectId, executionId, logEntry = latestExecutionLog },
+                    cancellationToken);
+            }
 
             var (commitAuthorName, commitAuthorEmail) = ResolveCommitAuthor(
                 project.CommitAuthorMode,
@@ -929,15 +1114,18 @@ public class AgentOrchestrationService(
                 branchName,
                 commitAuthorName,
                 commitAuthorEmail,
-                userId,
+                userId.Value,
                 ModelKeys.Haiku,
                 pipeline,
-                    ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
+                ResolveMaxConcurrentAgentsPerTask(
+                    tierPolicy.MaxConcurrentAgentsPerTask,
+                    workItem.AssignmentMode,
+                    workItem.AssignedAgentCount),
                 pullRequestTargetBranch,
                 retryPlan,
                 retryPlan.ReusePullRequestNumber ?? 0,
-                string.IsNullOrWhiteSpace(pausedExecution.ParentExecutionId),
-                pausedExecution.ParentExecutionId,
+                string.IsNullOrWhiteSpace(persistedExecution.ParentExecutionId),
+                persistedExecution.ParentExecutionId,
                 cts.Token), CancellationToken.None);
 
             return true;
@@ -952,15 +1140,16 @@ public class AgentOrchestrationService(
             {
                 var executionToRestore = await db.AgentExecutions
                     .FirstOrDefaultAsync(
-                        e => e.Id == executionId && e.ProjectId == projectId,
+                        execution => execution.Id == executionId && execution.ProjectId == projectId,
                         CancellationToken.None);
                 if (executionToRestore is not null)
                 {
-                    executionToRestore.Status = "paused";
-                    executionToRestore.CurrentPhase = pausedExecution.CurrentPhase ?? "Paused";
-                    executionToRestore.Progress = pausedExecution.Progress;
-                    executionToRestore.CompletedAtUtc = pausedExecution.CompletedAtUtc;
-                    executionToRestore.Agents = pausedExecution.Agents
+                    executionToRestore.Status = persistedExecution.Status;
+                    executionToRestore.CurrentPhase = persistedExecution.CurrentPhase ??
+                        (recoveringInterruptedExecution ? "Interrupted" : "Paused");
+                    executionToRestore.Progress = persistedExecution.Progress;
+                    executionToRestore.CompletedAtUtc = persistedExecution.CompletedAtUtc;
+                    executionToRestore.Agents = persistedExecution.Agents
                         .Select(agent => new AgentInfo
                         {
                             Role = agent.Role,
@@ -976,9 +1165,10 @@ public class AgentOrchestrationService(
             {
                 logger.LogWarning(
                     restoreEx,
-                    "Execution {ExecutionId}: failed to restore paused state after resume setup error",
+                    "Execution {ExecutionId}: failed to restore persisted state after relaunch setup error",
                     executionId);
             }
+
             throw;
         }
     }
@@ -1292,19 +1482,17 @@ public class AgentOrchestrationService(
         IRepoSandbox? sandbox = null;
         string accessToken = string.Empty;
 
-        Task PublishAgentsUpdatedAsync() =>
-            scopedEventPublisher.PublishProjectEventAsync(
-                userId,
-                projectId,
-                ServerEventTopics.AgentsUpdated,
-                new { projectId, executionId });
+        Task WithDbLockAsync(Func<Task> action) => dbQueue.EnqueueAsync(async () =>
+        {
+            ThrowIfExecutionDeleted(executionId);
+            await action();
+        });
 
-        Task PublishLogsUpdatedAsync() =>
-            scopedEventPublisher.PublishProjectEventAsync(
-                userId,
-                projectId,
-                ServerEventTopics.LogsUpdated,
-                new { projectId, executionId });
+        Task<T> WithDbResultAsync<T>(Func<Task<T>> action) => dbQueue.EnqueueAsync(async () =>
+        {
+            ThrowIfExecutionDeleted(executionId);
+            return await action();
+        });
 
         Task PublishWorkItemsUpdatedAsync() =>
             scopedEventPublisher.PublishProjectEventAsync(
@@ -1319,17 +1507,53 @@ public class AgentOrchestrationService(
                 ServerEventTopics.ProjectsUpdated,
                 new { projectId });
 
-        Task WithDbLockAsync(Func<Task> action) => dbQueue.EnqueueAsync(async () =>
+        async Task<AgentExecutionDto?> LoadExecutionSnapshotAsync()
         {
-            ThrowIfExecutionDeleted(executionId);
-            await action();
-        });
+            var currentExecution = await WithDbResultAsync(async () =>
+                await scopedDb.AgentExecutions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        execution => execution.Id == executionId && execution.ProjectId == projectId,
+                        CancellationToken.None));
 
-        Task<T> WithDbResultAsync<T>(Func<Task<T>> action) => dbQueue.EnqueueAsync(async () =>
+            return currentExecution is null ? null : CreateInitializationExecutionDto(currentExecution);
+        }
+
+        async Task<LogEntryDto?> LoadLatestExecutionLogAsync()
+            => await WithDbResultAsync(async () =>
+                await scopedDb.LogEntries
+                    .AsNoTracking()
+                    .Where(log => log.ProjectId == projectId && log.ExecutionId == executionId)
+                    .OrderByDescending(log => log.Time)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => new LogEntryDto(
+                        log.Time,
+                        log.Agent,
+                        log.Level,
+                        log.Message,
+                        log.IsDetailed,
+                        log.ExecutionId))
+                    .FirstOrDefaultAsync(CancellationToken.None));
+
+        async Task PublishAgentsUpdatedAsync()
         {
-            ThrowIfExecutionDeleted(executionId);
-            return await action();
-        });
+            var executionSnapshot = await LoadExecutionSnapshotAsync();
+            await scopedEventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.AgentsUpdated,
+                new { projectId, executionId, execution = executionSnapshot });
+        }
+
+        async Task PublishLogsUpdatedAsync()
+        {
+            var logEntry = await LoadLatestExecutionLogAsync();
+            await scopedEventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.LogsUpdated,
+                new { projectId, executionId, logEntry });
+        }
 
         async Task UpdateOrchestrationProgressAsync(int completedSubFlows, int totalSubFlows, string currentPhase)
         {
@@ -1363,10 +1587,26 @@ public class AgentOrchestrationService(
                     externalCancellation);
             }
 
-            if (string.Equals(existingExecution.Status, "completed", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(existingExecution.Status, "running", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(existingExecution.Status, "queued", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(existingExecution.Status, "completed", StringComparison.OrdinalIgnoreCase))
             {
+                return existingExecution.Id;
+            }
+
+            if (IsRecoverableInterruptedExecutionStatus(existingExecution.Status))
+            {
+                if (ActiveExecutions.ContainsKey(existingExecution.Id))
+                    return existingExecution.Id;
+
+                var recovered = await orchestrationService.RecoverExecutionAsync(
+                    projectId,
+                    existingExecution.Id,
+                    externalCancellation);
+                if (!recovered)
+                {
+                    throw new InvalidOperationException(
+                        $"Interrupted sub-flow execution {existingExecution.Id} could not be recovered.");
+                }
+
                 return existingExecution.Id;
             }
 
@@ -1442,6 +1682,7 @@ public class AgentOrchestrationService(
                 .ToArray();
             var parallelism = Math.Clamp(Math.Min(maxConcurrentAgentsPerTask, MaxParallelSubFlows), 1, MaxParallelSubFlows);
             var completedSubFlows = 0;
+            var mergedChildBranchesPendingCleanup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             await WithDbLockAsync(async () =>
                 await WriteLogEntryAsync(
@@ -1539,20 +1780,33 @@ public class AgentOrchestrationService(
                             executionId: executionId));
                     await PublishLogsUpdatedAsync();
 
+                    var childBranchStillExists = await BranchExistsAsync(
+                        httpClientFactory.CreateClient("GitHub"),
+                        accessToken,
+                        repoFullName,
+                        childBranchName,
+                        externalCancellation);
+                    if (!childBranchStillExists)
+                    {
+                        await WithDbLockAsync(async () =>
+                            await WriteLogEntryAsync(
+                                scopedDb,
+                                projectId,
+                                "System",
+                                "warn",
+                                $"Sub-flow branch '{childBranchName}' was already gone before merge; assuming its commits were already incorporated into '{sandbox.BranchName}'.",
+                                executionId: executionId));
+                        await PublishLogsUpdatedAsync();
+                        continue;
+                    }
+
                     await sandbox.MergeBranchAsync(
                         accessToken,
                         childBranchName,
                         commitAuthorName,
                         commitAuthorEmail,
                         externalCancellation);
-
-                    await TryDeleteRemoteBranchIfSafeAsync(
-                        accessToken,
-                        repoFullName,
-                        childBranchName,
-                        externalCancellation,
-                        protectedBranchName: sandbox.BranchName,
-                        projectId: projectId);
+                    mergedChildBranchesPendingCleanup.Add(childBranchName);
                 }
 
                 completedSubFlows += terminalExecutions.Length;
@@ -1578,6 +1832,17 @@ public class AgentOrchestrationService(
                     : "Publishing merged sub-flow batch");
 
             await sandbox.PushBranchAsync(accessToken, externalCancellation);
+
+            foreach (var childBranchName in mergedChildBranchesPendingCleanup)
+            {
+                await TryDeleteRemoteBranchIfSafeAsync(
+                    accessToken,
+                    repoFullName,
+                    childBranchName,
+                    externalCancellation,
+                    protectedBranchName: sandbox.BranchName,
+                    projectId: projectId);
+            }
 
             var refreshedDirectChildren = new List<Models.WorkItemDto>();
             await CollectDirectChildrenAsync(projectId, parentWorkItem.ChildWorkItemNumbers, refreshedDirectChildren);

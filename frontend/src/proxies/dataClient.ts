@@ -206,17 +206,19 @@ export function useWorkItemLevels(projectId: string | undefined) {
 export function useExecutions(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], {
     staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
-    refetchOnReconnect: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchInterval: options?.pollingInterval ?? EXECUTIONS_POLL_MS,
     refetchIntervalInBackground: true,
   })
 }
 
-export function useLogs(projectId: string | undefined) {
+export function useLogs(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], {
-    refetchInterval: LOGS_POLL_MS,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: options?.pollingInterval ?? LOGS_POLL_MS,
+    refetchIntervalInBackground: true,
   })
 }
 

@@ -67,21 +67,6 @@ public class AgentsController(
         var executionId = await orchestrationService.StartExecutionAsync(
             projectId, request.WorkItemNumber, userId, request.TargetBranch);
 
-        await eventPublisher.PublishProjectEventAsync(
-            userId,
-            projectId,
-            ServerEventTopics.AgentsUpdated,
-            new { projectId, executionId });
-        await eventPublisher.PublishProjectEventAsync(
-            userId,
-            projectId,
-            ServerEventTopics.WorkItemsUpdated,
-            new { projectId, workItemNumber = request.WorkItemNumber });
-        await eventPublisher.PublishUserEventAsync(
-            userId,
-            ServerEventTopics.ProjectsUpdated,
-            new { projectId });
-
         return Accepted(new { executionId });
     }
 
@@ -213,21 +198,6 @@ public class AgentsController(
         var newExecutionId = await orchestrationService.RetryExecutionAsync(projectId, executionId, userId);
         if (newExecutionId is null)
             return NotFound();
-
-        await eventPublisher.PublishProjectEventAsync(
-            userId,
-            projectId,
-            ServerEventTopics.AgentsUpdated,
-            new { projectId, executionId = newExecutionId, retriedFromExecutionId = executionId });
-        await eventPublisher.PublishProjectEventAsync(
-            userId,
-            projectId,
-            ServerEventTopics.WorkItemsUpdated,
-            new { projectId });
-        await eventPublisher.PublishUserEventAsync(
-            userId,
-            ServerEventTopics.ProjectsUpdated,
-            new { projectId });
 
         return Accepted(new { executionId = newExecutionId });
     }

@@ -8,7 +8,7 @@ namespace Fleet.Server.Realtime;
 public sealed class ServerEventPublisher(
     ILogger<ServerEventPublisher> logger) : IServerEventPublisher
 {
-    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(10);
     private readonly ConcurrentDictionary<Guid, Subscription> _subscriptions = new();
 
     public async Task SubscribeAsync(
