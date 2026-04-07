@@ -369,6 +369,7 @@ public class ChatService(
             var performedWorkItemMutation = false;
 
             var outputTokenCap = AdaptiveTokenCap.DefaultCap;
+            var errorRecovery = new ErrorRecoveryLadder();
 
             for (var loop = 0; loop < maxLoops; loop++)
             {
@@ -551,6 +552,29 @@ public class ChatService(
 
                     if (exceededToolCallLimit)
                         break;
+
+                    // Check error recovery ladder after processing all tool results
+                    var recoveryLevel = RecoveryLevel.None;
+                    foreach (var msg in llmMessages.TakeLast(response.ToolCalls.Count))
+                    {
+                        if (msg.Role == "tool")
+                        {
+                            var isError = msg.Content?.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) == true;
+                            recoveryLevel = errorRecovery.RecordResult(isError);
+                        }
+                    }
+
+                    if (recoveryLevel == RecoveryLevel.Abort)
+                    {
+                        logger.LogWarning("Error recovery ladder reached abort threshold ({Errors} consecutive errors)",
+                            errorRecovery.ConsecutiveErrors);
+                        break;
+                    }
+
+                    if (recoveryLevel == RecoveryLevel.InjectHint)
+                    {
+                        llmMessages.Add(ErrorRecoveryLadder.CreateRecoveryHint(errorRecovery.ConsecutiveErrors));
+                    }
 
                     // Continue the loop so the LLM can process results
                     continue;

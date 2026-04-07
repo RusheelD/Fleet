@@ -250,6 +250,7 @@ public class AgentPhaseRunner(
         {
             await ReportProgressAsync(MinimumProgressIncrementPercent, "Starting phase", force: true);
             var outputTokenCap = AdaptiveTokenCap.DefaultCap;
+            var errorRecovery = new ErrorRecoveryLadder();
             for (var loop = 0; loop < maxToolLoops; loop++)
             {
                 // Compress context when approaching the token budget
@@ -438,6 +439,33 @@ public class AgentPhaseRunner(
                     if (totalToolCalls > maxToolCalls)
                         break;
 
+                    // Check error recovery ladder
+                    var recoveryLevel = RecoveryLevel.None;
+                    foreach (var msg in messages.TakeLast(response.ToolCalls.Count))
+                    {
+                        if (msg.Role == "tool")
+                        {
+                            var isError = msg.Content?.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) == true;
+                            recoveryLevel = errorRecovery.RecordResult(isError);
+                        }
+                    }
+
+                    if (recoveryLevel == RecoveryLevel.Abort)
+                    {
+                        logger.LogWarning("Phase {Role}: error recovery ladder reached abort ({Errors} consecutive errors)",
+                            role, errorRecovery.ConsecutiveErrors);
+                        return new PhaseResult(role, string.Empty, totalToolCalls, false,
+                            $"Aborted after {errorRecovery.ConsecutiveErrors} consecutive tool errors.",
+                            lastReportedPercent, lastProgressSummary,
+                            tokenTracker?.TotalInputTokens ?? 0,
+                            tokenTracker?.TotalOutputTokens ?? 0);
+                    }
+
+                    if (recoveryLevel == RecoveryLevel.InjectHint)
+                    {
+                        messages.Add(ErrorRecoveryLadder.CreateRecoveryHint(errorRecovery.ConsecutiveErrors));
+                    }
+
                     continue;
                 }
 
@@ -483,7 +511,15 @@ public class AgentPhaseRunner(
         var tool = toolRegistry.Get(toolCall.Name);
         if (tool is null && mcpToolSession.HasTool(toolCall.Name))
         {
-            return await mcpToolSession.ExecuteAsync(toolCall.Name, toolCall.ArgumentsJson, ct);
+            try
+            {
+                return await mcpToolSession.ExecuteAsync(toolCall.Name, toolCall.ArgumentsJson, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "MCP tool {ToolName} failed in agent phase {Role}", toolCall.Name, role);
+                return $"Error executing tool '{toolCall.Name}': {ex.Message}";
+            }
         }
 
         if (tool is null)
