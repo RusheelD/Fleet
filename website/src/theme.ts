@@ -3,4 +3,4 @@ export {
     warmDarkCompactTheme,
     warmLightTheme,
     warmLightCompactTheme,
-} from '../../frontend/src/theme'
+} from './generated/frontend-brand/theme'

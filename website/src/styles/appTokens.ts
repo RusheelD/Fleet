@@ -3,7 +3,7 @@ import {
     appTokens as frontendAppTokens,
     APP_MOBILE_MAX_WIDTH,
     APP_MOBILE_MEDIA_QUERY,
-} from '../../../frontend/src/styles/appTokens'
+} from '../generated/frontend-brand/appTokens'
 
 const cssVar = (name: string) => `var(${name})`
 

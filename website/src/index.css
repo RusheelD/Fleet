@@ -1,4 +1,4 @@
-@import "../../frontend/src/index.css";
+@import "./generated/frontend-brand/index.css";
 
 :root {
   --app-space-3xl: 3rem;

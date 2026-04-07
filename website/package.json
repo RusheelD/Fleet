@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "sync-brand": "node ./scripts/sync-frontend-brand.mjs",
+    "dev": "npm run sync-brand && vite",
+    "build": "npm run sync-brand && tsc -b && vite build",
+    "lint": "npm run sync-brand && eslint .",
+    "preview": "npm run sync-brand && vite preview"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.73.1",

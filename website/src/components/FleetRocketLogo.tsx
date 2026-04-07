@@ -1,1 +1,1 @@
-export { FleetRocketLogo } from '../../../frontend/src/components/shared/FleetRocketLogo'
+export { FleetRocketLogo } from '../generated/frontend-brand/FleetRocketLogo'

@@ -7,6 +7,10 @@ on:
       - main
     paths:
       - "website/**"
+      - "frontend/src/theme.ts"
+      - "frontend/src/index.css"
+      - "frontend/src/styles/**"
+      - "frontend/src/components/shared/FleetRocketLogo.tsx"
       - ".github/workflows/azure-static-web-apps-black-island-0c460421e.yml"
   pull_request:
     types: [opened, synchronize, reopened, closed]
@@ -14,6 +18,10 @@ on:
       - website
     paths:
       - "website/**"
+      - "frontend/src/theme.ts"
+      - "frontend/src/index.css"
+      - "frontend/src/styles/**"
+      - "frontend/src/components/shared/FleetRocketLogo.tsx"
       - ".github/workflows/azure-static-web-apps-black-island-0c460421e.yml"
 
 jobs:
