@@ -622,6 +622,10 @@ public class ChatService(
                         ? "Work-item generation completed."
                         : "Response completed.");
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
+
+                // Fire-and-forget: extract memories from the conversation
+                FireBackgroundMemoryExtraction(userId, projectId, llmMessages);
+
                 return new SendMessageResponseDto(sessionId, assistantMessage, [.. toolEvents], null);
             }
 
@@ -691,6 +695,38 @@ public class ChatService(
             heartbeatCts?.Dispose();
             ReleaseInFlightRequest(requestKey, sessionCts);
         }
+    }
+
+    /// <summary>
+    /// Fire-and-forget background memory extraction from a conversation.
+    /// Uses a new DI scope so it doesn't depend on the request lifetime.
+    /// </summary>
+    private void FireBackgroundMemoryExtraction(
+        int userId,
+        string? projectId,
+        IReadOnlyList<LLMMessage> llmMessages)
+    {
+        if (_serviceScopeFactory is null || llmMessages.Count < 4)
+            return;
+
+        // Snapshot the messages so the background task owns its own copy
+        var snapshot = llmMessages.ToList();
+        var factory = _serviceScopeFactory;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = factory.CreateScope();
+                var extractor = scope.ServiceProvider.GetService<IMemoryExtractor>();
+                if (extractor is not null)
+                    await extractor.ExtractAndSaveAsync(userId, projectId, snapshot, CancellationToken.None);
+            }
+            catch
+            {
+                // Non-critical — swallow all errors
+            }
+        });
     }
 
     private async Task<SendMessageResponseDto> StartDeferredGenerateWorkItemsAsync(
