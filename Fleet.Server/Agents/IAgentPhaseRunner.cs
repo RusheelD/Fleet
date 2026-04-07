@@ -26,7 +26,7 @@ public interface IAgentPhaseRunner
     /// <param name="role">The agent role to run.</param>
     /// <param name="userMessage">The user-level instruction (work item context + previous phase outputs).</param>
     /// <param name="toolContext">Shared context with sandbox, credentials, etc.</param>
-    /// <param name="modelOverride">Optional model override (e.g., opus for complex tasks). Uses GenerateModel if null.</param>
+    /// <param name="modelOverride">Optional model override (e.g., premium for complex tasks). Uses GenerateModel if null.</param>
     /// <param name="maxTokens">Optional max output tokens. Uses the provider default (16384) if null.</param>
     /// <param name="onProgress">Optional callback invoked after every few tool calls to report live progress.</param>
     /// <param name="onToolCall">Optional callback invoked after each tool call to log detailed entries.</param>

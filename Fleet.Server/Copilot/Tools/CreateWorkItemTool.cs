@@ -122,7 +122,7 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             var priority = 3;
             if (root.TryGetProperty("priority", out var p))
             {
-                // Gemini returns string enums; other providers may return integers
+                // Some providers return string enums; others may return integers
                 if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var pv))
                     priority = pv;
                 else if (p.ValueKind == JsonValueKind.String && int.TryParse(p.GetString(), out var ps))

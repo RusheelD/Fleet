@@ -18,9 +18,9 @@ public class ModelCatalog : IModelCatalog
         }
 
         // Ensure defaults if configuration doesn't provide them.
-        SetDefault("Haiku", "gpt-5.2-codex");
-        SetDefault("Sonnet", "gpt-5.2-codex");
-        SetDefault("Opus", "gpt-5.2-codex");
+        SetDefault("Fast", "gpt-5.2-codex");
+        SetDefault("Standard", "gpt-5.2-codex");
+        SetDefault("Premium", "gpt-5.2-codex");
     }
 
     private void SetDefault(string key, string modelName)

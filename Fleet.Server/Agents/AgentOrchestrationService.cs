@@ -204,7 +204,7 @@ public class AgentOrchestrationService(
 
         try
         {
-            var model = modelCatalog.Get(ModelKeys.Haiku);
+            var model = modelCatalog.Get(ModelKeys.Fast);
             var messages = new List<LLMMessage>
             {
                 new() { Role = "user", Content = workItemContext }
@@ -275,7 +275,7 @@ public class AgentOrchestrationService(
     /// Arranges selected roles into the standard <c>AgentRole[][]</c> pipeline format,
     /// preserving the canonical dependency order.
     /// </summary>
-        private static AgentRole[][] ArrangePipeline(List<AgentRole> roles)
+    private static AgentRole[][] ArrangePipeline(List<AgentRole> roles)
     {
         // Ensure Manager and Planner are always present
         if (!roles.Contains(AgentRole.Manager))
@@ -508,7 +508,7 @@ public class AgentOrchestrationService(
             var executionMode = shouldOrchestrateDirectChildren
                 ? AgentExecutionModes.Orchestration
                 : AgentExecutionModes.Standard;
-            var selectedModelKey = ModelKeys.Haiku;
+            var selectedModelKey = ModelKeys.Fast;
             var pipeline = ResolveDefaultPipeline(executionMode);
             pipeline = ApplyAssignedAgentLimit(pipeline, workItem.AssignmentMode, workItem.AssignedAgentCount);
             if (directChildWorkItems.Count > 0 && !shouldOrchestrateDirectChildren)
@@ -1137,7 +1137,7 @@ public class AgentOrchestrationService(
                 commitAuthorName,
                 commitAuthorEmail,
                 userId.Value,
-                ModelKeys.Haiku,
+                ModelKeys.Fast,
                 pipeline,
                 ResolveMaxConcurrentAgentsPerTask(
                     tierPolicy.MaxConcurrentAgentsPerTask,
@@ -4337,13 +4337,13 @@ public class AgentOrchestrationService(
 
     private static class ModelKeys
     {
-        public const string Haiku = "Haiku";
-        public const string Sonnet = "Sonnet";
-        public const string Opus = "Opus";
+        public const string Fast = "Fast";
+        public const string Standard = "Standard";
+        public const string Premium = "Premium";
     }
 
     /// <summary>
-    /// Summarizes a phase's output into a compact form using a cheap Haiku call.
+    /// Summarizes a phase's output into a compact form using a cheap Fast-tier call.
     /// This dramatically reduces the context window size for downstream phases,
     /// cutting token costs proportionally to the number of phases.
     /// </summary>
@@ -4353,7 +4353,7 @@ public class AgentOrchestrationService(
         if (string.IsNullOrWhiteSpace(fullOutput) || fullOutput.Length < 500)
             return fullOutput; // Not worth summarizing tiny outputs
 
-        var summaryModel = modelCatalog.Get(ModelKeys.Haiku);
+        var summaryModel = modelCatalog.Get(ModelKeys.Fast);
         var systemPrompt =
             "You are a concise technical summarizer. Summarize the given agent phase output into a compact form " +
             "that preserves ALL actionable information: files changed, APIs added/modified, key decisions, " +

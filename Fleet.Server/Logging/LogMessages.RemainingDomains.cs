@@ -43,24 +43,6 @@ public static partial class LogMessages
     [LoggerMessage(EventId = 8001, Level = LogLevel.Information, Message = "Search completed. resultCount={resultCount}")]
     public static partial void SearchCompleted(this ILogger logger, int resultCount);
 
-    [LoggerMessage(EventId = 9000, Level = LogLevel.Debug, Message = "Claude request body. body={body}")]
-    public static partial void LlmClaudeRequest(this ILogger logger, string body);
-
-    [LoggerMessage(EventId = 9001, Level = LogLevel.Error, Message = "Claude API error. status={status} body={body}")]
-    public static partial void LlmClaudeApiError(this ILogger logger, int status, string body);
-
-    [LoggerMessage(EventId = 9002, Level = LogLevel.Debug, Message = "Claude response body. body={body}")]
-    public static partial void LlmClaudeResponse(this ILogger logger, string body);
-
-    [LoggerMessage(EventId = 9010, Level = LogLevel.Debug, Message = "Gemini request body. body={body}")]
-    public static partial void LlmGeminiRequest(this ILogger logger, string body);
-
-    [LoggerMessage(EventId = 9011, Level = LogLevel.Error, Message = "Gemini API error. status={status} body={body}")]
-    public static partial void LlmGeminiApiError(this ILogger logger, int status, string body);
-
-    [LoggerMessage(EventId = 9012, Level = LogLevel.Debug, Message = "Gemini response body. body={body}")]
-    public static partial void LlmGeminiResponse(this ILogger logger, string body);
-
     [LoggerMessage(EventId = 10000, Level = LogLevel.Warning, Message = "No GitHub token available; returning empty stats. userId={userId}")]
     public static partial void GitHubNoToken(this ILogger logger, int userId);
 

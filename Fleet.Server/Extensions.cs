@@ -30,7 +30,7 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Named clients (e.g. "Gemini") configure their own resilience handlers
+            // Named clients configure their own resilience handlers
             // with appropriate timeouts, so we don't add a global one here.
 
             // Turn on service discovery by default

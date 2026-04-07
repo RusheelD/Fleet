@@ -62,13 +62,13 @@ Fleet executions may generate and orchestrate child sub-flows when a work item i
 
 | Tier | Example Models |
 | --- | --- |
-| Free | Claude Haiku, Gemini Flash, GPT 5.1-Codex-Mini (lightweight/fast) |
-| Mid-tier | Mid-range models (e.g., Claude Sonnet, Gemini Pro, GPT Codex) |
-| Premium | Claude Opus, Gemini Pro, GPT Codex (full capability) |
+| Free | GPT 5.1-Codex-Mini or equivalent lightweight/fast deployment |
+| Mid-tier | GPT 5.2-Codex or equivalent balanced deployment |
+| Premium | GPT 5.2-Codex or equivalent full-capability deployment |
 
 ### MVP approach
 
-- Start with a **single provider** (TBD which one)
+- **Azure OpenAI** is the sole provider
 - Build the abstraction layer so swapping/adding providers is straightforward
 - Provider selection per-task or per-project is a future enhancement
 

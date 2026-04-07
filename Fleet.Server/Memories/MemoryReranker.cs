@@ -55,7 +55,7 @@ public class MemoryReranker(
 
             var userMessage = $"Query: {query}\n\nMemories:\n{candidateList}";
 
-            var model = modelCatalog.Get("Haiku");
+            var model = modelCatalog.Get("Fast");
             var request = new LLMRequest(
                 RerankPrompt,
                 [new LLMMessage { Role = "user", Content = userMessage }],

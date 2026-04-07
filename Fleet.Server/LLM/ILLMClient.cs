@@ -1,8 +1,8 @@
 namespace Fleet.Server.LLM;
 
 /// <summary>
-/// Provider-agnostic LLM client. Implement this once per provider
-/// (Gemini, OpenAI, Anthropic, Ollama) and swap via configuration.
+/// Provider-agnostic LLM client. Implement this per provider
+/// (e.g. Azure OpenAI) and swap via configuration.
 /// </summary>
 public interface ILLMClient
 {

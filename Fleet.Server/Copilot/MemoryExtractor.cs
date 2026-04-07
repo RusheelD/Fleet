@@ -79,7 +79,7 @@ public class MemoryExtractor(
                 .ToList();
 
             // Use a fast/cheap model for extraction
-            var model = modelCatalog.Get("Haiku");
+            var model = modelCatalog.Get("Fast");
             var request = new LLMRequest(
                 ExtractionPrompt,
                 messagesToAnalyze,

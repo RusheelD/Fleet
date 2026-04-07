@@ -22,9 +22,9 @@ public class ModelCatalogTests
     {
         var catalog = new ModelCatalog(CreateOptions());
 
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Haiku"));
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Sonnet"));
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Opus"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Fast"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Standard"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Premium"));
     }
 
     [TestMethod]
@@ -32,8 +32,8 @@ public class ModelCatalogTests
     {
         var catalog = new ModelCatalog(CreateOptions());
 
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("sonnet"));
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("SONNET"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("standard"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("STANDARD"));
     }
 
     [TestMethod]
@@ -41,12 +41,12 @@ public class ModelCatalogTests
     {
         var catalog = new ModelCatalog(CreateOptions(new Dictionary<string, string>
         {
-            ["Sonnet"] = "my-custom-sonnet"
+            ["Standard"] = "my-custom-standard"
         }));
 
-        Assert.AreEqual("my-custom-sonnet", catalog.Get("Sonnet"));
+        Assert.AreEqual("my-custom-standard", catalog.Get("Standard"));
         // Other defaults still present
-        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Haiku"));
+        Assert.AreEqual("gpt-5.2-codex", catalog.Get("Fast"));
     }
 
     [TestMethod]
@@ -76,9 +76,9 @@ public class ModelCatalogTests
         var models = catalog.Models;
 
         Assert.IsTrue(models.ContainsKey("Custom"));
-        Assert.IsTrue(models.ContainsKey("Haiku"));
-        Assert.IsTrue(models.ContainsKey("Sonnet"));
-        Assert.IsTrue(models.ContainsKey("Opus"));
+        Assert.IsTrue(models.ContainsKey("Fast"));
+        Assert.IsTrue(models.ContainsKey("Standard"));
+        Assert.IsTrue(models.ContainsKey("Premium"));
         Assert.AreEqual(4, models.Count);
     }
 }

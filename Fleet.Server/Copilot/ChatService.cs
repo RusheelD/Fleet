@@ -350,7 +350,7 @@ public class ChatService(
                 .Concat(mcpToolSession.Definitions)
                 .ToList();
 
-            // 4. Auto-name the session before generation starts (fast Haiku call)
+            // 4. Auto-name the session before generation starts (fast model call)
             if (generateWorkItems)
             {
                 await UpdateGenerationProgressAsync(
@@ -374,7 +374,7 @@ public class ChatService(
 
             for (var loop = 0; loop < maxLoops; loop++)
             {
-                // Use Sonnet for generation, Haiku for normal chat
+                // Use Standard tier for generation, default model for normal chat
                 var modelOverride = generateWorkItems ? config.GenerateModel : null;
 
                 // Compress context when approaching the token budget
@@ -504,50 +504,50 @@ public class ChatService(
 
                         foreach (var toolCall in toolBatch.ToolCalls)
                         {
-                        // Don't count write tools (create/update/delete) toward the limit —
-                        // the LLM should be able to modify as many work items as needed
-                        if (CountsTowardToolCallLimit(toolCall, mcpToolSession))
-                        {
-                            totalToolCalls++;
-                            if (totalToolCalls > maxToolCallsTotal)
+                            // Don't count write tools (create/update/delete) toward the limit —
+                            // the LLM should be able to modify as many work items as needed
+                            if (CountsTowardToolCallLimit(toolCall, mcpToolSession))
                             {
-                                logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
-                                exceededToolCallLimit = true;
-                                break;
+                                totalToolCalls++;
+                                if (totalToolCalls > maxToolCallsTotal)
+                                {
+                                    logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
+                                    exceededToolCallLimit = true;
+                                    break;
+                                }
                             }
-                        }
 
-                        if (generateWorkItems)
-                        {
-                            await UpdateGenerationProgressAsync(
+                            if (generateWorkItems)
+                            {
+                                await UpdateGenerationProgressAsync(
+                                    projectId,
+                                    sessionId,
+                                    userId,
+                                    progress,
+                                    isGenerating: true,
+                                    generationState: ChatGenerationStates.Running,
+                                    generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...");
+                            }
+
+                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
+                            await ApplyToolResultAsync(
                                 projectId,
                                 sessionId,
                                 userId,
                                 progress,
-                                isGenerating: true,
-                                generationState: ChatGenerationStates.Running,
-                                generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...");
+                                generateWorkItems,
+                                toolEvents,
+                                llmMessages,
+                                mcpToolSession,
+                                toolCall,
+                                toolResult);
+                            if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+                                performedWorkItemMutation = true;
+                            if (exceededToolCallLimit)
+                            {
+                                break;
+                            }
                         }
-
-                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
-                        await ApplyToolResultAsync(
-                            projectId,
-                            sessionId,
-                            userId,
-                            progress,
-                            generateWorkItems,
-                            toolEvents,
-                            llmMessages,
-                            mcpToolSession,
-                            toolCall,
-                            toolResult);
-                        if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
-                            performedWorkItemMutation = true;
-                        if (exceededToolCallLimit)
-                        {
-                            break;
-                        }
-                    }
 
                     }
 
@@ -1884,7 +1884,7 @@ public class ChatService(
     }
 
     /// <summary>
-    /// Calls Haiku to generate a concise name for the chat session based on conversation context,
+    /// Calls the Fast-tier model to generate a concise name for the chat session based on conversation context,
     /// then persists it. Failures are logged but do not propagate — naming is best-effort.
     /// </summary>
     private async Task GenerateSessionNameAsync(
@@ -1912,7 +1912,7 @@ public class ChatService(
                 "You are a helpful assistant that generates concise chat session names.",
                 contextMessages,
                 Tools: null,
-                ModelOverride: config.Model); // Use Haiku for speed
+                ModelOverride: config.Model); // Use Fast tier for speed
 
             using var namingTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, namingTimeout.Token);
