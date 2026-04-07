@@ -448,17 +448,54 @@ public class ChatService(
                         ToolCalls = response.ToolCalls,
                     });
 
-                    foreach (var toolCall in response.ToolCalls)
+                    var exceededToolCallLimit = false;
+                    var toolBatches = ToolCallBatchPlanner.PartitionByReadOnly(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
+
+                    foreach (var toolBatch in toolBatches)
                     {
+                        if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
+                        {
+                            var batchResult = await ExecuteParallelToolBatchAsync(
+                                projectId,
+                                sessionId,
+                                userId,
+                                progress,
+                                generateWorkItems,
+                                toolContext,
+                                config,
+                                toolDefs,
+                                mcpToolSession,
+                                requestCancellation,
+                                maxToolCallsTotal,
+                                totalToolCalls,
+                                toolEvents,
+                                llmMessages,
+                                toolBatch.ToolCalls);
+                            totalToolCalls = batchResult.TotalToolCalls;
+                            exceededToolCallLimit = batchResult.ExceededToolCallLimit;
+                            performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
+
+                            if (exceededToolCallLimit)
+                            {
+                                break;
+                            }
+
+                            continue;
+                        }
+
+                        foreach (var toolCall in toolBatch.ToolCalls)
+                        {
                         // Don't count write tools (create/update/delete) toward the limit —
                         // the LLM should be able to modify as many work items as needed
-                        var toolDef = toolRegistry.Get(toolCall.Name);
-                        if (toolDef is null || !toolDef.IsWriteTool)
+                        if (CountsTowardToolCallLimit(toolCall, mcpToolSession))
                         {
                             totalToolCalls++;
                             if (totalToolCalls > maxToolCallsTotal)
                             {
                                 logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
+                                exceededToolCallLimit = true;
                                 break;
                             }
                         }
@@ -476,55 +513,28 @@ public class ChatService(
                         }
 
                         var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
-                        toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
+                        await ApplyToolResultAsync(
+                            projectId,
+                            sessionId,
+                            userId,
+                            progress,
+                            generateWorkItems,
+                            toolEvents,
+                            llmMessages,
+                            mcpToolSession,
+                            toolCall,
+                            toolResult);
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                             performedWorkItemMutation = true;
-
-                        // Add tool result to context for the LLM
-                        llmMessages.Add(new LLMMessage
+                        if (exceededToolCallLimit)
                         {
-                            Role = "tool",
-                            Content = toolResult,
-                            ToolCallId = toolCall.Id,
-                            ToolName = toolCall.Name,
-                        });
-
-                        await PublishChatToolEventAsync(
-                            userId,
-                            projectId,
-                            sessionId,
-                            toolCall.Name,
-                            toolCall.ArgumentsJson,
-                            toolResult,
-                            DidToolResultSucceed(toolResult));
-                        var toolActivity = BuildToolActivity(toolCall.Name, toolResult);
-                        await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, toolActivity);
-                        await PublishChatSessionEventAsync(
-                            userId,
-                            projectId,
-                            sessionId,
-                            progress.IsGenerating,
-                            progress.GenerationState,
-                            progress.GenerationStatus,
-                            toolActivity);
-                        if (generateWorkItems)
-                        {
-                            await UpdateGenerationProgressAsync(
-                                projectId,
-                                sessionId,
-                                userId,
-                                progress,
-                                isGenerating: true,
-                                generationState: ChatGenerationStates.Running,
-                                generationStatus: BuildToolCompletionStatus(toolCall.Name, toolResult),
-                                trackActivity: false);
+                            break;
                         }
-                        await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                        var isWriteTool = toolDef?.IsWriteTool == true || (mcpToolSession.HasTool(toolCall.Name) && !mcpToolSession.IsReadOnly(toolCall.Name));
-                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, isWriteTool);
                     }
 
-                    if (totalToolCalls > maxToolCallsTotal)
+                    }
+
+                    if (exceededToolCallLimit)
                         break;
 
                     // Continue the loop so the LLM can process results
@@ -886,73 +896,92 @@ public class ChatService(
                         ToolCalls = response.ToolCalls,
                     });
 
-                    foreach (var toolCall in response.ToolCalls)
+                    var exceededToolCallLimit = false;
+                    var toolBatches = ToolCallBatchPlanner.PartitionByReadOnly(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
+
+                    foreach (var toolBatch in toolBatches)
                     {
-                        var toolDef = toolRegistry.Get(toolCall.Name);
-                        if (toolDef is null || !toolDef.IsWriteTool)
+                        if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
                         {
-                            totalToolCalls++;
-                            if (totalToolCalls > maxToolCallsTotal)
+                            var batchResult = await ExecuteParallelToolBatchAsync(
+                                projectId,
+                                sessionId,
+                                userId,
+                                progress,
+                                true,
+                                toolContext,
+                                config,
+                                toolDefs,
+                                mcpToolSession,
+                                requestCancellation,
+                                maxToolCallsTotal,
+                                totalToolCalls,
+                                new List<ToolEventDto>(),
+                                llmMessages,
+                                toolBatch.ToolCalls,
+                                ownerId);
+                            totalToolCalls = batchResult.TotalToolCalls;
+                            exceededToolCallLimit = batchResult.ExceededToolCallLimit;
+                            performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
+
+                            if (exceededToolCallLimit)
                             {
-                                logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
                                 break;
+                            }
+
+                            continue;
+                        }
+
+                        foreach (var toolCall in toolBatch.ToolCalls)
+                        {
+                            if (CountsTowardToolCallLimit(toolCall, mcpToolSession))
+                            {
+                                totalToolCalls++;
+                                if (totalToolCalls > maxToolCallsTotal)
+                                {
+                                    logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
+                                    exceededToolCallLimit = true;
+                                    break;
+                                }
+                            }
+
+                            await UpdateGenerationProgressAsync(
+                                projectId,
+                                sessionId,
+                                userId,
+                                progress,
+                                isGenerating: true,
+                                generationState: ChatGenerationStates.Running,
+                                generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...",
+                                ownerId: ownerId);
+                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
+                            await ApplyToolResultAsync(
+                                projectId,
+                                sessionId,
+                                userId,
+                                progress,
+                                true,
+                                new List<ToolEventDto>(),
+                                llmMessages,
+                                mcpToolSession,
+                                toolCall,
+                                toolResult,
+                                ownerId);
+                            if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+                            {
+                                performedWorkItemMutation = true;
                             }
                         }
 
-                        await UpdateGenerationProgressAsync(
-                            projectId,
-                            sessionId,
-                            userId,
-                            progress,
-                            isGenerating: true,
-                            generationState: ChatGenerationStates.Running,
-                            generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...",
-                            ownerId: ownerId);
-                        var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
-                        if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
-                            performedWorkItemMutation = true;
-                        llmMessages.Add(new LLMMessage
+                        if (exceededToolCallLimit)
                         {
-                            Role = "tool",
-                            Content = toolResult,
-                            ToolCallId = toolCall.Id,
-                            ToolName = toolCall.Name,
-                        });
-
-                        await PublishChatToolEventAsync(
-                            userId,
-                            projectId,
-                            sessionId,
-                            toolCall.Name,
-                            toolCall.ArgumentsJson,
-                            toolResult,
-                            DidToolResultSucceed(toolResult));
-                        var toolActivity = BuildToolActivity(toolCall.Name, toolResult);
-                        await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, toolActivity, ownerId);
-                        await PublishChatSessionEventAsync(
-                            userId,
-                            projectId,
-                            sessionId,
-                            progress.IsGenerating,
-                            progress.GenerationState,
-                            progress.GenerationStatus,
-                            toolActivity);
-                        await UpdateGenerationProgressAsync(
-                            projectId,
-                            sessionId,
-                            userId,
-                            progress,
-                            isGenerating: true,
-                            generationState: ChatGenerationStates.Running,
-                            generationStatus: BuildToolCompletionStatus(toolCall.Name, toolResult),
-                            trackActivity: false,
-                            ownerId: ownerId);
-                        await PublishChatUpdatedAsync(userId, projectId, sessionId);
-                        var isWriteTool = toolDef?.IsWriteTool == true || (mcpToolSession.HasTool(toolCall.Name) && !mcpToolSession.IsReadOnly(toolCall.Name));
-                        await PublishWriteSideEffectsAsync(userId, projectId, sessionId, toolCall.Name, isWriteTool);
+                            break;
+                        }
                     }
 
-                    if (totalToolCalls > maxToolCallsTotal)
+                    if (exceededToolCallLimit)
                         break;
 
                     continue;
@@ -1326,6 +1355,14 @@ public class ChatService(
             ? $"{FormatToolStatus(toolName)} completed."
             : $"{FormatToolStatus(toolName)} reported an issue.";
 
+    private static string BuildParallelToolStatus(IReadOnlyList<LLMToolCall> toolCalls)
+        => toolCalls.Count switch
+        {
+            0 => "Running tools...",
+            1 => $"Running {FormatToolStatus(toolCalls[0].Name)}...",
+            _ => $"Running {FormatToolStatus(toolCalls[0].Name)} and {toolCalls.Count - 1} more read-only tools...",
+        };
+
     private static ChatSessionActivityDto BuildStatusActivity(string message)
         => new(
             Guid.NewGuid().ToString(),
@@ -1352,6 +1389,175 @@ public class ChatService(
             DateTime.UtcNow.ToString("O"),
             toolName,
             DidToolResultSucceed(toolResult));
+
+    private bool CountsTowardToolCallLimit(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
+        => !IsWriteToolCall(toolCall, mcpToolSession);
+
+    private bool IsReadOnlyToolCall(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
+    {
+        var tool = toolRegistry.Get(toolCall.Name);
+        if (tool is not null)
+            return !tool.IsWriteTool;
+
+        return mcpToolSession.HasTool(toolCall.Name) && mcpToolSession.IsReadOnly(toolCall.Name);
+    }
+
+    private bool IsWriteToolCall(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
+    {
+        var tool = toolRegistry.Get(toolCall.Name);
+        if (tool is not null)
+            return tool.IsWriteTool;
+
+        return mcpToolSession.HasTool(toolCall.Name) && !mcpToolSession.IsReadOnly(toolCall.Name);
+    }
+
+    private async Task<(bool PerformedMutation, int TotalToolCalls, bool ExceededToolCallLimit)> ExecuteParallelToolBatchAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        GenerationProgressState progress,
+        bool generateWorkItems,
+        ChatToolContext toolContext,
+        LLMOptions config,
+        IReadOnlyList<LLMToolDefinition> allowedTools,
+        IMcpToolSession mcpToolSession,
+        CancellationToken cancellationToken,
+        int maxToolCallsTotal,
+        int totalToolCalls,
+        List<ToolEventDto> toolEvents,
+        List<LLMMessage> llmMessages,
+        IReadOnlyList<LLMToolCall> toolCalls,
+        string? ownerId = null)
+    {
+        var exceededToolCallLimit = false;
+        var executableCalls = new List<LLMToolCall>();
+        foreach (var toolCall in toolCalls)
+        {
+            if (CountsTowardToolCallLimit(toolCall, mcpToolSession))
+            {
+                totalToolCalls++;
+                if (totalToolCalls > maxToolCallsTotal)
+                {
+                    logger.CopilotMaxToolCallsExceeded(maxToolCallsTotal);
+                    exceededToolCallLimit = true;
+                    break;
+                }
+            }
+
+            executableCalls.Add(toolCall);
+        }
+
+        if (executableCalls.Count == 0)
+        {
+            return (false, totalToolCalls, exceededToolCallLimit);
+        }
+
+        if (generateWorkItems)
+        {
+            await UpdateGenerationProgressAsync(
+                projectId,
+                sessionId,
+                userId,
+                progress,
+                isGenerating: true,
+                generationState: ChatGenerationStates.Running,
+                generationStatus: BuildParallelToolStatus(executableCalls),
+                ownerId: ownerId);
+        }
+
+        var toolResults = await Task.WhenAll(executableCalls.Select(async toolCall =>
+        {
+            var result = await ExecuteToolAsync(toolCall, toolContext, config, allowedTools, mcpToolSession, cancellationToken);
+            return (toolCall, result);
+        }));
+
+        var performedMutation = false;
+        foreach (var (toolCall, toolResult) in toolResults)
+        {
+            await ApplyToolResultAsync(
+                projectId,
+                sessionId,
+                userId,
+                progress,
+                generateWorkItems,
+                toolEvents,
+                llmMessages,
+                mcpToolSession,
+                toolCall,
+                toolResult,
+                ownerId);
+            if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+            {
+                performedMutation = true;
+            }
+        }
+
+        return (performedMutation, totalToolCalls, exceededToolCallLimit);
+    }
+
+    private async Task ApplyToolResultAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        GenerationProgressState progress,
+        bool generateWorkItems,
+        List<ToolEventDto> toolEvents,
+        List<LLMMessage> llmMessages,
+        IMcpToolSession mcpToolSession,
+        LLMToolCall toolCall,
+        string toolResult,
+        string? ownerId = null)
+    {
+        toolEvents.Add(new ToolEventDto(toolCall.Name, toolCall.ArgumentsJson, toolResult));
+
+        llmMessages.Add(new LLMMessage
+        {
+            Role = "tool",
+            Content = toolResult,
+            ToolCallId = toolCall.Id,
+            ToolName = toolCall.Name,
+        });
+
+        await PublishChatToolEventAsync(
+            userId,
+            projectId,
+            sessionId,
+            toolCall.Name,
+            toolCall.ArgumentsJson,
+            toolResult,
+            DidToolResultSucceed(toolResult));
+        var toolActivity = BuildToolActivity(toolCall.Name, toolResult);
+        await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, toolActivity, ownerId);
+        await PublishChatSessionEventAsync(
+            userId,
+            projectId,
+            sessionId,
+            progress.IsGenerating,
+            progress.GenerationState,
+            progress.GenerationStatus,
+            toolActivity);
+        if (generateWorkItems)
+        {
+            await UpdateGenerationProgressAsync(
+                projectId,
+                sessionId,
+                userId,
+                progress,
+                isGenerating: true,
+                generationState: ChatGenerationStates.Running,
+                generationStatus: BuildToolCompletionStatus(toolCall.Name, toolResult),
+                trackActivity: false,
+                ownerId: ownerId);
+        }
+
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+        await PublishWriteSideEffectsAsync(
+            userId,
+            projectId,
+            sessionId,
+            toolCall.Name,
+            IsWriteToolCall(toolCall, mcpToolSession));
+    }
 
     private static string BuildAssistantErrorStatus(Exception exception)
         => exception.Message.Contains("quota", StringComparison.OrdinalIgnoreCase)

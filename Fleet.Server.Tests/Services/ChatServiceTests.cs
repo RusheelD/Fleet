@@ -1002,6 +1002,76 @@ public class ChatServiceTests
             Times.AtLeastOnce);
     }
 
+    [TestMethod]
+    public async Task SendMessageAsync_MixedToolBatch_RunsReadOnlyCallsInParallelBeforeWriteCalls()
+    {
+        var releaseReadBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startOrder = new ConcurrentQueue<string>();
+        var readOne = new BlockingChatTool("read_spec", "Read spec", isWriteTool: false, "Spec loaded", releaseReadBatch.Task, startOrder);
+        var readTwo = new BlockingChatTool("search_notes", "Search notes", isWriteTool: false, "Notes loaded", releaseReadBatch.Task, startOrder);
+        var writeTool = new BlockingChatTool("bulk_update_work_items", "Bulk update work items", isWriteTool: true, "Updated 1 work item.", Task.CompletedTask, startOrder);
+        var toolRegistryWithTools = new ChatToolRegistry([readOne, readTwo, writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Done", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done", It.IsAny<string?>()))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", readOne.Name, "{}"),
+            new("call-2", readTwo.Name, "{}"),
+            new("call-3", writeTool.Name, "{}"),
+        };
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse(string.Empty, null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Done", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var sendTask = sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+
+        await readOne.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await readTwo.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsFalse(writeTool.Started.Task.IsCompleted);
+
+        releaseReadBatch.TrySetResult();
+
+        var result = await sendTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.IsTrue(writeTool.Started.Task.IsCompleted);
+        Assert.IsNull(result.Error);
+        var startedTools = startOrder.ToArray();
+        Assert.AreEqual(3, startedTools.Length);
+        CollectionAssert.AreEquivalent(new[] { readOne.Name, readTwo.Name }, startedTools.Take(2).ToArray());
+        Assert.AreEqual(writeTool.Name, startedTools[2]);
+        Assert.AreEqual(1, writeTool.ExecuteCount);
+    }
+
     private sealed class TestChatTool(
         string name,
         string description,
@@ -1018,6 +1088,31 @@ public class ChatServiceTests
         {
             ExecuteCount++;
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class BlockingChatTool(
+        string name,
+        string description,
+        bool isWriteTool,
+        string result,
+        Task releaseTask,
+        ConcurrentQueue<string> startOrder) : IChatTool
+    {
+        public string Name => name;
+        public string Description => description;
+        public string ParametersJsonSchema => "{}";
+        public bool IsWriteTool => isWriteTool;
+        public int ExecuteCount { get; private set; }
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
+        {
+            ExecuteCount++;
+            startOrder.Enqueue(Name);
+            Started.TrySetResult();
+            await releaseTask.WaitAsync(cancellationToken);
+            return result;
         }
     }
 

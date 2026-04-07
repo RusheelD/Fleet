@@ -4,6 +4,7 @@ using Fleet.Server.LLM;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Collections.Concurrent;
 
 namespace Fleet.Server.Tests.Services;
 
@@ -150,6 +151,74 @@ public class AgentPhaseRunnerTests
         CollectionAssert.Contains(progressUpdates, 100.0);
     }
 
+    [TestMethod]
+    public async Task RunPhaseAsync_MixedToolBatch_ParallelizesReadOnlySegmentsAroundWriteCalls()
+    {
+        var promptLoader = new Mock<IAgentPromptLoader>();
+        promptLoader.Setup(loader => loader.GetPrompt(It.IsAny<AgentRole>())).Returns("system");
+
+        var startOrder = new ConcurrentQueue<string>();
+        var releaseReadBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readOne = new BlockingAgentTool("read_one", "read one", isReadOnly: true, releaseReadBatch.Task, startOrder);
+        var readTwo = new BlockingAgentTool("read_two", "read two", isReadOnly: true, releaseReadBatch.Task, startOrder);
+        var writeTool = new BlockingAgentTool("write_one", "write one", isReadOnly: false, releaseWrite.Task, startOrder);
+        var readThree = new BlockingAgentTool("read_three", "read three", isReadOnly: true, Task.CompletedTask, startOrder);
+
+        var llmClient = new Mock<ILLMClient>();
+        var responses = new Queue<LLMResponse>([
+            new(null, [
+                new LLMToolCall("call-1", readOne.Name, "{}"),
+                new LLMToolCall("call-2", readTwo.Name, "{}"),
+                new LLMToolCall("call-3", writeTool.Name, "{}"),
+                new LLMToolCall("call-4", readThree.Name, "{}"),
+            ]),
+            new("done", null),
+        ]);
+        llmClient
+            .Setup(client => client.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var runner = new AgentPhaseRunner(
+            promptLoader.Object,
+            llmClient.Object,
+            new AgentToolRegistry([
+                readOne,
+                readTwo,
+                writeTool,
+                readThree,
+            ]),
+            Options.Create(new LLMOptions { GenerateModel = "test-model" }),
+            NullLogger<AgentPhaseRunner>.Instance);
+
+        var runTask = runner.RunPhaseAsync(
+            AgentRole.Backend,
+            "Implement the feature",
+            new AgentToolContext(Mock.Of<IRepoSandbox>(), "proj", "user", "token", "owner/repo", "exec"));
+
+        await readOne.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await readTwo.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsFalse(writeTool.Started.Task.IsCompleted);
+
+        releaseReadBatch.TrySetResult();
+
+        await writeTool.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.IsFalse(readThree.Started.Task.IsCompleted);
+
+        releaseWrite.TrySetResult();
+
+        var result = await runTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.IsTrue(readThree.Started.Task.IsCompleted);
+        Assert.IsTrue(result.Success);
+
+        var startedTools = startOrder.ToArray();
+        Assert.AreEqual(4, startedTools.Length);
+        CollectionAssert.AreEquivalent(new[] { readOne.Name, readTwo.Name }, startedTools.Take(2).ToArray());
+        Assert.AreEqual(writeTool.Name, startedTools[2]);
+        Assert.AreEqual(readThree.Name, startedTools[3]);
+    }
+
     private sealed class StubAgentTool(string name, string result, bool isReadOnly) : IAgentTool
     {
         public string Name => name;
@@ -159,5 +228,27 @@ public class AgentPhaseRunnerTests
 
         public Task<string> ExecuteAsync(string argumentsJson, AgentToolContext context, CancellationToken cancellationToken) =>
             Task.FromResult(result);
+    }
+
+    private sealed class BlockingAgentTool(
+        string name,
+        string result,
+        bool isReadOnly,
+        Task releaseTask,
+        ConcurrentQueue<string> startOrder) : IAgentTool
+    {
+        public string Name => name;
+        public string Description => name;
+        public string ParametersJsonSchema => """{"type":"object","properties":{}}""";
+        public bool IsReadOnly => isReadOnly;
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<string> ExecuteAsync(string argumentsJson, AgentToolContext context, CancellationToken cancellationToken)
+        {
+            startOrder.Enqueue(Name);
+            Started.TrySetResult();
+            await releaseTask.WaitAsync(cancellationToken);
+            return result;
+        }
     }
 }

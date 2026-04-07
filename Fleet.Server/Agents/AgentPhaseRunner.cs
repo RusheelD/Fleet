@@ -301,22 +301,18 @@ public class AgentPhaseRunner(
                         ToolCalls = response.ToolCalls,
                     });
 
-                    // Determine if ALL tool calls in this batch are read-only.
-                    // If so, execute them all in parallel for maximum speed.
-                    // Otherwise, fall back to sequential execution to preserve ordering.
-                    var allReadOnly = response.ToolCalls.All(tc =>
-                    {
-                        var tool = toolRegistry.Get(tc.Name);
-                        if (tool is not null)
-                            return tool.IsReadOnly;
+                    // Partition tool calls into consecutive read-only and mutating batches.
+                    // This keeps writes ordered while still parallelizing safe reads around them.
+                    var toolBatches = ToolCallBatchPlanner.PartitionByReadOnly(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
 
-                        return mcpToolSession.HasTool(tc.Name) && mcpToolSession.IsReadOnly(tc.Name);
-                    });
-
-                    if (allReadOnly && response.ToolCalls.Count > 1)
+                    foreach (var toolBatch in toolBatches)
                     {
+                        if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
+                        {
                         // ── Parallel execution for read-only batches ──
-                        var tasks = response.ToolCalls.Select(async toolCall =>
+                        var tasks = toolBatch.ToolCalls.Select(async toolCall =>
                         {
                             var result = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
                             return (toolCall, result);
@@ -372,7 +368,7 @@ public class AgentPhaseRunner(
                     else
                     {
                         // ── Sequential execution for write operations ──
-                        foreach (var toolCall in response.ToolCalls)
+                        foreach (var toolCall in toolBatch.ToolCalls)
                         {
                             totalToolCalls++;
                             if (totalToolCalls > maxToolCalls)
@@ -420,6 +416,8 @@ public class AgentPhaseRunner(
                                 }
                             }
                         }
+                    }
+
                     }
 
                     if (totalToolCalls > maxToolCalls)
@@ -490,6 +488,15 @@ public class AgentPhaseRunner(
             logger.LogWarning(ex, "Agent tool {ToolName} failed", toolCall.Name);
             return $"Error executing tool '{toolCall.Name}': {ex.Message}";
         }
+    }
+
+    private bool IsReadOnlyToolCall(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
+    {
+        var tool = toolRegistry.Get(toolCall.Name);
+        if (tool is not null)
+            return tool.IsReadOnly;
+
+        return mcpToolSession.HasTool(toolCall.Name) && mcpToolSession.IsReadOnly(toolCall.Name);
     }
 
     private static double ParseProgressPercent(string argumentsJson)
