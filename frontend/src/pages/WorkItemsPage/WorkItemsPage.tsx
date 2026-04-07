@@ -42,7 +42,8 @@ import {
     useExportWorkItems,
     useImportWorkItems,
 } from '../../proxies'
-import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
+import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
+import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
 import {
@@ -374,6 +375,7 @@ interface WorkItemFilters {
 
 const NO_TYPE_FILTER_KEY = '__none__'
 const EMPTY_FILTERS: WorkItemFilters = { states: new Set(), priorities: new Set(), levelKeys: new Set(), aiOnly: null }
+const WORK_ITEMS_FALLBACK_POLL_MS = 15000
 
 function isFiltered(filters: WorkItemFilters): boolean {
     return filters.states.size > 0 || filters.priorities.size > 0 || filters.levelKeys.size > 0 || filters.aiOnly !== null
@@ -383,10 +385,14 @@ export function WorkItemsPage() {
     const styles = useStyles()
     const { projectId } = useCurrentProject()
     const { preferences } = usePreferences()
+    const { state: serverEventState } = useServerEventConnection(projectId)
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const isDense = isCompact || isMobile
-    const { data: workItems, isLoading } = useWorkItems(projectId)
+    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, WORK_ITEMS_FALLBACK_POLL_MS)
+    const { data: workItems, isLoading } = useWorkItems(projectId, {
+        pollingInterval: workItemsPollingInterval,
+    })
     const { data: levels } = useWorkItemLevels(projectId)
     const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)

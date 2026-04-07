@@ -4,6 +4,13 @@ import { ApiError, fetchWithAuth } from '../proxies'
 import { useAuth } from './useAuthHook'
 import { normalizeLogEntry, type AgentExecution, type ChatData, type ChatSessionActivity, type ChatSessionData, type LogEntry } from '../models'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
+import {
+  buildServerEventConnectionDetail,
+  cacheServerEventConnection,
+  getCachedServerEventConnection,
+  type ServerEventConnectionDetail,
+  type ServerEventConnectionState,
+} from './serverEventConnectionState'
 
 interface ServerEventMessage {
   eventName: string
@@ -32,14 +39,6 @@ export interface ChatSessionEventPayload {
   generationStatus: string | null
   generationUpdatedAtUtc: string
   activity?: ChatSessionActivity | null
-}
-
-export type ServerEventConnectionState = 'connecting' | 'live' | 'reconnecting'
-
-export interface ServerEventConnectionDetail {
-  projectId?: string | null
-  state: ServerEventConnectionState
-  updatedAtUtc: string
 }
 
 interface AgentsUpdatedEventPayload {
@@ -375,18 +374,10 @@ function getExecutionPhaseForStatus(status: string | null | undefined): string |
 
 export function useServerEventConnection(projectId?: string) {
   const normalizedProjectId = projectId ?? null
-  const [connection, setConnection] = useState<ServerEventConnectionDetail>(() => ({
-    projectId: normalizedProjectId,
-    state: 'connecting',
-    updatedAtUtc: new Date().toISOString(),
-  }))
+  const [connection, setConnection] = useState<ServerEventConnectionDetail>(() => getCachedServerEventConnection(normalizedProjectId))
 
   useEffect(() => {
-    setConnection({
-      projectId: normalizedProjectId,
-      state: 'connecting',
-      updatedAtUtc: new Date().toISOString(),
-    })
+    setConnection(getCachedServerEventConnection(normalizedProjectId))
 
     if (typeof window === 'undefined') {
       return
@@ -427,19 +418,18 @@ export function useServerEvents(projectId?: string) {
     const pendingInvalidationTimers = new Map<string, number>()
 
     const emitConnectionState = (state: ServerEventConnectionState) => {
-      if (currentConnectionState === state) {
-        return
-      }
+      const previousDetail = getCachedServerEventConnection(projectId ?? null)
+      const detail = cacheServerEventConnection(buildServerEventConnectionDetail(projectId ?? null, state))
+      const stateChanged = currentConnectionState !== state
+      const cachedStateChanged =
+        (previousDetail.projectId ?? null) !== (detail.projectId ?? null) ||
+        previousDetail.state !== detail.state
 
       currentConnectionState = state
 
-      if (typeof window !== 'undefined') {
+      if ((stateChanged || cachedStateChanged) && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent<ServerEventConnectionDetail>(SERVER_EVENT_CONNECTION_WINDOW_EVENT, {
-          detail: {
-            projectId: projectId ?? null,
-            state,
-            updatedAtUtc: new Date().toISOString(),
-          },
+          detail,
         }))
       }
     }
@@ -647,7 +637,18 @@ export function useServerEvents(projectId?: string) {
 
     const invalidateForTopicNow = (topic: string) => {
       if (topic === 'connected') {
-        refreshMany(['executions', 'logs', 'work-items', 'project-dashboard', 'project-dashboard-slug', 'projects'])
+        refreshMany([
+          'chat-data',
+          'chat-messages',
+          'chat-attachments',
+          'executions',
+          'logs',
+          'work-items',
+          'project-dashboard',
+          'project-dashboard-slug',
+          'projects',
+          'notifications',
+        ])
         return
       }
 

@@ -381,9 +381,9 @@ export function useResumeExecution(projectId: string | undefined) {
 
 // ── Chat ──────────────────────────────────────────────────
 
-export function useChatData(projectId: string | undefined) {
+export function useChatData(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('chat-data', () => getChatData(projectId), [], [projectId], {
-    refetchInterval: CHAT_DATA_POLL_MS,
+    refetchInterval: options?.pollingInterval ?? CHAT_DATA_POLL_MS,
   })
 }
 

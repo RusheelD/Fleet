@@ -33,6 +33,7 @@ import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs
 import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
+import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
@@ -265,11 +266,10 @@ export function AgentMonitorPage() {
     const isDense = isCompact || isMobile
     const [tab, setTab] = useState<string>('active')
     const isLiveRunTab = tab === 'active' || tab === 'paused' || tab === 'all'
-    const sseHealthy = serverEventState === 'live'
     const fallbackPollingInterval = isLiveRunTab ? LIVE_FALLBACK_POLL_MS : IDLE_FALLBACK_POLL_MS
-    const executionsPollingInterval = sseHealthy ? false : fallbackPollingInterval
-    const logsPollingInterval = sseHealthy ? false : fallbackPollingInterval
-    const workItemsPollingInterval = sseHealthy ? false : IDLE_FALLBACK_POLL_MS
+    const executionsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval)
+    const logsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval)
+    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, IDLE_FALLBACK_POLL_MS)
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId, {
         pollingInterval: executionsPollingInterval,
     })

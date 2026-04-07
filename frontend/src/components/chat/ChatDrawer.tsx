@@ -9,7 +9,8 @@ import {
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession, useCancelChatGeneration,
     cancelChatSessionRequests, sendChatMessage, getApiErrorMessage,
 } from '../../proxies'
-import { useAuth, usePreferences, useIsMobile } from '../../hooks'
+import { useAuth, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
+import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatGenerationState, ChatMessageData } from '../../models'
 import { normalizeChatSessionActivities } from '../../models/chat'
@@ -70,6 +71,8 @@ interface ChatDrawerProps {
 
 const DEFAULT_GENERATE_MESSAGE =
     'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
+const BUSY_CHAT_FALLBACK_POLL_MS = 4000
+const IDLE_CHAT_FALLBACK_POLL_MS = 8000
 
 type PendingAttachment = ChatAttachment & {
     isUploading: true
@@ -103,15 +106,24 @@ export function ChatDrawer({
     const [optimisticGeneratingSessionIds, setOptimisticGeneratingSessionIds] = useState<string[]>([])
     const { user } = useAuth()
     const { preferences } = usePreferences()
+    const { state: serverEventState } = useServerEventConnection(projectId)
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const hasConstrainedPaneWidth = !isMobile && typeof chatWidth === 'number' && chatWidth <= 520
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
     const deletingSessionIdsRef = useRef<Set<string>>(new Set())
-
-    const { data: chatData, isLoading: loadingChat } = useChatData(projectId)
-    const { data: messages } = useChatMessages(projectId, activeSession)
+    const chatFallbackPollingInterval =
+        pendingMessageSessionIds.length > 0 || optimisticGeneratingSessionIds.length > 0
+            ? BUSY_CHAT_FALLBACK_POLL_MS
+            : IDLE_CHAT_FALLBACK_POLL_MS
+    const chatPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, chatFallbackPollingInterval)
+    const { data: chatData, isLoading: loadingChat } = useChatData(projectId, {
+        pollingInterval: chatPollingInterval,
+    })
+    const { data: messages } = useChatMessages(projectId, activeSession, {
+        pollingInterval: chatPollingInterval,
+    })
     const createSessionMutation = useCreateChatSession(projectId)
     const deleteSessionMutation = useDeleteSession(projectId)
     const renameSessionMutation = useRenameSession(projectId)
