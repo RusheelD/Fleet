@@ -367,6 +367,8 @@ builder.Services.AddScoped<IAgentTool, CommitAndPushTool>();
 builder.Services.AddScoped<IAgentTool, GetChangeSummaryTool>();
 builder.Services.AddScoped<IAgentTool, ReportProgressTool>();
 builder.Services.AddScoped<IAgentTool, RecallToolOutputAgentTool>();
+builder.Services.AddScoped<IAgentTool, WriteScratchpadTool>();
+builder.Services.AddScoped<IAgentTool, ReadScratchpadTool>();
 builder.Services.AddScoped<AgentToolRegistry>();
 
 // Tool result store (shared within a request scope for recall_tool_output)

@@ -21,4 +21,11 @@ public record AgentToolContext(
 
     /// <summary>The execution ID for logging.</summary>
     string ExecutionId
-);
+)
+{
+    /// <summary>
+    /// Shared scratchpad for inter-phase communication within an execution.
+    /// Agents can write named entries that downstream phases read selectively.
+    /// </summary>
+    public AgentScratchpad Scratchpad { get; init; } = new();
+}

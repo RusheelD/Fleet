@@ -2044,7 +2044,10 @@ public class AgentOrchestrationService(
                 resumeFromBranch: retryPlan?.ResumeFromRemoteBranch == true);
 
             var toolContext = new AgentToolContext(
-                sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId);
+                sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId)
+            {
+                Scratchpad = new AgentScratchpad()
+            };
 
             string? prUrl = retryPlan?.ReuseExistingBranchAndPullRequest == true &&
                             !string.IsNullOrWhiteSpace(retryPlan.ReusePullRequestUrl)
