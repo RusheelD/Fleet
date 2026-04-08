@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react'
 import { Spinner, makeStyles } from '@fluentui/react-components'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout'
-import { ProtectedRoute } from './components/shared'
+import { ErrorBoundary, ProtectedRoute } from './components/shared'
 
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((module) => ({ default: module.ProjectsPage })))
 const ProjectDashboardPage = lazy(() => import('./pages/ProjectDashboardPage').then((module) => ({ default: module.ProjectDashboardPage })))
@@ -28,6 +28,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ErrorBoundary>
       <Suspense fallback={<div className={styles.loadingShell}><Spinner label="Loading Fleet..." /></div>}>
         <Routes>
           {/* Public auth routes */}
@@ -64,6 +65,7 @@ function App() {
           <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -128,7 +129,7 @@ interface ProjectCardProps {
     onClick: () => void
 }
 
-export function ProjectCard({ project, onClick }: ProjectCardProps) {
+export const ProjectCard = memo(function ProjectCard({ project, onClick }: ProjectCardProps) {
     const styles = useStyles()
     const isMobile = useIsMobile()
 
@@ -180,4 +181,4 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
             </CardPreview>
         </Card>
     )
-}
+})

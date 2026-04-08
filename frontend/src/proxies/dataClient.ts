@@ -214,7 +214,7 @@ export function useExecutions(projectId: string | undefined, options?: { polling
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: options?.pollingInterval ?? EXECUTIONS_POLL_MS,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
 }
 
@@ -223,7 +223,7 @@ export function useLogs(projectId: string | undefined, options?: { pollingInterv
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: options?.pollingInterval ?? LOGS_POLL_MS,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
 }
 

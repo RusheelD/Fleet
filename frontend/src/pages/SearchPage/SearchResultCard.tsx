@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -132,7 +133,7 @@ interface SearchResultCardProps {
     result: SearchResult
 }
 
-export function SearchResultCard({ result }: SearchResultCardProps) {
+export const SearchResultCard = memo(function SearchResultCard({ result }: SearchResultCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -191,4 +192,4 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
             )}
         </Card>
     )
-}
+})

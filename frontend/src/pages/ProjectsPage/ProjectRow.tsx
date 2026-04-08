@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -104,7 +105,7 @@ interface ProjectRowProps {
     onClick: () => void
 }
 
-export function ProjectRow({ project, onClick }: ProjectRowProps) {
+export const ProjectRow = memo(function ProjectRow({ project, onClick }: ProjectRowProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
@@ -140,4 +141,4 @@ export function ProjectRow({ project, onClick }: ProjectRowProps) {
             </div>
         </div>
     )
-}
+})

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -300,7 +301,7 @@ interface ChatMessageProps {
     currentUserIdentity?: string
 }
 
-export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
@@ -434,7 +435,7 @@ export function ChatMessage({ message, currentUserIdentity }: ChatMessageProps) 
             </div>
         </div>
     )
-}
+})
 
 function formatSize(chars: number): string {
     if (chars < 1024) return `${chars} B`

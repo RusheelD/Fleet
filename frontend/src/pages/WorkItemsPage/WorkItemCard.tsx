@@ -1,4 +1,7 @@
 import {
+    memo,
+} from 'react'
+import {
     makeStyles,
     Caption1,
     Text,
@@ -146,7 +149,7 @@ interface WorkItemCardProps {
     onItemClick?: (item: WorkItem) => void
 }
 
-export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps) {
+export const WorkItemCard = memo(function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
     const isMobile = useIsMobile()
@@ -216,4 +219,4 @@ export function WorkItemCard({ item, levelMap, onItemClick }: WorkItemCardProps)
             </div>
         </Card>
     )
-}
+})

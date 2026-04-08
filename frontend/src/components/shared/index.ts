@@ -1,5 +1,6 @@
 export { PageHeader } from './PageHeader'
 export { EmptyState } from './EmptyState'
+export { ErrorBoundary } from './ErrorBoundary'
 export { FleetRocketLogo } from './FleetRocketLogo'
 export { SettingRow } from './SettingRow'
 export { SplitView } from './SplitView'
