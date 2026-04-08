@@ -40,9 +40,15 @@ public class GitHubApiService(
 
         try
         {
-            var (openPrs, mergedPrs) = await FetchPullRequestStatsAsync(client, accessToken, repoFullName);
-            var recentCommits = await FetchRecentCommitCountAsync(client, accessToken, repoFullName);
-            var events = await FetchRecentEventsAsync(client, accessToken, repoFullName);
+            // Run all three independent GitHub API calls in parallel
+            var prStatsTask = FetchPullRequestStatsAsync(client, accessToken, repoFullName);
+            var commitsTask = FetchRecentCommitCountAsync(client, accessToken, repoFullName);
+            var eventsTask = FetchRecentEventsAsync(client, accessToken, repoFullName);
+            await Task.WhenAll(prStatsTask, commitsTask, eventsTask);
+
+            var (openPrs, mergedPrs) = await prStatsTask;
+            var recentCommits = await commitsTask;
+            var events = await eventsTask;
 
             return new GitHubRepoStats(openPrs, mergedPrs, recentCommits, events);
         }
@@ -66,8 +72,12 @@ public class GitHubApiService(
 
         try
         {
-            var openPrs = await FetchPullRequestsAsync(client, accessToken, repoFullName, "open");
-            var closedPrs = await FetchPullRequestsAsync(client, accessToken, repoFullName, "closed");
+            // Fetch open and closed PRs in parallel
+            var openPrsTask = FetchPullRequestsAsync(client, accessToken, repoFullName, "open");
+            var closedPrsTask = FetchPullRequestsAsync(client, accessToken, repoFullName, "closed");
+            await Task.WhenAll(openPrsTask, closedPrsTask);
+            var openPrs = await openPrsTask;
+            var closedPrs = await closedPrsTask;
 
             var allRefs = new List<GitHubWorkItemReference>();
             foreach (var pr in openPrs.Concat(closedPrs))

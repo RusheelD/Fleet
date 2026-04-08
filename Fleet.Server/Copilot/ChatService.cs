@@ -84,13 +84,19 @@ public class ChatService(
         });
 
         logger.CopilotChatDataRetrieving(projectId.SanitizeForLogging());
-        await RepairStaleGeneratingSessionsAsync(projectId);
-        var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+
+        // Run repair and session fetch in parallel
+        var repairTask = RepairStaleGeneratingSessionsAsync(projectId);
+        var sessionsTask = chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+        var suggestionsTask = chatSessionRepository.GetSuggestionsAsync(projectId);
+        await Task.WhenAll(repairTask, sessionsTask, suggestionsTask);
+
+        var sessions = await sessionsTask;
+        var suggestions = await suggestionsTask;
         var activeSession = sessions.FirstOrDefault(s => s.IsActive);
         var messages = activeSession is not null
             ? await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, activeSession.Id)
             : [];
-        var suggestions = await chatSessionRepository.GetSuggestionsAsync(projectId);
 
         logger.CopilotChatDataRetrieved(projectId.SanitizeForLogging(), sessions.Count);
         return new ChatDataDto([.. sessions], [.. messages], suggestions);

@@ -45,8 +45,13 @@ public class ProjectService(
         logger.ProjectsRetrievingAll();
         var ownerId = await GetCurrentOwnerIdAsync();
         var projects = await projectRepository.GetAllByOwnerAsync(ownerId);
-        var summaries = await workItemRepository.GetSummariesByProjectAsync();
-        var agentSummaries = await agentTaskRepository.GetAgentSummariesByProjectAsync();
+
+        // Run independent summary queries in parallel
+        var summariesTask = workItemRepository.GetSummariesByProjectAsync();
+        var agentSummariesTask = agentTaskRepository.GetAgentSummariesByProjectAsync();
+        await Task.WhenAll(summariesTask, agentSummariesTask);
+        var summaries = await summariesTask;
+        var agentSummaries = await agentSummariesTask;
 
         return projects.Select(p =>
         {

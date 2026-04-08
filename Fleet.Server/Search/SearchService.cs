@@ -18,29 +18,25 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
         var normalizedType = NormalizeType(type);
         var normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
         logger.SearchStarted((query ?? string.Empty).SanitizeForLogging(), normalizedType.SanitizeForLogging());
-        var results = new List<SearchResultDto>();
-
         var includeAll = normalizedType == "all";
 
+        // Build list of search tasks and run in parallel
+        var tasks = new List<Task<IReadOnlyList<SearchResultDto>>>();
+
         if (includeAll || normalizedType == "projects")
-        {
-            results.AddRange(await SearchProjectsAsync(ownerId, normalizedQuery));
-        }
+            tasks.Add(SearchProjectsAsync(ownerId, normalizedQuery));
 
         if (includeAll || normalizedType == "workitems")
-        {
-            results.AddRange(await SearchWorkItemsAsync(ownerId, normalizedQuery));
-        }
+            tasks.Add(SearchWorkItemsAsync(ownerId, normalizedQuery));
 
         if (includeAll || normalizedType == "chats")
-        {
-            results.AddRange(await SearchChatsAsync(ownerId, normalizedQuery));
-        }
+            tasks.Add(SearchChatsAsync(ownerId, normalizedQuery));
 
         if (includeAll || normalizedType == "agents")
-        {
-            results.AddRange(await SearchAgentsAsync(ownerId, normalizedQuery));
-        }
+            tasks.Add(SearchAgentsAsync(ownerId, normalizedQuery));
+
+        var allResults = await Task.WhenAll(tasks);
+        var results = allResults.SelectMany(r => r).ToList();
 
         logger.SearchCompleted(results.Count);
         return results;
