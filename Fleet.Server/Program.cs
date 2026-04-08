@@ -353,6 +353,7 @@ builder.Services.AddScoped<IChatTool, TryBulkUpdateWorkItemsTool>();
 builder.Services.AddScoped<IChatTool, GetRepoTreeTool>();
 builder.Services.AddScoped<IChatTool, ReadRepoFileTool>();
 builder.Services.AddScoped<IChatTool, RecallToolOutputChatTool>();
+builder.Services.AddScoped<IChatTool, GenerateDeploymentTemplateTool>();
 builder.Services.AddScoped<ChatToolRegistry>();
 
 // Agent tools (registered individually, collected by AgentToolRegistry)
@@ -369,6 +370,7 @@ builder.Services.AddScoped<IAgentTool, ReportProgressTool>();
 builder.Services.AddScoped<IAgentTool, RecallToolOutputAgentTool>();
 builder.Services.AddScoped<IAgentTool, WriteScratchpadTool>();
 builder.Services.AddScoped<IAgentTool, ReadScratchpadTool>();
+builder.Services.AddScoped<IAgentTool, GenerateIaCTool>();
 builder.Services.AddScoped<AgentToolRegistry>();
 
 // Tool result store (shared within a request scope for recall_tool_output)
