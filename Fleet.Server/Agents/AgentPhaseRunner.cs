@@ -23,11 +23,13 @@ public class AgentPhaseRunner(
     IMcpToolSessionFactory? mcpToolSessionFactory = null,
     IMemoryService? memoryService = null,
     ISkillService? skillService = null,
-    ITokenTracker? tokenTracker = null) : IAgentPhaseRunner
+    ITokenTracker? tokenTracker = null,
+    ToolResultStore? toolResultStore = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
+    private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -590,7 +592,7 @@ public class AgentPhaseRunner(
             // Truncate large results using the tighter agent-specific limit
             if (result.Length > AgentMaxToolOutputLength)
             {
-                result = result[..AgentMaxToolOutputLength] + $"\n\n[Output truncated at {AgentMaxToolOutputLength:N0} characters]";
+                result = _toolResultStore.StoreIfOversized(toolCall.Id, result, AgentMaxToolOutputLength);
             }
 
             return result;

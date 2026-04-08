@@ -32,7 +32,8 @@ public class ChatService(
     IMemoryService? memoryService = null,
     ISkillService? skillService = null,
     ITokenTracker? tokenTracker = null,
-    ToolLifecycleRunner? lifecycleRunner = null) : IChatService
+    ToolLifecycleRunner? lifecycleRunner = null,
+    ToolResultStore? toolResultStore = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
@@ -40,6 +41,7 @@ public class ChatService(
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
+    private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -2010,7 +2012,7 @@ public class ChatService(
                 var result = await mcpToolSession.ExecuteAsync(toolCall.Name, toolCall.ArgumentsJson, ct);
                 if (result.Length > config.MaxToolOutputLength)
                 {
-                    result = result[..config.MaxToolOutputLength] + "\n... (truncated)";
+                    result = _toolResultStore.StoreIfOversized(toolCall.Id, result, config.MaxToolOutputLength);
                 }
 
                 return await RunAfterHookAsync(toolCall, context, result, ct);
@@ -2043,7 +2045,7 @@ public class ChatService(
             // Truncate large outputs to avoid context blowup
             if (result.Length > config.MaxToolOutputLength)
             {
-                result = result[..config.MaxToolOutputLength] + "\n... (truncated)";
+                result = _toolResultStore.StoreIfOversized(toolCall.Id, result, config.MaxToolOutputLength);
             }
 
             return await RunAfterHookAsync(toolCall, context, result, ct);
