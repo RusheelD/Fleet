@@ -375,6 +375,9 @@ builder.Services.AddScoped<ToolResultStore>();
 // File read tracker (shared within a request scope for staleness detection)
 builder.Services.AddScoped<FileReadTracker>();
 
+// Prompt block cache (singleton — caches memory/skill blocks across requests with short TTL)
+builder.Services.AddSingleton<PromptBlockCache>();
+
 // Agent infrastructure
 builder.Services.AddSingleton<IAgentPromptLoader, AgentPromptLoader>();
 builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();

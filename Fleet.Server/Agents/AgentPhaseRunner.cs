@@ -24,12 +24,14 @@ public class AgentPhaseRunner(
     IMemoryService? memoryService = null,
     ISkillService? skillService = null,
     ITokenTracker? tokenTracker = null,
-    ToolResultStore? toolResultStore = null) : IAgentPhaseRunner
+    ToolResultStore? toolResultStore = null,
+    PromptBlockCache? promptBlockCache = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
+    private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -105,7 +107,8 @@ public class AgentPhaseRunner(
         var systemPrompt = promptLoader.GetPrompt(role);
         if (int.TryParse(toolContext.UserId, out var parsedUserId))
         {
-            var memoryPrompt = await _memoryService.BuildPromptBlockAsync(
+            var memoryPrompt = await _promptBlockCache.GetMemoryBlockAsync(
+                _memoryService,
                 parsedUserId,
                 toolContext.ProjectId,
                 userMessage,
@@ -115,7 +118,8 @@ public class AgentPhaseRunner(
                 systemPrompt = $"{systemPrompt}\n\n{memoryPrompt}";
             }
 
-            var skillPrompt = await _skillService.BuildPromptBlockAsync(
+            var skillPrompt = await _promptBlockCache.GetSkillBlockAsync(
+                _skillService,
                 parsedUserId,
                 toolContext.ProjectId,
                 userMessage,

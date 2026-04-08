@@ -33,7 +33,8 @@ public class ChatService(
     ISkillService? skillService = null,
     ITokenTracker? tokenTracker = null,
     ToolLifecycleRunner? lifecycleRunner = null,
-    ToolResultStore? toolResultStore = null) : IChatService
+    ToolResultStore? toolResultStore = null,
+    PromptBlockCache? promptBlockCache = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
@@ -42,6 +43,7 @@ public class ChatService(
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
+    private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -2099,7 +2101,8 @@ public class ChatService(
         builder.AppendLine();
         builder.AppendLine(scopePrompt);
 
-        var memoryPrompt = await _memoryService.BuildPromptBlockAsync(
+        var memoryPrompt = await _promptBlockCache.GetMemoryBlockAsync(
+            _memoryService,
             userId,
             IsGlobalScope(projectId) ? null : projectId,
             latestUserMessage,
@@ -2118,7 +2121,8 @@ public class ChatService(
             .TakeLast(8)
             .ToList();
 
-        var skillPrompt = await _skillService.BuildPromptBlockAsync(
+        var skillPrompt = await _promptBlockCache.GetSkillBlockAsync(
+            _skillService,
             userId,
             IsGlobalScope(projectId) ? null : projectId,
             latestUserMessage,
