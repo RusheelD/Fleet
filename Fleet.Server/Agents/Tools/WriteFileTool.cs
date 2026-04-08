@@ -5,7 +5,7 @@ namespace Fleet.Server.Agents.Tools;
 /// <summary>
 /// Creates or overwrites a file in the local repo clone.
 /// </summary>
-public class WriteFileTool : IAgentTool
+public class WriteFileTool(FileReadTracker fileReadTracker) : IAgentTool
 {
     public string Name => "write_file";
 
@@ -47,6 +47,7 @@ public class WriteFileTool : IAgentTool
         try
         {
             context.Sandbox.WriteFile(filePath, content);
+            fileReadTracker.RecordWrite(filePath, content);
             return Task.FromResult($"Successfully wrote {content.Length:N0} characters to '{filePath}'.");
         }
         catch (UnauthorizedAccessException ex)

@@ -5,7 +5,7 @@ namespace Fleet.Server.Agents.Tools;
 /// <summary>
 /// Applies a targeted edit to an existing file by replacing a specific string.
 /// </summary>
-public class EditFileTool : IAgentTool
+public class EditFileTool(FileReadTracker fileReadTracker) : IAgentTool
 {
     public string Name => "edit_file";
 
@@ -55,6 +55,12 @@ public class EditFileTool : IAgentTool
         try
         {
             var content = context.Sandbox.ReadFile(filePath);
+
+            // Staleness check: reject if the file changed since the model last read it
+            var staleError = fileReadTracker.CheckFreshness(filePath, content);
+            if (staleError is not null)
+                return Task.FromResult(staleError);
+
             var index = content.IndexOf(oldString, StringComparison.Ordinal);
 
             if (index < 0)
@@ -67,6 +73,7 @@ public class EditFileTool : IAgentTool
 
             var newContent = content[..index] + newString + content[(index + oldString.Length)..];
             context.Sandbox.WriteFile(filePath, newContent);
+            fileReadTracker.RecordWrite(filePath, newContent);
 
             return Task.FromResult($"Successfully edited '{filePath}'. Replaced {oldString.Length} characters with {newString.Length} characters.");
         }

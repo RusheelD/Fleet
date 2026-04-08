@@ -371,6 +371,9 @@ builder.Services.AddScoped<AgentToolRegistry>();
 // Tool result store (shared within a request scope for recall_tool_output)
 builder.Services.AddScoped<ToolResultStore>();
 
+// File read tracker (shared within a request scope for staleness detection)
+builder.Services.AddScoped<FileReadTracker>();
+
 // Agent infrastructure
 builder.Services.AddSingleton<IAgentPromptLoader, AgentPromptLoader>();
 builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();

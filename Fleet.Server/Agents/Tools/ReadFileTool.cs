@@ -5,7 +5,7 @@ namespace Fleet.Server.Agents.Tools;
 /// <summary>
 /// Reads the content of a single file from the local repo clone.
 /// </summary>
-public class ReadFileTool : IAgentTool
+public class ReadFileTool(FileReadTracker fileReadTracker) : IAgentTool
 {
     public string Name => "read_file";
     public bool IsReadOnly => true;
@@ -39,6 +39,7 @@ public class ReadFileTool : IAgentTool
         try
         {
             var content = context.Sandbox.ReadFile(filePath);
+            fileReadTracker.RecordRead(filePath, content);
             var result = new { path = filePath, content, length = content.Length };
             return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
         }
