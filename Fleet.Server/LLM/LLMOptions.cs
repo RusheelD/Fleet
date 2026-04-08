@@ -22,6 +22,12 @@ public class LLMOptions
     /// <summary>Max non-write tool calls for work-item generation before the run is capped.</summary>
     public int GenerateMaxToolCallsTotal { get; set; } = 400;
     public int MaxToolOutputLength { get; set; } = 24000;
+    /// <summary>
+    /// Maximum aggregate characters of tool output per LLM turn. When many tools
+    /// fire in one response, later results are progressively truncated once the
+    /// budget is consumed. 0 = unlimited.
+    /// </summary>
+    public int MaxAggregateToolOutputChars { get; set; } = 200_000;
     /// <summary>Context window size in tokens for context compression.</summary>
     public int ContextWindowTokens { get; set; } = 200000;
     /// <summary>Tokens reserved for model output when computing compression budget.</summary>

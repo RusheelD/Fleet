@@ -76,6 +76,9 @@ public class AgentPhaseRunner(
     /// chat limit to keep context windows lean and inference fast.
     /// </summary>
     private const int AgentMaxToolOutputLength = 12_000;
+
+    /// <summary>Max aggregate tool output chars per LLM turn for agent phases (tighter than interactive chat).</summary>
+    private const int AgentMaxAggregateToolOutputChars = 120_000;
     private const double EstimatedProgressCeilingPercent = 100.0;
     private const double EstimatedProgressSoftCeilingPercent = 99.95;
     private const double MinimumProgressIncrementPercent = 0.05;
@@ -335,6 +338,9 @@ public class AgentPhaseRunner(
                         (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
                         cts.Token);
 
+                    // Aggregate result budget: prevent context blowup from many tool results
+                    var resultBudget = new ToolResultBudget(AgentMaxAggregateToolOutputChars);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
@@ -353,11 +359,12 @@ public class AgentPhaseRunner(
 
                             var results = await Task.WhenAll(tasks);
 
-                            foreach (var (toolCall, toolResult) in results)
+                            foreach (var (toolCall, rawToolResult) in results)
                             {
                                 totalToolCalls++;
                                 if (totalToolCalls > maxToolCalls) break;
 
+                                var toolResult = resultBudget.Apply(rawToolResult);
                                 messages.Add(new LLMMessage
                                 {
                                     Role = "tool",
@@ -417,6 +424,7 @@ public class AgentPhaseRunner(
                                     toolCall,
                                     (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
                                     cts.Token);
+                                toolResult = resultBudget.Apply(toolResult);
 
                                 messages.Add(new LLMMessage
                                 {

@@ -478,6 +478,9 @@ public class ChatService(
                         (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
                         requestCancellation);
 
+                    // Aggregate result budget: prevent context blowup from many tool results
+                    var resultBudget = new ToolResultBudget(config.MaxAggregateToolOutputChars);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
@@ -498,7 +501,8 @@ public class ChatService(
                                 toolEvents,
                                 llmMessages,
                                 toolBatch.ToolCalls,
-                                speculative: speculative);
+                                speculative: speculative,
+                                resultBudget: resultBudget);
                             totalToolCalls = batchResult.TotalToolCalls;
                             exceededToolCallLimit = batchResult.ExceededToolCallLimit;
                             performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
@@ -542,6 +546,7 @@ public class ChatService(
                                 toolCall,
                                 (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
                                 requestCancellation);
+                            toolResult = resultBudget.Apply(toolResult);
                             await ApplyToolResultAsync(
                                 projectId,
                                 sessionId,
@@ -998,6 +1003,9 @@ public class ChatService(
                         (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
                         requestCancellation);
 
+                    // Aggregate result budget: prevent context blowup from many tool results
+                    var resultBudget = new ToolResultBudget(config.MaxAggregateToolOutputChars);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
@@ -1019,7 +1027,8 @@ public class ChatService(
                                 llmMessages,
                                 toolBatch.ToolCalls,
                                 ownerId,
-                                speculative: speculative);
+                                speculative: speculative,
+                                resultBudget: resultBudget);
                             totalToolCalls = batchResult.TotalToolCalls;
                             exceededToolCallLimit = batchResult.ExceededToolCallLimit;
                             performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
@@ -1058,6 +1067,7 @@ public class ChatService(
                                 toolCall,
                                 (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
                                 requestCancellation);
+                            toolResult = resultBudget.Apply(toolResult);
                             await ApplyToolResultAsync(
                                 projectId,
                                 sessionId,
@@ -1529,7 +1539,8 @@ public class ChatService(
         List<LLMMessage> llmMessages,
         IReadOnlyList<LLMToolCall> toolCalls,
         string? ownerId = null,
-        SpeculativeToolExecutor? speculative = null)
+        SpeculativeToolExecutor? speculative = null,
+        ToolResultBudget? resultBudget = null)
     {
         var exceededToolCallLimit = false;
         var executableCalls = new List<LLMToolCall>();
@@ -1579,8 +1590,9 @@ public class ChatService(
         }));
 
         var performedMutation = false;
-        foreach (var (toolCall, toolResult) in toolResults)
+        foreach (var (toolCall, rawResult) in toolResults)
         {
+            var toolResult = resultBudget?.Apply(rawResult) ?? rawResult;
             await ApplyToolResultAsync(
                 projectId,
                 sessionId,
