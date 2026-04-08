@@ -196,27 +196,28 @@ public class AgentPhaseRunnerTests
             "Implement the feature",
             new AgentToolContext(Mock.Of<IRepoSandbox>(), "proj", "user", "token", "owner/repo", "exec"));
 
+        // All read-only tools are prefetched speculatively — including readThree
         await readOne.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await readTwo.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await readThree.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // Write tools are never prefetched — they respect batch ordering
         Assert.IsFalse(writeTool.Started.Task.IsCompleted);
 
         releaseReadBatch.TrySetResult();
 
         await writeTool.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.IsFalse(readThree.Started.Task.IsCompleted);
 
         releaseWrite.TrySetResult();
 
         var result = await runTask.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.IsTrue(readThree.Started.Task.IsCompleted);
         Assert.IsTrue(result.Success);
 
         var startedTools = startOrder.ToArray();
         Assert.AreEqual(4, startedTools.Length);
-        CollectionAssert.AreEquivalent(new[] { readOne.Name, readTwo.Name }, startedTools.Take(2).ToArray());
-        Assert.AreEqual(writeTool.Name, startedTools[2]);
-        Assert.AreEqual(readThree.Name, startedTools[3]);
+        // All three reads were prefetched concurrently before the write started
+        CollectionAssert.AreEquivalent(new[] { readOne.Name, readTwo.Name, readThree.Name }, startedTools.Take(3).ToArray());
+        Assert.AreEqual(writeTool.Name, startedTools[3]);
     }
 
     private sealed class StubAgentTool(string name, string result, bool isReadOnly) : IAgentTool

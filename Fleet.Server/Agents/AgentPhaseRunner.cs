@@ -324,14 +324,30 @@ public class AgentPhaseRunner(
                         response.ToolCalls,
                         toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
 
+                    // Speculative execution: pre-fire ALL read-only tools from the entire
+                    // response concurrently, regardless of batch position. Reads in batch 3
+                    // start running alongside reads in batch 1, even if a write batch separates
+                    // them. The executor caches results so the batch loop retrieves them instantly.
+                    var speculative = new SpeculativeToolExecutor();
+                    speculative.PrefetchReadOnlyTools(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession),
+                        (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
+                        cts.Token);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
                         {
                             // ── Parallel execution for read-only batches ──
+                            // Results are already pre-fetched by the speculative executor;
+                            // this await simply collects the cached results.
                             var tasks = toolBatch.ToolCalls.Select(async toolCall =>
                             {
-                                var result = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
+                                var result = await speculative.GetOrExecuteAsync(
+                                    toolCall,
+                                    (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
+                                    cts.Token);
                                 return (toolCall, result);
                             }).ToList();
 
@@ -385,6 +401,8 @@ public class AgentPhaseRunner(
                         else
                         {
                             // ── Sequential execution for write operations ──
+                            // Write tools won't be in the speculative cache, so GetOrExecuteAsync
+                            // falls through to direct execution. Single read-only tools may hit the cache.
                             foreach (var toolCall in toolBatch.ToolCalls)
                             {
                                 totalToolCalls++;
@@ -395,7 +413,10 @@ public class AgentPhaseRunner(
                                     break;
                                 }
 
-                                var toolResult = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
+                                var toolResult = await speculative.GetOrExecuteAsync(
+                                    toolCall,
+                                    (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
+                                    cts.Token);
 
                                 messages.Add(new LLMMessage
                                 {

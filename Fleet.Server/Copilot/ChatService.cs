@@ -470,6 +470,14 @@ public class ChatService(
                         response.ToolCalls,
                         toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
 
+                    // Speculative execution: pre-fire ALL read-only tools concurrently
+                    var speculative = new SpeculativeToolExecutor();
+                    speculative.PrefetchReadOnlyTools(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession),
+                        (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
+                        requestCancellation);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
@@ -489,7 +497,8 @@ public class ChatService(
                                 totalToolCalls,
                                 toolEvents,
                                 llmMessages,
-                                toolBatch.ToolCalls);
+                                toolBatch.ToolCalls,
+                                speculative: speculative);
                             totalToolCalls = batchResult.TotalToolCalls;
                             exceededToolCallLimit = batchResult.ExceededToolCallLimit;
                             performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
@@ -529,7 +538,10 @@ public class ChatService(
                                     generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...");
                             }
 
-                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
+                            var toolResult = await speculative.GetOrExecuteAsync(
+                                toolCall,
+                                (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
+                                requestCancellation);
                             await ApplyToolResultAsync(
                                 projectId,
                                 sessionId,
@@ -978,6 +990,14 @@ public class ChatService(
                         response.ToolCalls,
                         toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
 
+                    // Speculative execution: pre-fire ALL read-only tools concurrently
+                    var speculative = new SpeculativeToolExecutor();
+                    speculative.PrefetchReadOnlyTools(
+                        response.ToolCalls,
+                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession),
+                        (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
+                        requestCancellation);
+
                     foreach (var toolBatch in toolBatches)
                     {
                         if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
@@ -998,7 +1018,8 @@ public class ChatService(
                                 new List<ToolEventDto>(),
                                 llmMessages,
                                 toolBatch.ToolCalls,
-                                ownerId);
+                                ownerId,
+                                speculative: speculative);
                             totalToolCalls = batchResult.TotalToolCalls;
                             exceededToolCallLimit = batchResult.ExceededToolCallLimit;
                             performedWorkItemMutation = performedWorkItemMutation || batchResult.PerformedMutation;
@@ -1033,7 +1054,10 @@ public class ChatService(
                                 generationState: ChatGenerationStates.Running,
                                 generationStatus: $"Running {FormatToolStatus(toolCall.Name)}...",
                                 ownerId: ownerId);
-                            var toolResult = await ExecuteToolAsync(toolCall, toolContext, config, toolDefs, mcpToolSession, requestCancellation);
+                            var toolResult = await speculative.GetOrExecuteAsync(
+                                toolCall,
+                                (tc, ct) => ExecuteToolAsync(tc, toolContext, config, toolDefs, mcpToolSession, ct),
+                                requestCancellation);
                             await ApplyToolResultAsync(
                                 projectId,
                                 sessionId,
@@ -1504,7 +1528,8 @@ public class ChatService(
         List<ToolEventDto> toolEvents,
         List<LLMMessage> llmMessages,
         IReadOnlyList<LLMToolCall> toolCalls,
-        string? ownerId = null)
+        string? ownerId = null,
+        SpeculativeToolExecutor? speculative = null)
     {
         var exceededToolCallLimit = false;
         var executableCalls = new List<LLMToolCall>();
@@ -1544,7 +1569,12 @@ public class ChatService(
 
         var toolResults = await Task.WhenAll(executableCalls.Select(async toolCall =>
         {
-            var result = await ExecuteToolAsync(toolCall, toolContext, config, allowedTools, mcpToolSession, cancellationToken);
+            var result = speculative is not null
+                ? await speculative.GetOrExecuteAsync(
+                    toolCall,
+                    (tc, ct) => ExecuteToolAsync(tc, toolContext, config, allowedTools, mcpToolSession, ct),
+                    cancellationToken)
+                : await ExecuteToolAsync(toolCall, toolContext, config, allowedTools, mcpToolSession, cancellationToken);
             return (toolCall, result);
         }));
 
