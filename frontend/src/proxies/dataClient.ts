@@ -16,7 +16,7 @@ import {
   getSkillTemplates, getUserSkills, createUserSkill, updateUserSkill, deleteUserSkill,
   getProjectSkills, createProjectSkill, updateProjectSkill, deleteProjectSkill,
   linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
-  getMcpServers, getMcpServerTemplates, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
+  getMcpServers, getMcpServerTemplates, getSystemMcpServers, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
   getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
 } from './'
 import type {
@@ -825,6 +825,10 @@ export function useMcpServers(enabled = true) {
 
 export function useMcpServerTemplates(enabled = true) {
   return useDataQuery('mcp-server-templates', getMcpServerTemplates, [], [], { enableFetch: enabled })
+}
+
+export function useSystemMcpServers(enabled = true) {
+  return useDataQuery('system-mcp-servers', getSystemMcpServers, [], [], { enableFetch: enabled })
 }
 
 export function useCreateMcpServer() {

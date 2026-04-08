@@ -146,6 +146,7 @@ export {
   useCreateGitHubRepo,
   useMcpServers,
   useMcpServerTemplates,
+  useSystemMcpServers,
   useCreateMcpServer,
   useUpdateMcpServer,
   useDeleteMcpServer,

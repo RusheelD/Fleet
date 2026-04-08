@@ -279,6 +279,10 @@ builder.Services.Configure<ModelCatalogOptions>(builder.Configuration
     .GetSection($"{LLMOptions.SectionName}:{ModelCatalogOptions.SectionName}"));
 builder.Services.AddSingleton<IModelCatalog, ModelCatalog>();
 
+// System-level MCP servers (available to all users without per-user configuration)
+builder.Services.Configure<SystemMcpServersOptions>(
+    builder.Configuration.GetSection(SystemMcpServersOptions.SectionName));
+
 var configuredLlmTimeoutSeconds = builder.Configuration.GetValue<int?>("LLM:TimeoutSeconds") ?? 1800;
 var configuredGenerateLlmTimeoutSeconds = builder.Configuration.GetValue<int?>("LLM:GenerateTimeoutSeconds") ?? configuredLlmTimeoutSeconds;
 var configuredMaxLlmTimeoutSeconds = Math.Max(configuredLlmTimeoutSeconds, configuredGenerateLlmTimeoutSeconds);

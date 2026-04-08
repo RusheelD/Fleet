@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
+using Microsoft.Extensions.Options;
 
 namespace Fleet.Server.Mcp;
 
@@ -8,6 +9,7 @@ public class McpServerService(
     IMcpServerRepository repository,
     IMcpSecretProtector secretProtector,
     IMcpRuntimeConnector runtimeConnector,
+    IOptions<SystemMcpServersOptions> systemMcpOptions,
     ILogger<McpServerService> logger) : IMcpServerService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -132,6 +134,29 @@ public class McpServerService(
         return servers.Select(ToRuntimeConfig).ToList();
     }
 
+    public IReadOnlyList<McpServerRuntimeConfig> GetSystemRuntimeConfigs()
+    {
+        var configs = systemMcpOptions.Value.Servers;
+        if (configs.Length == 0)
+            return [];
+
+        return configs
+            .Where(s => s.Enabled)
+            .Select((s, index) => new McpServerRuntimeConfig(
+                Id: -(index + 1), // negative IDs for system servers to avoid collisions
+                Name: s.Name,
+                TransportType: s.TransportType,
+                Command: s.Command,
+                Arguments: s.Arguments,
+                WorkingDirectory: s.WorkingDirectory,
+                Endpoint: s.Endpoint,
+                EnvironmentVariables: s.EnvironmentVariables.ToDictionary(
+                    kv => kv.Key, kv => (string?)kv.Value, StringComparer.OrdinalIgnoreCase),
+                Headers: s.Headers.ToDictionary(
+                    kv => kv.Key, kv => (string?)kv.Value, StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
     private static readonly IReadOnlyList<McpServerTemplateDto> BuiltInTemplates =
     [
         new(
@@ -204,6 +229,61 @@ public class McpServerService(
             [
                 "Requires Node.js and npm or npx on the Fleet host.",
                 "Helpful for lightweight research and docs lookup without wiring a full browser server."
+            ]),
+        new(
+            Key: "brave-search",
+            Name: "Brave Search",
+            Description: "Search the web using Brave Search API. Supports both web and news search.",
+            TransportType: "stdio",
+            Command: "npx",
+            Arguments: ["-y", "@modelcontextprotocol/server-brave-search"],
+            WorkingDirectory: null,
+            Endpoint: null,
+            EnvironmentVariables:
+            [
+                new McpServerTemplateFieldDto(
+                    "BRAVE_API_KEY",
+                    "API key for Brave Search (get one at https://api.search.brave.com/).",
+                    IsSecret: true,
+                    Required: true)
+            ],
+            Headers: [],
+            Notes:
+            [
+                "Requires a Brave Search API key.",
+                "Useful for giving agents access to real-time web search results."
+            ]),
+        new(
+            Key: "puppeteer",
+            Name: "Puppeteer Browser",
+            Description: "Control a headless Chrome browser via Puppeteer for screenshots, navigation, and page interaction.",
+            TransportType: "stdio",
+            Command: "npx",
+            Arguments: ["-y", "@modelcontextprotocol/server-puppeteer"],
+            WorkingDirectory: null,
+            Endpoint: null,
+            EnvironmentVariables: [],
+            Headers: [],
+            Notes:
+            [
+                "Requires Node.js and npm or npx on the Fleet host.",
+                "Alternative to Playwright for browser automation. Uses headless Chrome."
+            ]),
+        new(
+            Key: "memory",
+            Name: "Memory",
+            Description: "Give agents persistent memory using a knowledge graph stored in a local JSON file.",
+            TransportType: "stdio",
+            Command: "npx",
+            Arguments: ["-y", "@modelcontextprotocol/server-memory"],
+            WorkingDirectory: null,
+            Endpoint: null,
+            EnvironmentVariables: [],
+            Headers: [],
+            Notes:
+            [
+                "Stores a knowledge graph in a local file for cross-session recall.",
+                "Useful for giving agents long-term memory across multiple interactions."
             ])
     ];
 

@@ -28,6 +28,7 @@ export type {
   McpServerTemplateField,
   McpServerValidationResult,
   McpServerVariable,
+  SystemMcpServer,
   UserPreferences,
   UserSettings,
 } from './user'

@@ -21,12 +21,13 @@ import {
     useDeleteMcpServer,
     useMcpServerTemplates,
     useMcpServers,
+    useSystemMcpServers,
     useUpdateMcpServer,
     useValidateMcpServer,
     getApiErrorMessage,
     type UpsertMcpServerRequest,
 } from '../../proxies'
-import type { McpServer, McpServerTemplate, McpServerVariable } from '../../models'
+import type { McpServer, McpServerTemplate, McpServerVariable, SystemMcpServer } from '../../models'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 
@@ -281,6 +282,7 @@ export function McpServersSection() {
     const isMobile = useIsMobile()
     const { data: servers = [], isLoading: isLoadingServers } = useMcpServers()
     const { data: templates = [] } = useMcpServerTemplates()
+    const { data: systemServers = [] } = useSystemMcpServers()
     const createServer = useCreateMcpServer()
     const updateServer = useUpdateMcpServer()
     const deleteServer = useDeleteMcpServer()
@@ -610,6 +612,33 @@ export function McpServersSection() {
                     )
                 })}
             </div>
+
+            {systemServers.length > 0 && (
+                <>
+                    <Divider />
+                    <div className={styles.serverList}>
+                        <Text weight="semibold">System Servers</Text>
+                        <Caption1>
+                            These MCP servers are configured at the system level and are automatically available to all users and agents.
+                        </Caption1>
+                        {systemServers.map((server: SystemMcpServer) => (
+                            <Card
+                                key={server.name}
+                                className={mergeClasses(styles.serverCard, isMobile && styles.serverCardMobile)}
+                            >
+                                <div className={styles.serverMeta}>
+                                    <Text weight="semibold">{server.name}</Text>
+                                    <Caption1>{server.transportType === 'http' ? server.endpoint : `${server.command ?? ''} ${server.arguments.join(' ')}`}</Caption1>
+                                    <div className={styles.serverBadges}>
+                                        <Badge appearance="outline">{server.transportType.toUpperCase()}</Badge>
+                                        <Badge appearance="filled" color="brand">System</Badge>
+                                    </div>
+                                </div>
+                            </Card>
+                        ))}
+                    </div>
+                </>
+            )}
         </Card>
     )
 }

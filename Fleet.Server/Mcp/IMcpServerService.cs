@@ -11,4 +11,10 @@ public interface IMcpServerService
     Task DeleteAsync(int userId, int id);
     Task<McpServerValidationResultDto> ValidateAsync(int userId, int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<McpServerRuntimeConfig>> GetEnabledRuntimeConfigsAsync(int userId);
+
+    /// <summary>
+    /// Returns runtime configs for system-level MCP servers defined in appsettings.json.
+    /// These are available to all users without per-user configuration.
+    /// </summary>
+    IReadOnlyList<McpServerRuntimeConfig> GetSystemRuntimeConfigs();
 }

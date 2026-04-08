@@ -11,6 +11,7 @@ import type {
   McpServer,
   McpServerTemplate,
   McpServerValidationResult,
+  SystemMcpServer,
 } from '../models'
 
 export function getUserSettings(): Promise<UserSettings> {
@@ -193,4 +194,8 @@ export function deleteMcpServer(id: number): Promise<void> {
 
 export function validateMcpServer(id: number): Promise<McpServerValidationResult> {
   return post<McpServerValidationResult>(`/api/mcp-servers/${id}/validate`, {})
+}
+
+export function getSystemMcpServers(): Promise<SystemMcpServer[]> {
+  return get<SystemMcpServer[]>('/api/mcp-servers/system')
 }

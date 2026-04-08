@@ -59,4 +59,21 @@ public class McpServersController(
         var result = await serverService.ValidateAsync(userId, id, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("system")]
+    public IActionResult GetSystemServers()
+    {
+        var configs = serverService.GetSystemRuntimeConfigs();
+        var result = configs.Select(c => new
+        {
+            c.Name,
+            c.TransportType,
+            c.Command,
+            c.Arguments,
+            c.WorkingDirectory,
+            c.Endpoint,
+            isSystem = true,
+        });
+        return Ok(result);
+    }
 }

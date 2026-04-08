@@ -73,6 +73,16 @@ export interface McpServerValidationResult {
   toolNames: string[]
 }
 
+export interface SystemMcpServer {
+  name: string
+  transportType: 'stdio' | 'http' | string
+  command?: string | null
+  arguments: string[]
+  workingDirectory?: string | null
+  endpoint?: string | null
+  isSystem: true
+}
+
 export interface UserPreferences {
   agentCompletedNotification: boolean
   prOpenedNotification: boolean

@@ -32,7 +32,25 @@ public class McpToolSessionFactory(
         Func<McpRuntimeToolDescriptor, bool> includeTool,
         CancellationToken cancellationToken)
     {
-        var configs = await serverService.GetEnabledRuntimeConfigsAsync(userId);
+        var userConfigs = await serverService.GetEnabledRuntimeConfigsAsync(userId);
+        var systemConfigs = serverService.GetSystemRuntimeConfigs();
+
+        // Merge system configs first, then user configs (user overrides by name)
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var configs = new List<McpServerRuntimeConfig>();
+
+        foreach (var cfg in systemConfigs)
+        {
+            if (seenNames.Add(cfg.Name))
+                configs.Add(cfg);
+        }
+
+        foreach (var cfg in userConfigs)
+        {
+            if (seenNames.Add(cfg.Name))
+                configs.Add(cfg);
+        }
+
         if (configs.Count == 0)
             return EmptyMcpToolSession.Instance;
 
