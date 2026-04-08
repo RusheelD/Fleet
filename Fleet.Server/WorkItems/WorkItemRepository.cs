@@ -189,6 +189,34 @@ public class WorkItemRepository(FleetDbContext context) : IWorkItemRepository
         return true;
     }
 
+    public async Task<WorkItemStateCounts> GetStateCountsAsync(string projectId)
+    {
+        var counts = await context.WorkItems
+            .AsNoTracking()
+            .Where(w => w.ProjectId == projectId)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Active = g.Count(w =>
+                    w.State == "New" ||
+                    w.State == "Active" ||
+                    w.State == "Planning (AI)" ||
+                    w.State == "In Progress" ||
+                    w.State == "In Progress (AI)" ||
+                    w.State == "In-PR" ||
+                    w.State == "In-PR (AI)"),
+                Resolved = g.Count(w =>
+                    w.State == "Resolved" || w.State == "Resolved (AI)"),
+                Closed = g.Count(w => w.State == "Closed"),
+            })
+            .FirstOrDefaultAsync();
+
+        return counts is null
+            ? new WorkItemStateCounts(0, 0, 0, 0)
+            : new WorkItemStateCounts(counts.Total, counts.Active, counts.Resolved, counts.Closed);
+    }
+
     private static WorkItemDto MapToDto(WorkItem w)
     {
         var assignmentMode = NormalizeAssignmentMode(w.AssignmentMode, w.IsAI);

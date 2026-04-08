@@ -75,6 +75,10 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .HasForeignKey(a => a.WorkItemId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Performance indexes for common query patterns
+            builder.HasIndex(w => new { w.ProjectId, w.State });
+            builder.HasIndex(w => w.ProjectId); // fast project-scoped listing
+
             // Tags stored as PostgreSQL text[] (native array support via Npgsql)
         });
 
@@ -188,6 +192,9 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .WithMany(s => s.Messages)
                 .HasForeignKey(m => m.ChatSessionId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Fast ordering by timestamp within a session
+            builder.HasIndex(m => new { m.ChatSessionId, m.Timestamp });
         });
 
         modelBuilder.Entity<ChatAttachment>(builder =>

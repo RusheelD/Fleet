@@ -197,17 +197,16 @@ public class ProjectService(
         var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id);
         var agentSummary = await agentTaskRepository.GetAgentSummaryByProjectIdAsync(project.Id);
         var userId = await authService.GetCurrentUserIdAsync();
-        // ── Real work item metrics from the database ──────────────
+
+        // ── Work items: load for PR-sync side-effect, count for metrics ──
         var workItems = await workItemRepository.GetByProjectIdAsync(project.Id);
         workItems = await ApplyPullRequestReferencesAsync(project, userId, workItems);
+
         var totalItems = workItems.Count;
-        var activeItems = workItems.Count(w =>
-            IsActiveWorkItemState(w.State));
-        var resolvedItems = workItems.Count(w =>
-            w.State.Equals("Resolved", StringComparison.OrdinalIgnoreCase) ||
-            w.State.Equals("Resolved (AI)", StringComparison.OrdinalIgnoreCase));
-        var closedItems = workItems.Count(w =>
-            w.State.Equals("Closed", StringComparison.OrdinalIgnoreCase));
+        var activeItems = workItems.Count(w => w.State is "New" or "Active" or "Planning (AI)"
+            or "In Progress" or "In Progress (AI)" or "In-PR" or "In-PR (AI)");
+        var resolvedItems = workItems.Count(w => w.State is "Resolved" or "Resolved (AI)");
+        var closedItems = workItems.Count(w => w.State is "Closed");
         var completedItems = resolvedItems + closedItems;
         var completionPct = totalItems > 0 ? Math.Round((double)completedItems / totalItems, 2) : 0;
 

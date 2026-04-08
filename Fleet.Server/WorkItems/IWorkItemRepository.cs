@@ -10,4 +10,10 @@ public interface IWorkItemRepository
     Task<WorkItemDto> CreateAsync(string projectId, CreateWorkItemRequest request);
     Task<WorkItemDto?> UpdateAsync(string projectId, int workItemNumber, UpdateWorkItemRequest request);
     Task<bool> DeleteAsync(string projectId, int workItemNumber);
+
+    /// <summary>
+    /// Returns work item state counts for a project using a single DB query.
+    /// Used by the dashboard to avoid loading all work items into memory.
+    /// </summary>
+    Task<WorkItemStateCounts> GetStateCountsAsync(string projectId);
 }

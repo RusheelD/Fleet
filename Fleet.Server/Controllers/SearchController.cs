@@ -2,6 +2,7 @@ using Fleet.Server.Auth;
 using Fleet.Server.Search;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 
 namespace Fleet.Server.Controllers;
 
@@ -11,6 +12,7 @@ namespace Fleet.Server.Controllers;
 public class SearchController(ISearchService searchService, IAuthService authService) : ControllerBase
 {
     [HttpGet]
+    [OutputCache(Duration = 5)]
     public async Task<IActionResult> Search([FromQuery] string? q, [FromQuery] string? type)
     {
         var ownerId = (await authService.GetCurrentUserIdAsync()).ToString();
