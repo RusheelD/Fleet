@@ -93,6 +93,7 @@ builder.Services.Configure<ChatAttachmentStorageOptions>(options =>
 builder.Services.AddHostedService<GitStartupProbeHostedService>();
 builder.Services.AddHostedService<RepoSandboxCleanupService>();
 builder.Services.AddHostedService<AgentExecutionRecoveryService>();
+builder.Services.AddHostedService<LlmPreconnectService>();
 builder.Services.AddHealthChecks()
     .AddCheck<GitHealthCheck>("git", tags: ["ready"]);
 builder.Services.AddSingleton<ServiceStats>();
