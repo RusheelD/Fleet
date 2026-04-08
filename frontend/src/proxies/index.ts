@@ -76,6 +76,7 @@ export {
   createGitHubRepo,
   getMcpServers,
   getMcpServerTemplates,
+  getSystemMcpServers,
   createMcpServer,
   updateMcpServer,
   deleteMcpServer,
