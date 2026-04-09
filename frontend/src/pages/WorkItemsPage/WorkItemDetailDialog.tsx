@@ -316,6 +316,11 @@ const useStyles = makeStyles({
         gap: appTokens.space.sm,
         flexWrap: 'wrap',
     },
+    assetsTitleGroup: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxs,
+    },
     assetList: {
         display: 'flex',
         flexDirection: 'column',
@@ -882,7 +887,7 @@ export function WorkItemDetailDialog({ projectId, item, workItems, levels, onClo
 
                     <div className={styles.assetsSection}>
                         <div className={styles.assetsHeader}>
-                            <div>
+                            <div className={styles.assetsTitleGroup}>
                                 <Text className={styles.sectionTitle}>Assets</Text>
                                 <Caption1>
                                     Upload images, documents, or other files here, then reference them in the description or acceptance criteria so Fleet builders can use them during runs.
