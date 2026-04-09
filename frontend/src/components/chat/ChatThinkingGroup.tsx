@@ -11,7 +11,7 @@ import {
     ChevronDownRegular,
     ChevronRightRegular,
 } from '@fluentui/react-icons'
-import { usePreferences } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
 import { ChatActivityFeed } from './ChatActivityFeed'
 import type { ChatThinkingGroup as ChatThinkingGroupData } from './chatTimeline'

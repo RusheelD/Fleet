@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { PreferencesContext, type PreferencesContextValue } from './PreferencesContext'
-import { useUserSettings, useUpdatePreferences } from '../proxies'
+import { useUserSettings, useUpdatePreferences } from '../proxies/dataClient'
 import type { UserPreferences } from '../models'
 import { useAuth } from './useAuthHook'
 

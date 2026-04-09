@@ -22,7 +22,8 @@ import {
     StopRegular,
 } from '@fluentui/react-icons'
 import type { ChatSessionData } from '../../models'
-import { useIsMobile, usePreferences } from '../../hooks'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

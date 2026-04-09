@@ -12,7 +12,7 @@ import {
 } from '@fluentui/react-icons'
 import { appTokens } from '../../styles/appTokens'
 import { normalizeChatSessionActivity, type ChatSessionActivity } from '../../models/chat'
-import { usePreferences } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
 
 const useStyles = makeStyles({
     feed: {

@@ -15,8 +15,9 @@ import {
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from './'
-import { useMarkAllNotificationsAsRead, useNotifications } from '../../proxies'
-import { useAuth, usePreferences } from '../../hooks'
+import { useMarkAllNotificationsAsRead, useNotifications } from '../../proxies/dataClient'
+import { useAuth } from '../../hooks/useAuthHook'
+import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

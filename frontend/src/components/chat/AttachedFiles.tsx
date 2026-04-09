@@ -12,7 +12,7 @@ import {
     ImageRegular,
 } from '@fluentui/react-icons'
 import type { ChatAttachment } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../shared/InfoBadge'
 import { AuthorizedAttachmentImage, AuthorizedAttachmentLink } from '../shared/AuthorizedAttachment'

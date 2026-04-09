@@ -1,5 +1,5 @@
 import { makeStyles, Button, mergeClasses } from '@fluentui/react-components'
-import { usePreferences } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
 
 const useStyles = makeStyles({
     suggestionsRow: {

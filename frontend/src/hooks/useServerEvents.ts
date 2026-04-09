@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ApiError, fetchWithAuth } from '../proxies'
+import { ApiError, fetchWithAuth } from '../proxies/proxy'
 import { useAuth } from './useAuthHook'
 import { normalizeLogEntry, type AgentExecution, type ChatData, type ChatSessionActivity, type ChatSessionData, type LogEntry } from '../models'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'

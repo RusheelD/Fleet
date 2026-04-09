@@ -1,5 +1,5 @@
 import { useParams } from 'react-router-dom'
-import { useProjectDashboardBySlug } from '../proxies'
+import { useProjectDashboardBySlug } from '../proxies/dataClient'
 
 /**
  * Resolves the current project from the `:slug` route param.

@@ -22,7 +22,10 @@ import {
 import { SidebarHeader, ProjectSelector, SidebarNavItem, TopBar } from './'
 import { SplitView } from '../shared'
 import { ChatDrawer } from '../chat'
-import { useCurrentProject, usePreferences, useServerEvents, useIsMobile } from '../../hooks'
+import { useCurrentProject } from '../../hooks/useCurrentProject'
+import { usePreferences } from '../../hooks/PreferencesContext'
+import { useServerEvents } from '../../hooks/useServerEvents'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
 
 import type { NavItemConfig } from '../../models'

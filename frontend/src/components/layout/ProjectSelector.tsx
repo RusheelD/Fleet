@@ -15,7 +15,7 @@ import {
     CheckmarkRegular,
 } from '@fluentui/react-icons'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useProjects } from '../../proxies'
+import { useProjects } from '../../proxies/dataClient'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

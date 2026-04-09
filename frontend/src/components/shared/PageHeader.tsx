@@ -1,6 +1,6 @@
 import { makeStyles, mergeClasses, Title2, Body1 } from '@fluentui/react-components'
 import type { ReactNode } from 'react'
-import { useIsMobile } from '../../hooks'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

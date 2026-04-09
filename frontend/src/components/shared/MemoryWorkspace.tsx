@@ -19,7 +19,7 @@ import {
 import type { MemoryEntry } from '../../models'
 import { getApiErrorMessage } from '../../proxies/proxy'
 import type { UpsertMemoryEntryRequest } from '../../proxies/userProxy'
-import { useIsMobile } from '../../hooks'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
 
 const memoryTypeOptions: Array<{ value: UpsertMemoryEntryRequest['type']; label: string }> = [

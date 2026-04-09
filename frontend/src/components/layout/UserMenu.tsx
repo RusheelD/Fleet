@@ -16,7 +16,7 @@ import {
     SignOutRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../../hooks'
+import { useAuth } from '../../hooks/useAuthHook'
 
 const useStyles = makeStyles({
     userMenuHeader: {

@@ -9,7 +9,8 @@ import {
     BotRegular,
     DismissRegular,
 } from '@fluentui/react-icons'
-import { usePreferences, useIsMobile } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

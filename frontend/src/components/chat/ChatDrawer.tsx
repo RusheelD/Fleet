@@ -7,9 +7,13 @@ import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatI
 import {
     useChatData, useChatMessages, useCreateChatSession,
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession, useCancelChatGeneration,
-    cancelChatSessionRequests, sendChatMessage, getApiErrorMessage,
-} from '../../proxies'
-import { useAuth, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
+} from '../../proxies/dataClient'
+import { cancelChatSessionRequests, sendChatMessage } from '../../proxies/chatProxy'
+import { getApiErrorMessage } from '../../proxies/proxy'
+import { useAuth } from '../../hooks/useAuthHook'
+import { usePreferences } from '../../hooks/PreferencesContext'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { useServerEventConnection } from '../../hooks/useServerEvents'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import { appTokens } from '../../styles/appTokens'
 import type { ChatAttachment, ChatGenerationState, ChatMessageData } from '../../models'

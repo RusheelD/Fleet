@@ -5,7 +5,7 @@ import {
 } from '@fluentui/react-components'
 import { useNavigate } from 'react-router-dom'
 import type { NavItemConfig } from '../../models'
-import { usePreferences } from '../../hooks'
+import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

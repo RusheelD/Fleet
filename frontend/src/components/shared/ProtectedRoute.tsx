@@ -2,7 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom'
 import { useMsal } from '@azure/msal-react'
 import { InteractionStatus } from '@azure/msal-browser'
 import { Spinner, makeStyles } from '@fluentui/react-components'
-import { useAuth } from '../../hooks'
+import { useAuth } from '../../hooks/useAuthHook'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({

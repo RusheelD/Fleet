@@ -17,7 +17,7 @@ import {
 import type { PromptSkill, PromptSkillTemplate } from '../../models'
 import { getApiErrorMessage } from '../../proxies/proxy'
 import type { UpsertPromptSkillRequest } from '../../proxies/userProxy'
-import { useIsMobile } from '../../hooks'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
 
 interface PlaybookWorkspaceProps {
