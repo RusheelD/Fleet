@@ -1,4 +1,4 @@
-import { del, get, post } from './'
+import { del, get, post } from './proxy'
 import { normalizeLogEntries, type AgentExecution, type LogEntry } from '../models'
 
 export function getExecutions(projectId: string): Promise<AgentExecution[]> {

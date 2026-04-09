@@ -1,4 +1,4 @@
-import { get } from './'
+import { get } from './proxy'
 import type { SearchResult } from '../models'
 
 export function search(query: string, type?: string): Promise<SearchResult[]> {

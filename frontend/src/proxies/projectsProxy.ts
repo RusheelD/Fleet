@@ -1,4 +1,4 @@
-import { get, post, put, del, fetchWithAuth, ApiError } from './'
+import { get, post, put, del, fetchWithAuth, ApiError } from './proxy'
 import type { ProjectData, ProjectDashboard, SlugCheckResult } from '../models'
 
 export interface CreateProjectRequest {

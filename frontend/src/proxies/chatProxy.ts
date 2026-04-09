@@ -1,4 +1,4 @@
-import { get, post, put, del, postForm } from './'
+import { get, post, put, del, postForm } from './proxy'
 import type { ChatData, ChatMessageData, ChatSessionData, SendMessageResponse, ChatAttachment } from '../models'
 
 const GLOBAL_CHAT_BASE = '/api/chat'

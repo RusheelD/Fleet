@@ -1,4 +1,4 @@
-import { get, put, post, del } from './'
+import { get, put, post, del } from './proxy'
 import type {
   UserSettings,
   UserProfile,

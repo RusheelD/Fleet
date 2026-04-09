@@ -1,4 +1,4 @@
-import { get } from './'
+import { get } from './proxy'
 import type { SubscriptionData } from '../models'
 
 export function getSubscription(): Promise<SubscriptionData> {

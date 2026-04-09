@@ -1,4 +1,4 @@
-import { get, post } from './'
+import { get, post } from './proxy'
 import type { NotificationEvent } from '../models'
 
 export function getNotifications(unreadOnly = false): Promise<NotificationEvent[]> {

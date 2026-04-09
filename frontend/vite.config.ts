@@ -98,19 +98,10 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
           manualChunks(id: string) {
             const normalizedId = id.replace(/\\/g, '/')
 
+            // Only split node_modules into manual chunks.
+            // App code (src/) is left to Rollup's automatic splitting
+            // to avoid circular chunk dependencies between tightly-coupled modules.
             if (!normalizedId.includes('node_modules')) {
-              if (normalizedId.includes('/src/proxies/')) {
-                return 'app-proxies'
-              }
-
-              if (normalizedId.includes('/src/components/shared/')) {
-                return 'app-shared'
-              }
-
-              if (normalizedId.includes('/src/hooks/')) {
-                return 'app-hooks'
-              }
-
               return
             }
 

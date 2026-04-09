@@ -1,4 +1,4 @@
-import { get, post, put, del } from './'
+import { get, post, put, del } from './proxy'
 import type { WorkItemLevel } from '../models'
 
 export interface CreateWorkItemLevelRequest {

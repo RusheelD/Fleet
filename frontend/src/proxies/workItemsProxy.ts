@@ -1,4 +1,4 @@
-import { get, post, put, del, postForm, fetchWithAuth, ApiError } from './'
+import { get, post, put, del, postForm, fetchWithAuth, ApiError } from './proxy'
 import type { WorkItem, WorkItemAttachment } from '../models'
 
 export function getWorkItems(projectId: string): Promise<WorkItem[]> {
