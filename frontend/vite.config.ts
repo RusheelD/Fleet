@@ -118,7 +118,7 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
               return 'fluent-icons'
             }
 
-            if (normalizedId.includes('@fluentui')) {
+            if (normalizedId.includes('@fluentui') || normalizedId.includes('@griffel')) {
               return 'fluentui'
             }
 
@@ -134,7 +134,7 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
               return 'query'
             }
 
-            if (normalizedId.includes('react-router') || normalizedId.includes('react-dom') || /node_modules\/react\//.test(normalizedId)) {
+            if (normalizedId.includes('react-router') || normalizedId.includes('react-dom') || /node_modules\/react\//.test(normalizedId) || normalizedId.includes('node_modules/scheduler')) {
               return 'react-core'
             }
 
