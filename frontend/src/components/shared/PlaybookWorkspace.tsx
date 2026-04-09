@@ -111,6 +111,11 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: appTokens.space.md,
   },
+  titleGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.xxs,
+  },
   helperText: {
     color: appTokens.color.textMuted,
   },
@@ -253,7 +258,7 @@ export function PlaybookWorkspace({
   return (
     <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
       <div className={styles.header}>
-        <div>
+        <div className={styles.titleGroup}>
           <Title3>{title}</Title3>
           <Caption1 className={styles.helperText}>{subtitle}</Caption1>
         </div>
@@ -265,7 +270,7 @@ export function PlaybookWorkspace({
       {templates && templates.length > 0 ? (
         <>
           <Divider />
-          <div>
+          <div className={styles.titleGroup}>
             <Text weight="semibold">Built-in Playbooks</Text>
             <Caption1 className={styles.helperText}>
               Fleet can already use these built-ins automatically. You can also copy one into the editor as a starting point for a custom playbook.
@@ -300,7 +305,7 @@ export function PlaybookWorkspace({
           orderedPlaybooks.map((playbook) => (
             <Card key={playbook.id} className={styles.playbookCard}>
               <div className={styles.playbookHeader}>
-                <div>
+                <div className={styles.titleGroup}>
                   <Text weight="semibold">{playbook.name}</Text>
                   <Caption1>{playbook.description}</Caption1>
                 </div>
@@ -330,7 +335,7 @@ export function PlaybookWorkspace({
       <Divider />
 
       <div className={styles.form}>
-        <div>
+        <div className={styles.titleGroup}>
           <Text weight="semibold">{isEditing ? 'Edit playbook' : 'Add playbook'}</Text>
           <Caption1 className={styles.helperText}>
             Keep the description and usage guidance crisp so Fleet knows when to apply this playbook.

@@ -122,6 +122,11 @@ const useStyles = makeStyles({
     gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
     gap: appTokens.space.md,
   },
+  titleGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.xxs,
+  },
   helperText: {
     color: appTokens.color.textMuted,
   },
@@ -246,7 +251,7 @@ export function MemoryWorkspace({
   return (
     <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
       <div className={styles.header}>
-        <div>
+        <div className={styles.titleGroup}>
           <Title3>{title}</Title3>
           <Caption1 className={styles.helperText}>{subtitle}</Caption1>
         </div>
@@ -266,7 +271,7 @@ export function MemoryWorkspace({
           orderedMemories.map((memory) => (
             <Card key={memory.id} className={styles.memoryCard}>
               <div className={styles.memoryHeader}>
-                <div>
+                <div className={styles.titleGroup}>
                   <Text weight="semibold">{memory.name}</Text>
                   <Caption1>{memory.description}</Caption1>
                 </div>
@@ -299,7 +304,7 @@ export function MemoryWorkspace({
       <Divider />
 
       <div className={styles.form}>
-        <div>
+        <div className={styles.titleGroup}>
           <Text weight="semibold">{isEditing ? 'Edit memory' : 'Add memory'}</Text>
           <Caption1 className={styles.helperText}>
             Keep the description concise so Fleet can decide when this memory matters.
