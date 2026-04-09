@@ -4,7 +4,7 @@ using Fleet.Server.WorkItems;
 namespace Fleet.Server.Copilot.Tools;
 
 /// <summary>Deletes multiple work items in a single tool call.</summary>
-public class BulkDeleteWorkItemsTool(IWorkItemService workItemService) : IChatTool
+public class BulkDeleteWorkItemsTool(IWorkItemService workItemService, IWorkItemRepository workItemRepository) : IChatTool
 {
     public string Name => "bulk_delete_work_items";
 
@@ -37,13 +37,29 @@ public class BulkDeleteWorkItemsTool(IWorkItemService workItemService) : IChatTo
         if (!root.TryGetProperty("ids", out var idsEl) || idsEl.ValueKind != JsonValueKind.Array)
             return "Error: 'ids' array is required.";
 
-        var results = new List<object>();
+        var ids = new List<int>();
         foreach (var idEl in idsEl.EnumerateArray())
         {
-            int id = 0;
-            if (idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var n)) id = n;
-            else if (idEl.ValueKind == JsonValueKind.String && int.TryParse(idEl.GetString(), out var s)) id = s;
+            if (idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var n)) ids.Add(n);
+            else if (idEl.ValueKind == JsonValueKind.String && int.TryParse(idEl.GetString(), out var s)) ids.Add(s);
+        }
 
+        // Sort deepest-first so children are deleted before parents,
+        // avoiding FK constraint failures (parent→child uses Restrict).
+        var workItems = await workItemRepository.GetByProjectIdAsync(projectId);
+        var parentLookup = workItems.ToDictionary(w => w.WorkItemNumber, w => w.ParentWorkItemNumber);
+
+        int Depth(int workItemNumber)
+        {
+            var parent = parentLookup.GetValueOrDefault(workItemNumber);
+            return parent is null or 0 ? 0 : 1 + Depth(parent.Value);
+        }
+
+        var sortedIds = ids.OrderByDescending(Depth).ToList();
+
+        var results = new List<object>();
+        foreach (var id in sortedIds)
+        {
             if (id <= 0) { results.Add(new { Id = id, Error = "Invalid id." }); continue; }
 
             try

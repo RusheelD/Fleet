@@ -54,7 +54,11 @@ export function bulkUpdateWorkItems(
 }
 
 export async function bulkDeleteWorkItems(projectId: string, workItemNumbers: number[]): Promise<void> {
-  await Promise.all(workItemNumbers.map((workItemNumber) => deleteWorkItem(projectId, workItemNumber)))
+  // Delete sequentially — callers sort deepest-first so children are
+  // removed before their parents, avoiding FK constraint failures.
+  for (const workItemNumber of workItemNumbers) {
+    await deleteWorkItem(projectId, workItemNumber)
+  }
 }
 
 export function deleteWorkItem(projectId: string, workItemNumber: number): Promise<void> {

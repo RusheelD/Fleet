@@ -695,7 +695,16 @@ export function WorkItemsPage() {
             return
         }
 
-        bulkDeleteMutation.mutate(selectedItems, {
+        // Sort deepest-first so children are deleted before parents,
+        // avoiding FK constraint failures.
+        const depthOf = (num: number): number => {
+            const item = workItems?.find(w => w.workItemNumber === num)
+            if (!item?.parentWorkItemNumber) return 0
+            return 1 + depthOf(item.parentWorkItemNumber)
+        }
+        const sorted = [...selectedItems].sort((a, b) => depthOf(b) - depthOf(a))
+
+        bulkDeleteMutation.mutate(sorted, {
             onSuccess: () => {
                 clearSelection()
                 setBulkState('')
@@ -705,7 +714,7 @@ export function WorkItemsPage() {
                 }
             },
         })
-    }, [bulkDeleteMutation, clearSelection, selectedItem, selectedWorkItemNumbers])
+    }, [bulkDeleteMutation, clearSelection, selectedItem, selectedWorkItemNumbers, workItems])
 
     const handleSelectDescendants = useCallback(() => {
         if (descendantSelection.length === 0) {

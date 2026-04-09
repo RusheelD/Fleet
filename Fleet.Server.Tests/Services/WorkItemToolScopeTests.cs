@@ -25,7 +25,8 @@ public class WorkItemToolScopeTests
     public async Task BulkDeleteWorkItemsTool_GlobalScope_ReturnsScopeError()
     {
         var workItemService = new Mock<IWorkItemService>();
-        var sut = new BulkDeleteWorkItemsTool(workItemService.Object);
+        var workItemRepository = new Mock<IWorkItemRepository>();
+        var sut = new BulkDeleteWorkItemsTool(workItemService.Object, workItemRepository.Object);
 
         var result = await sut.ExecuteAsync("""{"ids":[1,2,3]}""", new ChatToolContext(null, "42"));
 
