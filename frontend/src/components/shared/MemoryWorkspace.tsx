@@ -17,7 +17,8 @@ import {
   mergeClasses,
 } from '@fluentui/react-components'
 import type { MemoryEntry } from '../../models'
-import { getApiErrorMessage, type UpsertMemoryEntryRequest } from '../../proxies'
+import { getApiErrorMessage } from '../../proxies/proxy'
+import type { UpsertMemoryEntryRequest } from '../../proxies/userProxy'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ImgHTMLAttributes, MouseEvent, ReactNode } from 'react'
 import { Link, Spinner, makeStyles, mergeClasses } from '@fluentui/react-components'
 import { appTokens } from '../../styles/appTokens'
-import { fetchWithAuth } from '../../proxies'
+import { fetchWithAuth } from '../../proxies/proxy'
 import { isProtectedChatAttachmentUrl, openProtectedAttachmentUrl } from './chatAttachmentUrl'
 
 const useStyles = makeStyles({

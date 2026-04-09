@@ -1,4 +1,4 @@
-import { fetchWithAuth } from '../../proxies'
+import { fetchWithAuth } from '../../proxies/proxy'
 
 const ProtectedAttachmentPathPattern = /\/api\/(?:chat\/attachments\/[^/]+\/content|projects\/[^/]+\/work-items\/\d+\/attachments\/[^/]+\/content)(?:$|\?)/i
 

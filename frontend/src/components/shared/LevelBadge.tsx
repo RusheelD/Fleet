@@ -1,6 +1,6 @@
 import { makeStyles, Tooltip, mergeClasses } from '@fluentui/react-components'
 import type { WorkItemLevel } from '../../models'
-import { resolveLevelIcon } from '../../proxies'
+import { resolveLevelIcon } from '../../proxies/levelIconMap'
 
 const useStyles = makeStyles({
     badge: {

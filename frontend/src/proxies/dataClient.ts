@@ -3,27 +3,30 @@ import { useMemo } from 'react'
 import { normalizeChatSessionActivities } from '../models/chat'
 import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
+} from './projectsProxy'
+import type { CreateProjectRequest, UpdateProjectRequest } from './projectsProxy'
+import {
   getWorkItems, createWorkItem, updateWorkItem, bulkUpdateWorkItems, bulkDeleteWorkItems, deleteWorkItem, exportWorkItemsFile, importWorkItemsFile,
   getWorkItemAttachments, uploadWorkItemAttachment, deleteWorkItemAttachment,
-  getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel,
+} from './workItemsProxy'
+import type { CreateWorkItemRequest, UpdateWorkItemRequest } from './workItemsProxy'
+import { getWorkItemLevels, createWorkItemLevel, updateWorkItemLevel, deleteWorkItemLevel } from './levelsProxy'
+import type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './levelsProxy'
+import {
   getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
-  getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration,
-  getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession,
-  search,
-  getSubscription,
+} from './agentsProxy'
+import { getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession } from './chatProxy'
+import { search } from './searchProxy'
+import { getSubscription } from './subscriptionProxy'
+import {
   getUserSettings, updateProfile, updatePreferences, getUserMemories, createUserMemory, updateUserMemory, deleteUserMemory,
   getProjectMemories, createProjectMemory, updateProjectMemory, deleteProjectMemory,
   getSkillTemplates, getUserSkills, createUserSkill, updateUserSkill, deleteUserSkill,
   getProjectSkills, createProjectSkill, updateProjectSkill, deleteProjectSkill,
   linkGitHub, unlinkGitHub, setPrimaryGitHubAccount, getGitHubRepos, createGitHubRepo,
   getMcpServers, getMcpServerTemplates, getSystemMcpServers, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
-  getNotifications, markNotificationAsRead, markAllNotificationsAsRead,
-} from './'
-import type {
-  CreateProjectRequest, UpdateProjectRequest,
-  CreateWorkItemRequest, UpdateWorkItemRequest,
-  CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest,
-} from './'
+} from './userProxy'
+import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5

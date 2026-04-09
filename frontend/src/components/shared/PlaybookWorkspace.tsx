@@ -15,7 +15,8 @@ import {
   mergeClasses,
 } from '@fluentui/react-components'
 import type { PromptSkill, PromptSkillTemplate } from '../../models'
-import { getApiErrorMessage, type UpsertPromptSkillRequest } from '../../proxies'
+import { getApiErrorMessage } from '../../proxies/proxy'
+import type { UpsertPromptSkillRequest } from '../../proxies/userProxy'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 

@@ -27,7 +27,7 @@ import {
     CalendarRegular,
     TagRegular,
 } from '@fluentui/react-icons'
-import { FleetRocketLogo } from '../components/shared'
+import { FleetRocketLogo } from '../components/shared/FleetRocketLogo'
 
 /**
  * Maps level icon name strings from the API to Fluent UI React icon components.

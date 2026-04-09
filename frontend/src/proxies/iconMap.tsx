@@ -13,7 +13,7 @@ import {
     QuestionCircleRegular,
     HistoryRegular,
 } from '@fluentui/react-icons'
-import { FleetRocketLogo } from '../components/shared'
+import { FleetRocketLogo } from '../components/shared/FleetRocketLogo'
 
 const iconMap: Record<string, ReactNode> = {
     branch: <BranchRegular />,
