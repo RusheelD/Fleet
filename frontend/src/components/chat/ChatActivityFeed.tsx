@@ -109,25 +109,25 @@ export function ChatActivityFeed({ activities }: ChatActivityFeedProps) {
             {activities.map((activity, index) => {
                 const normalizedActivity = normalizeChatSessionActivity(activity, index)
                 return (
-                <div
-                    key={normalizedActivity.id}
-                    className={mergeClasses(styles.item, isCompact && styles.itemCompact)}
-                >
-                    {renderActivityIcon(normalizedActivity, styles)}
-                    <div className={styles.content}>
-                        <div className={styles.titleRow}>
-                            <Text weight="semibold" size={200} className={styles.title}>
-                                {getActivityTitle(normalizedActivity)}
-                            </Text>
-                            <Caption1 className={styles.meta}>
-                                {formatActivityTime(normalizedActivity.timestampUtc)}
+                    <div
+                        key={normalizedActivity.id}
+                        className={mergeClasses(styles.item, isCompact && styles.itemCompact)}
+                    >
+                        {renderActivityIcon(normalizedActivity, styles)}
+                        <div className={styles.content}>
+                            <div className={styles.titleRow}>
+                                <Text weight="semibold" size={200} className={styles.title}>
+                                    {getActivityTitle(normalizedActivity)}
+                                </Text>
+                                <Caption1 className={styles.meta}>
+                                    {formatActivityTime(normalizedActivity.timestampUtc)}
+                                </Caption1>
+                            </div>
+                            <Caption1 className={styles.message}>
+                                {normalizedActivity.message}
                             </Caption1>
                         </div>
-                        <Caption1 className={styles.message}>
-                            {normalizedActivity.message}
-                        </Caption1>
                     </div>
-                </div>
                 )
             })}
         </div>

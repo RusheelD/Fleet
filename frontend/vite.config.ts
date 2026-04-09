@@ -114,10 +114,6 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
               return
             }
 
-            if (normalizedId.includes('@fluentui/react-icons')) {
-              return 'fluent-icons'
-            }
-
             if (normalizedId.includes('@fluentui') || normalizedId.includes('@griffel')) {
               return 'fluentui'
             }

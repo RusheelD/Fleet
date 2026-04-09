@@ -243,17 +243,17 @@ interface ChatInputProps {
     value: string
     onChange: (value: string) => void
     onSend?: () => void
-  onGenerate?: () => void
-  onCancelGeneration?: () => void
-  allowGenerate?: boolean
-  onFileSelect?: (files: File[]) => void
-  disabled?: boolean
-  uploading?: boolean
-  forceStackedLayout?: boolean
-  isGenerating?: boolean
-  canceling?: boolean
-  statusMessage?: string | null
-  statusState?: 'idle' | 'running' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
+    onGenerate?: () => void
+    onCancelGeneration?: () => void
+    allowGenerate?: boolean
+    onFileSelect?: (files: File[]) => void
+    disabled?: boolean
+    uploading?: boolean
+    forceStackedLayout?: boolean
+    isGenerating?: boolean
+    canceling?: boolean
+    statusMessage?: string | null
+    statusState?: 'idle' | 'running' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
 }
 
 export function ChatInput({
