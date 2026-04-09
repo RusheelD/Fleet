@@ -85,14 +85,11 @@ public class ChatService(
 
         logger.CopilotChatDataRetrieving(projectId.SanitizeForLogging());
 
-        // Run repair and session fetch in parallel
-        var repairTask = RepairStaleGeneratingSessionsAsync(projectId);
-        var sessionsTask = chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
-        var suggestionsTask = chatSessionRepository.GetSuggestionsAsync(projectId);
-        await Task.WhenAll(repairTask, sessionsTask, suggestionsTask);
-
-        var sessions = await sessionsTask;
-        var suggestions = await suggestionsTask;
+        // Run sequentially — repository methods share a scoped DbContext
+        // which does not support concurrent async operations.
+        await RepairStaleGeneratingSessionsAsync(projectId);
+        var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+        var suggestions = await chatSessionRepository.GetSuggestionsAsync(projectId);
         var activeSession = sessions.FirstOrDefault(s => s.IsActive);
         var messages = activeSession is not null
             ? await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, activeSession.Id)
@@ -1588,7 +1585,10 @@ public class ChatService(
                 ownerId: ownerId);
         }
 
-        var toolResults = await Task.WhenAll(executableCalls.Select(async toolCall =>
+        // Execute tools sequentially — tool handlers share a scoped DbContext
+        // which does not support concurrent async operations.
+        var toolResults = new List<(LLMToolCall toolCall, string result)>();
+        foreach (var toolCall in executableCalls)
         {
             var result = speculative is not null
                 ? await speculative.GetOrExecuteAsync(
@@ -1596,8 +1596,8 @@ public class ChatService(
                     (tc, ct) => ExecuteToolAsync(tc, toolContext, config, allowedTools, mcpToolSession, ct),
                     cancellationToken)
                 : await ExecuteToolAsync(toolCall, toolContext, config, allowedTools, mcpToolSession, cancellationToken);
-            return (toolCall, result);
-        }));
+            toolResults.Add((toolCall, result));
+        }
 
         var performedMutation = false;
         foreach (var (toolCall, rawResult) in toolResults)

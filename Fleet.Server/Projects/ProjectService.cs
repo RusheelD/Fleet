@@ -46,12 +46,10 @@ public class ProjectService(
         var ownerId = await GetCurrentOwnerIdAsync();
         var projects = await projectRepository.GetAllByOwnerAsync(ownerId);
 
-        // Run independent summary queries in parallel
-        var summariesTask = workItemRepository.GetSummariesByProjectAsync();
-        var agentSummariesTask = agentTaskRepository.GetAgentSummariesByProjectAsync();
-        await Task.WhenAll(summariesTask, agentSummariesTask);
-        var summaries = await summariesTask;
-        var agentSummaries = await agentSummariesTask;
+        // Run summary queries sequentially — repositories share a scoped DbContext
+        // which does not support concurrent async operations.
+        var summaries = await workItemRepository.GetSummariesByProjectAsync();
+        var agentSummaries = await agentTaskRepository.GetAgentSummariesByProjectAsync();
 
         return projects.Select(p =>
         {
