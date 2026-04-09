@@ -40,6 +40,13 @@ interface ErrorBoundaryState {
     error: Error | null
 }
 
+function isStaleChunkError(error: Error): boolean {
+    const msg = error.message
+    return msg.includes('Failed to fetch dynamically imported module')
+        || msg.includes('Importing a module script failed')
+        || msg.includes('error loading dynamically imported module')
+}
+
 class ErrorBoundaryInner extends Component<ErrorBoundaryProps & { classes: ReturnType<typeof useStyles> }, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps & { classes: ReturnType<typeof useStyles> }) {
         super(props)
@@ -52,6 +59,21 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryProps & { classes: Retur
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
         console.error('ErrorBoundary caught:', error, errorInfo)
+
+        // After a deployment, chunk hashes change. Browsers with stale HTML
+        // try to load old chunk URLs that no longer exist. Auto-reload once
+        // to pick up the new HTML with correct chunk references.
+        if (isStaleChunkError(error)) {
+            const key = 'fleet_chunk_reload'
+            const lastReload = sessionStorage.getItem(key)
+            const now = Date.now()
+            // Only auto-reload if we haven't done so in the past 30 seconds
+            // to avoid infinite reload loops.
+            if (!lastReload || now - Number(lastReload) > 30_000) {
+                sessionStorage.setItem(key, String(now))
+                window.location.reload()
+            }
+        }
     }
 
     handleReset = () => {
