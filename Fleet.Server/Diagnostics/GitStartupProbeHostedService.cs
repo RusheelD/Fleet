@@ -17,36 +17,44 @@ public sealed class GitStartupProbeHostedService : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var report = await _healthCheckService.CheckHealthAsync(
-            registration => string.Equals(registration.Name, "git", StringComparison.OrdinalIgnoreCase),
-            cancellationToken);
-
-        if (!report.Entries.TryGetValue("git", out var gitEntry))
+        try
         {
-            _logger.LogWarning("Git startup probe did not return a git health-check entry.");
-            return;
-        }
+            var report = await _healthCheckService.CheckHealthAsync(
+                registration => string.Equals(registration.Name, "git", StringComparison.OrdinalIgnoreCase),
+                cancellationToken);
 
-        var gitPath = gitEntry.Data.TryGetValue("gitPath", out var gitPathValue) ? gitPathValue : null;
-        var version = gitEntry.Data.TryGetValue("version", out var versionValue) ? versionValue : null;
-        var path = gitEntry.Data.TryGetValue("path", out var pathValue) ? pathValue : null;
+            if (!report.Entries.TryGetValue("git", out var gitEntry))
+            {
+                _logger.LogWarning("Git startup probe did not return a git health-check entry.");
+                return;
+            }
 
-        if (gitEntry.Status == HealthStatus.Healthy)
-        {
-            _logger.LogInformation(
-                "Git probe on startup succeeded. Path={GitPath}, Version={GitVersion}, PATH={Path}",
+            var gitPath = gitEntry.Data.TryGetValue("gitPath", out var gitPathValue) ? gitPathValue : null;
+            var version = gitEntry.Data.TryGetValue("version", out var versionValue) ? versionValue : null;
+            var path = gitEntry.Data.TryGetValue("path", out var pathValue) ? pathValue : null;
+
+            if (gitEntry.Status == HealthStatus.Healthy)
+            {
+                _logger.LogInformation(
+                    "Git probe on startup succeeded. Path={GitPath}, Version={GitVersion}, PATH={Path}",
+                    gitPath,
+                    version,
+                    path);
+                return;
+            }
+
+            _logger.LogError(
+                gitEntry.Exception,
+                "Git probe on startup failed. Path={GitPath}, Description={Description}, PATH={Path}",
                 gitPath,
-                version,
+                gitEntry.Description,
                 path);
-            return;
         }
-
-        _logger.LogError(
-            gitEntry.Exception,
-            "Git probe on startup failed. Path={GitPath}, Description={Description}, PATH={Path}",
-            gitPath,
-            gitEntry.Description,
-            path);
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Do not let a diagnostic probe prevent the host from starting.
+            _logger.LogError(ex, "Git startup probe threw an unexpected exception.");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
