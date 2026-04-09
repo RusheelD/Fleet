@@ -24,7 +24,9 @@ public class DatabaseMigrationService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.DataMigrationFailed(ex);
-            throw; // Let the host know startup is broken
+            // Do NOT rethrow: in .NET 8+ the default BackgroundServiceExceptionBehavior
+            // is StopHost, which causes the entire container to exit with code 0.
+            // The app can still serve requests even if migration didn't apply cleanly.
         }
     }
 }
