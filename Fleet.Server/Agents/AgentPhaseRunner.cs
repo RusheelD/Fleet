@@ -327,149 +327,61 @@ public class AgentPhaseRunner(
                         ToolCalls = response.ToolCalls,
                     });
 
-                    // Partition tool calls into consecutive read-only and mutating batches.
-                    // This keeps writes ordered while still parallelizing safe reads around them.
-                    var toolBatches = ToolCallBatchPlanner.PartitionByReadOnly(
-                        response.ToolCalls,
-                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession));
-
-                    // Speculative execution: pre-fire ALL read-only tools from the entire
-                    // response concurrently, regardless of batch position. Reads in batch 3
-                    // start running alongside reads in batch 1, even if a write batch separates
-                    // them. The executor caches results so the batch loop retrieves them instantly.
-                    var speculative = new SpeculativeToolExecutor();
-                    speculative.PrefetchReadOnlyTools(
-                        response.ToolCalls,
-                        toolCall => IsReadOnlyToolCall(toolCall, mcpToolSession),
-                        (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
-                        cts.Token);
-
                     // Aggregate result budget: prevent context blowup from many tool results
                     var resultBudget = new ToolResultBudget(AgentMaxAggregateToolOutputChars);
 
-                    foreach (var toolBatch in toolBatches)
+                    // ── Sequential execution for ALL tools ──
+                    // All tools share a scoped DbContext, so concurrent execution causes
+                    // "a second operation was started on this context" errors. Execute
+                    // every tool call sequentially to guarantee DbContext safety.
+                    foreach (var toolCall in response.ToolCalls)
                     {
-                        if (toolBatch.CanRunInParallel && toolBatch.ToolCalls.Count > 1)
+                        totalToolCalls++;
+                        if (totalToolCalls > maxToolCalls)
                         {
-                            // ── Parallel execution for read-only batches ──
-                            // Results are already pre-fetched by the speculative executor;
-                            // this await simply collects the cached results.
-                            var tasks = toolBatch.ToolCalls.Select(async toolCall =>
-                            {
-                                var result = await speculative.GetOrExecuteAsync(
-                                    toolCall,
-                                    (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
-                                    cts.Token);
-                                return (toolCall, result);
-                            }).ToList();
+                            logger.LogWarning("Phase {Role}: exceeded max tool calls ({Max})",
+                                role, maxToolCalls);
+                            break;
+                        }
 
-                            var results = await Task.WhenAll(tasks);
+                        var toolResult = await ExecuteToolAsync(role, toolCall, toolContext, mcpToolSession, cts.Token);
+                        toolResult = resultBudget.Apply(toolResult);
 
-                            foreach (var (toolCall, rawToolResult) in results)
-                            {
-                                totalToolCalls++;
-                                if (totalToolCalls > maxToolCalls) break;
+                        messages.Add(new LLMMessage
+                        {
+                            Role = "tool",
+                            Content = toolResult,
+                            ToolCallId = toolCall.Id,
+                            ToolName = toolCall.Name,
+                        });
 
-                                var toolResult = resultBudget.Apply(rawToolResult);
-                                messages.Add(new LLMMessage
-                                {
-                                    Role = "tool",
-                                    Content = toolResult,
-                                    ToolCallId = toolCall.Id,
-                                    ToolName = toolCall.Name,
-                                });
+                        // Log tool call as detailed entry (skip report_progress — it has its own log)
+                        if (onToolCall is not null && !toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var snippet = toolResult.Length > 200 ? toolResult[..200] + "…" : toolResult;
+                            try { await onToolCall(toolCall.Name, snippet); }
+                            catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
+                        }
 
-                                // Log tool call as detailed entry (skip report_progress — it has its own log)
-                                if (onToolCall is not null && !toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var snippet = toolResult.Length > 200 ? toolResult[..200] + "…" : toolResult;
-                                    try { await onToolCall(toolCall.Name, snippet); }
-                                    catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
-                                }
-                            }
-
-                            foreach (var (toolCall, _) in results)
-                            {
-                                if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var percent = ParseProgressPercent(toolCall.ArgumentsJson);
-                                    var summary = ParseProgressSummary(toolCall.ArgumentsJson);
-                                    await ReportProgressAsync(percent, summary);
-                                    nonProgressToolCallsSinceLastReport = 0;
-                                }
-                                else
-                                {
-                                    nonProgressToolCallsSinceLastReport++;
-                                    if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
-                                    {
-                                        var estimatedPercent = EstimateProgressPercentFromToolCalls();
-                                        await ReportProgressAsync(
-                                            estimatedPercent,
-                                            $"Working via {toolCall.Name} (step {totalToolCalls})");
-                                        nonProgressToolCallsSinceLastReport = 0;
-                                    }
-                                }
-                            }
+                        if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var percent = ParseProgressPercent(toolCall.ArgumentsJson);
+                            var summary = ParseProgressSummary(toolCall.ArgumentsJson);
+                            await ReportProgressAsync(percent, summary);
+                            nonProgressToolCallsSinceLastReport = 0;
                         }
                         else
                         {
-                            // ── Sequential execution for write operations ──
-                            // Write tools won't be in the speculative cache, so GetOrExecuteAsync
-                            // falls through to direct execution. Single read-only tools may hit the cache.
-                            foreach (var toolCall in toolBatch.ToolCalls)
+                            nonProgressToolCallsSinceLastReport++;
+                            if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
                             {
-                                totalToolCalls++;
-                                if (totalToolCalls > maxToolCalls)
-                                {
-                                    logger.LogWarning("Phase {Role}: exceeded max tool calls ({Max})",
-                                        role, maxToolCalls);
-                                    break;
-                                }
-
-                                var toolResult = await speculative.GetOrExecuteAsync(
-                                    toolCall,
-                                    (tc, ct) => ExecuteToolAsync(role, tc, toolContext, mcpToolSession, ct),
-                                    cts.Token);
-                                toolResult = resultBudget.Apply(toolResult);
-
-                                messages.Add(new LLMMessage
-                                {
-                                    Role = "tool",
-                                    Content = toolResult,
-                                    ToolCallId = toolCall.Id,
-                                    ToolName = toolCall.Name,
-                                });
-
-                                // Log tool call as detailed entry (skip report_progress — it has its own log)
-                                if (onToolCall is not null && !toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var snippet = toolResult.Length > 200 ? toolResult[..200] + "…" : toolResult;
-                                    try { await onToolCall(toolCall.Name, snippet); }
-                                    catch (Exception ex) { logger.LogWarning(ex, "Phase {Role}: tool-call logger failed (non-fatal)", role); }
-                                }
-
-                                if (toolCall.Name.Equals("report_progress", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var percent = ParseProgressPercent(toolCall.ArgumentsJson);
-                                    var summary = ParseProgressSummary(toolCall.ArgumentsJson);
-                                    await ReportProgressAsync(percent, summary);
-                                    nonProgressToolCallsSinceLastReport = 0;
-                                }
-                                else
-                                {
-                                    nonProgressToolCallsSinceLastReport++;
-                                    if (nonProgressToolCallsSinceLastReport >= FallbackProgressCadenceToolCalls)
-                                    {
-                                        var estimatedPercent = EstimateProgressPercentFromToolCalls();
-                                        await ReportProgressAsync(
-                                            estimatedPercent,
-                                            $"Working via {toolCall.Name} (step {totalToolCalls})");
-                                        nonProgressToolCallsSinceLastReport = 0;
-                                    }
-                                }
+                                var estimatedPercent = EstimateProgressPercentFromToolCalls();
+                                await ReportProgressAsync(
+                                    estimatedPercent,
+                                    $"Working via {toolCall.Name} (step {totalToolCalls})");
+                                nonProgressToolCallsSinceLastReport = 0;
                             }
                         }
-
                     }
 
                     if (totalToolCalls > maxToolCalls)
@@ -606,15 +518,6 @@ public class AgentPhaseRunner(
             logger.LogWarning(ex, "Agent tool {ToolName} failed", toolCall.Name);
             return $"Error executing tool '{toolCall.Name}': {ex.Message}";
         }
-    }
-
-    private bool IsReadOnlyToolCall(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
-    {
-        var tool = toolRegistry.Get(toolCall.Name);
-        if (tool is not null)
-            return tool.IsReadOnly;
-
-        return mcpToolSession.HasTool(toolCall.Name) && mcpToolSession.IsReadOnly(toolCall.Name);
     }
 
     private static double ParseProgressPercent(string argumentsJson)

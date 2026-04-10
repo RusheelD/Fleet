@@ -4,7 +4,6 @@ using Fleet.Server.LLM;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using System.Collections.Concurrent;
 
 namespace Fleet.Server.Tests.Services;
 
@@ -152,18 +151,16 @@ public class AgentPhaseRunnerTests
     }
 
     [TestMethod]
-    public async Task RunPhaseAsync_MixedToolBatch_ParallelizesReadOnlySegmentsAroundWriteCalls()
+    public async Task RunPhaseAsync_MixedToolBatch_ExecutesAllToolsSequentially()
     {
         var promptLoader = new Mock<IAgentPromptLoader>();
         promptLoader.Setup(loader => loader.GetPrompt(It.IsAny<AgentRole>())).Returns("system");
 
-        var startOrder = new ConcurrentQueue<string>();
-        var releaseReadBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var readOne = new BlockingAgentTool("read_one", "read one", isReadOnly: true, releaseReadBatch.Task, startOrder);
-        var readTwo = new BlockingAgentTool("read_two", "read two", isReadOnly: true, releaseReadBatch.Task, startOrder);
-        var writeTool = new BlockingAgentTool("write_one", "write one", isReadOnly: false, releaseWrite.Task, startOrder);
-        var readThree = new BlockingAgentTool("read_three", "read three", isReadOnly: true, Task.CompletedTask, startOrder);
+        var executionOrder = new List<string>();
+        var readOne = new OrderTrackingAgentTool("read_one", "read one", isReadOnly: true, executionOrder);
+        var readTwo = new OrderTrackingAgentTool("read_two", "read two", isReadOnly: true, executionOrder);
+        var writeTool = new OrderTrackingAgentTool("write_one", "write one", isReadOnly: false, executionOrder);
+        var readThree = new OrderTrackingAgentTool("read_three", "read three", isReadOnly: true, executionOrder);
 
         var llmClient = new Mock<ILLMClient>();
         var responses = new Queue<LLMResponse>([
@@ -191,33 +188,18 @@ public class AgentPhaseRunnerTests
             Options.Create(new LLMOptions { GenerateModel = "test-model" }),
             NullLogger<AgentPhaseRunner>.Instance);
 
-        var runTask = runner.RunPhaseAsync(
+        var result = await runner.RunPhaseAsync(
             AgentRole.Backend,
             "Implement the feature",
             new AgentToolContext(Mock.Of<IRepoSandbox>(), "proj", "user", "token", "owner/repo", "exec"));
 
-        // All read-only tools are prefetched speculatively — including readThree
-        await readOne.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await readTwo.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await readThree.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        // Write tools are never prefetched — they respect batch ordering
-        Assert.IsFalse(writeTool.Started.Task.IsCompleted);
-
-        releaseReadBatch.TrySetResult();
-
-        await writeTool.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
-        releaseWrite.TrySetResult();
-
-        var result = await runTask.WaitAsync(TimeSpan.FromSeconds(2));
-
         Assert.IsTrue(result.Success);
 
-        var startedTools = startOrder.ToArray();
-        Assert.AreEqual(4, startedTools.Length);
-        // All three reads were prefetched concurrently before the write started
-        CollectionAssert.AreEquivalent(new[] { readOne.Name, readTwo.Name, readThree.Name }, startedTools.Take(3).ToArray());
-        Assert.AreEqual(writeTool.Name, startedTools[3]);
+        // All tools must execute sequentially in the order they were returned by the LLM,
+        // regardless of read-only status, to prevent concurrent DbContext access.
+        CollectionAssert.AreEqual(
+            new[] { "read_one", "read_two", "write_one", "read_three" },
+            executionOrder);
     }
 
     private sealed class StubAgentTool(string name, string result, bool isReadOnly) : IAgentTool
@@ -231,25 +213,21 @@ public class AgentPhaseRunnerTests
             Task.FromResult(result);
     }
 
-    private sealed class BlockingAgentTool(
+    private sealed class OrderTrackingAgentTool(
         string name,
         string result,
         bool isReadOnly,
-        Task releaseTask,
-        ConcurrentQueue<string> startOrder) : IAgentTool
+        List<string> executionOrder) : IAgentTool
     {
         public string Name => name;
         public string Description => name;
         public string ParametersJsonSchema => """{"type":"object","properties":{}}""";
         public bool IsReadOnly => isReadOnly;
-        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<string> ExecuteAsync(string argumentsJson, AgentToolContext context, CancellationToken cancellationToken)
+        public Task<string> ExecuteAsync(string argumentsJson, AgentToolContext context, CancellationToken cancellationToken)
         {
-            startOrder.Enqueue(Name);
-            Started.TrySetResult();
-            await releaseTask.WaitAsync(cancellationToken);
-            return result;
+            executionOrder.Add(Name);
+            return Task.FromResult(result);
         }
     }
 }

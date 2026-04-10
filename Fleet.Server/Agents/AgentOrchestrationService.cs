@@ -1489,7 +1489,6 @@ public class AgentOrchestrationService(
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var scopedDb = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
         var scopedConnectionService = scope.ServiceProvider.GetRequiredService<IConnectionService>();
-        var scopedPhaseRunner = scope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
         var scopedWorkItemRepo = scope.ServiceProvider.GetRequiredService<IWorkItemRepository>();
         var scopedWorkItemAttachmentService = scope.ServiceProvider.GetRequiredService<IWorkItemAttachmentService>();
         var scopedChatSessionRepository = scope.ServiceProvider.GetRequiredService<IChatSessionRepository>();
@@ -2524,7 +2523,13 @@ public class AgentOrchestrationService(
 
                     var maxTokens = GetMaxTokensForRole(role);
                     var phaseStart = DateTime.UtcNow;
-                    var result = await scopedPhaseRunner.RunPhaseAsync(
+
+                    // Each role gets its own DI scope so that concurrent role execution
+                    // (when maxConcurrentAgentsPerTask > 1) doesn't share a DbContext.
+                    // The outer scopedDb is only accessed via WithDbLockAsync (serialized).
+                    await using var roleScope = serviceScopeFactory.CreateAsyncScope();
+                    var rolePhaseRunner = roleScope.ServiceProvider.GetRequiredService<IAgentPhaseRunner>();
+                    var result = await rolePhaseRunner.RunPhaseAsync(
                         role,
                         userMessage,
                         toolContext,
