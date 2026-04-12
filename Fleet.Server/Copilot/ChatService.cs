@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 
 namespace Fleet.Server.Copilot;
 
@@ -340,22 +341,21 @@ public class ChatService(
             }
 
             // 2b. Build system prompt with any uploaded documents
-            var systemPrompt = await BuildSystemPromptAsync(projectId, sessionId, userId, content, requestCancellation, conversationHistory: llmMessages);
+            var systemPrompt = await BuildSystemPromptAsync(
+                projectId,
+                sessionId,
+                userId,
+                content,
+                requestCancellation,
+                conversationHistory: llmMessages,
+                generateWorkItems: generateWorkItems);
 
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
             //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
-            await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
-                userId,
-                generateWorkItems,
-                requestCancellation);
-            var toolDefs = toolRegistry.ToLLMDefinitions(
-                includeWriteTools: generateWorkItems,
-                bulkOnly: generateWorkItems,
-                includeGlobalRepoTools: IsGlobalScope(projectId),
-                includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId))
-                .Concat(mcpToolSession.Definitions)
-                .ToList();
+            var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems, requestCancellation);
+            await using var mcpToolSession = tooling.Session;
+            var toolDefs = tooling.Definitions;
 
             // 4. Auto-name the session before generation starts (fast model call)
             if (generateWorkItems)
@@ -901,18 +901,11 @@ public class ChatService(
                 "Generate work-items based on provided context",
                 requestCancellation,
                 ownerId,
-                conversationHistory: llmMessages);
-            await using var mcpToolSession = await _mcpToolSessionFactory.CreateForChatAsync(
-                userId,
-                includeWriteTools: true,
-                requestCancellation);
-            var toolDefs = toolRegistry.ToLLMDefinitions(
-                includeWriteTools: true,
-                bulkOnly: true,
-                includeGlobalRepoTools: IsGlobalScope(projectId),
-                includeNormalChatWriteTools: false)
-                .Concat(mcpToolSession.Definitions)
-                .ToList();
+                conversationHistory: llmMessages,
+                generateWorkItems: true);
+            var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems: true, requestCancellation);
+            await using var mcpToolSession = tooling.Session;
+            var toolDefs = tooling.Definitions;
 
             await UpdateGenerationProgressAsync(
                 projectId,
@@ -1286,6 +1279,42 @@ public class ChatService(
 
     private static string BuildMissingWorkItemMutationInstruction()
         => "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
+
+    private async Task<ChatTooling> CreateChatToolingAsync(
+        string projectId,
+        int userId,
+        bool generateWorkItems,
+        CancellationToken cancellationToken)
+    {
+        // Work-item generation should stay focused on Fleet's built-in planning/work-item tools.
+        // Excluding MCP tools here prevents unrelated system servers (for example Playwright)
+        // from expanding the request payload or introducing schema regressions during backlog creation.
+        IMcpToolSession mcpToolSession = generateWorkItems
+            ? EmptyMcpToolSession.Instance
+            : await _mcpToolSessionFactory.CreateForChatAsync(
+                userId,
+                includeWriteTools: false,
+                cancellationToken);
+
+        var definitions = toolRegistry.ToLLMDefinitions(
+            includeWriteTools: generateWorkItems,
+            bulkOnly: generateWorkItems,
+            includeGlobalRepoTools: IsGlobalScope(projectId),
+            includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId),
+            workItemGenerationOnly: generateWorkItems)
+            .Concat(mcpToolSession.Definitions)
+            .ToList();
+
+        if (generateWorkItems)
+        {
+            logger.LogDebug(
+                "Prepared work-item generation tool surface with {BuiltInToolCount} built-in tools and {McpToolCount} MCP tools.",
+                definitions.Count - mcpToolSession.Definitions.Count,
+                mcpToolSession.Definitions.Count);
+        }
+
+        return new ChatTooling(mcpToolSession, definitions);
+    }
 
     private async Task RepairStaleGeneratingSessionsAsync(string projectId)
     {
@@ -1910,7 +1939,8 @@ public class ChatService(
         string? latestUserMessage,
         CancellationToken cancellationToken = default,
         string? ownerId = null,
-        IReadOnlyList<LLMMessage>? conversationHistory = null)
+        IReadOnlyList<LLMMessage>? conversationHistory = null,
+        bool generateWorkItems = false)
     {
         var scopePrompt = IsGlobalScope(projectId)
             ? """
@@ -1928,6 +1958,21 @@ public class ChatService(
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine(scopePrompt);
+
+        if (generateWorkItems)
+        {
+            builder.AppendLine();
+            builder.AppendLine();
+            builder.AppendLine(
+                """
+                ## Active Mode
+                Work-item generation has been explicitly requested now.
+                Do not ask for confirmation before creating or updating backlog items.
+                Do not refuse just because context is incomplete. Use reasonable assumptions, inspect available project context, and persist a best-effort draft backlog with Fleet's work-item tools.
+                Stay focused on project analysis and backlog mutation. Ignore unrelated automation or non-backlog write tasks.
+                """
+            );
+        }
 
         var memoryPrompt = await _promptBlockCache.GetMemoryBlockAsync(
             _memoryService,
@@ -2033,9 +2078,53 @@ public class ChatService(
             return "The AI service API key is missing or invalid. Update your Azure OpenAI API key in user secrets and restart Fleet.AppHost.";
         }
 
+        if (TryParseAzureResponsesApiError(message, out var statusCode, out var providerError))
+        {
+            if (statusCode is 401 or 403)
+            {
+                return "The AI service API key is missing or invalid. Update your Azure OpenAI API key in user secrets and restart Fleet.AppHost.";
+            }
+
+            if (statusCode == 429)
+            {
+                return "The AI service is rate-limiting requests right now. Wait a moment and try again.";
+            }
+
+            if (statusCode == 404 ||
+                providerError.Contains("deployment", StringComparison.OrdinalIgnoreCase) ||
+                providerError.Contains("model", StringComparison.OrdinalIgnoreCase))
+            {
+                return "The configured Azure OpenAI model or deployment could not be found. Update the Fleet LLM settings and try again.";
+            }
+
+            if (providerError.Contains("context", StringComparison.OrdinalIgnoreCase) ||
+                providerError.Contains("too many tokens", StringComparison.OrdinalIgnoreCase) ||
+                providerError.Contains("max", StringComparison.OrdinalIgnoreCase) && providerError.Contains("token", StringComparison.OrdinalIgnoreCase))
+            {
+                return "The AI service rejected this request because the prompt was too large. Reduce the amount of chat context or attached material and try again.";
+            }
+
+            if (statusCode is 400 or 422)
+            {
+                return $"The AI service rejected Fleet's request configuration: {providerError}";
+            }
+
+            if (statusCode >= 500)
+            {
+                return "The AI service is currently unavailable. Please try again in a moment.";
+            }
+        }
+
         if (message.Contains("429", StringComparison.OrdinalIgnoreCase))
         {
             return "The AI service is rate-limiting requests right now. Wait a moment and try again.";
+        }
+
+        if (message.Contains("A second operation was started on this context", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("A command is already in progress", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("NpgsqlOperationInProgressException", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Fleet hit a database concurrency error while processing this request. Please try again.";
         }
 
         if (message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
@@ -2045,6 +2134,106 @@ public class ChatService(
         }
 
         return "I encountered an error connecting to the AI service. Please try again.";
+    }
+
+    private static bool TryParseAzureResponsesApiError(string message, out int statusCode, out string providerError)
+    {
+        const string prefix = "Azure OpenAI Responses API returned ";
+        statusCode = 0;
+        providerError = string.Empty;
+
+        var prefixIndex = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (prefixIndex < 0)
+            return false;
+
+        var remainder = message[(prefixIndex + prefix.Length)..].Trim();
+        var separatorIndex = remainder.IndexOf(':');
+        var statusToken = separatorIndex >= 0 ? remainder[..separatorIndex].Trim() : remainder;
+        providerError = separatorIndex >= 0 ? remainder[(separatorIndex + 1)..].Trim() : string.Empty;
+
+        statusCode = ParseHttpStatusCodeToken(statusToken);
+        providerError = NormalizeProviderError(
+            TryExtractProviderErrorMessage(providerError) ?? providerError);
+        return statusCode != 0 || !string.IsNullOrWhiteSpace(providerError);
+    }
+
+    private static int ParseHttpStatusCodeToken(string statusToken)
+    {
+        if (int.TryParse(statusToken, out var numericStatus))
+            return numericStatus;
+
+        if (statusToken.StartsWith("BadRequest", StringComparison.OrdinalIgnoreCase))
+            return 400;
+        if (statusToken.StartsWith("Unauthorized", StringComparison.OrdinalIgnoreCase))
+            return 401;
+        if (statusToken.StartsWith("Forbidden", StringComparison.OrdinalIgnoreCase))
+            return 403;
+        if (statusToken.StartsWith("NotFound", StringComparison.OrdinalIgnoreCase))
+            return 404;
+        if (statusToken.StartsWith("Conflict", StringComparison.OrdinalIgnoreCase))
+            return 409;
+        if (statusToken.StartsWith("TooManyRequests", StringComparison.OrdinalIgnoreCase))
+            return 429;
+        if (statusToken.StartsWith("Unprocessable", StringComparison.OrdinalIgnoreCase))
+            return 422;
+        if (statusToken.StartsWith("InternalServerError", StringComparison.OrdinalIgnoreCase))
+            return 500;
+        if (statusToken.StartsWith("BadGateway", StringComparison.OrdinalIgnoreCase))
+            return 502;
+        if (statusToken.StartsWith("ServiceUnavailable", StringComparison.OrdinalIgnoreCase))
+            return 503;
+        if (statusToken.StartsWith("GatewayTimeout", StringComparison.OrdinalIgnoreCase))
+            return 504;
+
+        return 0;
+    }
+
+    private static string? TryExtractProviderErrorMessage(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            if (document.RootElement.TryGetProperty("error", out var errorElement))
+            {
+                if (errorElement.TryGetProperty("message", out var errorMessage) &&
+                    errorMessage.ValueKind == JsonValueKind.String)
+                {
+                    return errorMessage.GetString();
+                }
+
+                if (errorElement.TryGetProperty("innererror", out var innerErrorElement) &&
+                    innerErrorElement.TryGetProperty("message", out var innerMessage) &&
+                    innerMessage.ValueKind == JsonValueKind.String)
+                {
+                    return innerMessage.GetString();
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // The provider sometimes returns plain text bodies; fall back to the raw payload.
+        }
+
+        return null;
+    }
+
+    private static string NormalizeProviderError(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "The provider did not return additional details.";
+
+        var normalized = string.Join(
+            ' ',
+            value.Split(new[] { '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+            .Trim();
+
+        const int maxLength = 240;
+        return normalized.Length <= maxLength
+            ? normalized
+            : $"{normalized[..(maxLength - 3)]}...";
     }
 
     // ── Attachment CRUD ───────────────────────────────────────
@@ -2165,6 +2354,10 @@ public class ChatService(
             await chatAttachmentStorage.DeleteAsync(attachment.StoragePath);
         }
     }
+
+    private sealed record ChatTooling(
+        IMcpToolSession Session,
+        IReadOnlyList<LLMToolDefinition> Definitions);
 
     private sealed class NoOpMcpToolSessionFactory : IMcpToolSessionFactory
     {

@@ -27,8 +27,10 @@ public class ChatToolRegistry
         bool includeWriteTools = true,
         bool bulkOnly = false,
         bool includeGlobalRepoTools = true,
-        bool includeNormalChatWriteTools = true) =>
+        bool includeNormalChatWriteTools = true,
+        bool workItemGenerationOnly = false) =>
         All.Where(t => includeWriteTools || !t.IsWriteTool || AlwaysAvailableWriteTools.Contains(t.Name) || (includeNormalChatWriteTools && t.AllowInNormalChat))
+           .Where(t => !workItemGenerationOnly || !t.IsWriteTool || WorkItemGenerationWriteTools.Contains(t.Name))
            .Where(t => !bulkOnly || !SingleItemWriteTools.Contains(t.Name))
            .Where(t => includeGlobalRepoTools || !GlobalOnlyTools.Contains(t.Name))
            .Select(t => new LLMToolDefinition(t.Name, t.Description, t.ParametersJsonSchema))
@@ -55,5 +57,18 @@ public class ChatToolRegistry
     private static readonly HashSet<string> AlwaysAvailableWriteTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "create_project",
+    };
+
+    /// <summary>
+    /// Work-item generation should only expose write tools that mutate the backlog itself.
+    /// This prevents unrelated write-capable tools and system MCP actions from hijacking the
+    /// generation flow or causing request-shape regressions.
+    /// </summary>
+    private static readonly HashSet<string> WorkItemGenerationWriteTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bulk_create_work_items",
+        "bulk_update_work_items",
+        "bulk_delete_work_items",
+        "try_bulk_update_work_items",
     };
 }

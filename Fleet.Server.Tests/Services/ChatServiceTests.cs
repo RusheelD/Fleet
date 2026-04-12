@@ -2,6 +2,7 @@ using Fleet.Server.Auth;
 using Fleet.Server.Copilot;
 using Fleet.Server.Copilot.Tools;
 using Fleet.Server.LLM;
+using Fleet.Server.Mcp;
 using Fleet.Server.Memories;
 using Fleet.Server.Models;
 using Fleet.Server.Realtime;
@@ -1015,6 +1016,163 @@ public class ChatServiceTests
     }
 
     [TestMethod]
+    public async Task SendMessageAsync_GenerateWorkItems_RestrictsWriteToolSurfaceToFleetBacklogTools()
+    {
+        var readTool = new TestChatTool(
+            name: "list_work_items",
+            description: "List work items",
+            isWriteTool: false,
+            result: "[]");
+        var allowedWriteTool = new TestChatTool(
+            name: "bulk_update_work_items",
+            description: "Bulk update work items",
+            isWriteTool: true,
+            result: "Updated 1 work item.");
+        var unrelatedWriteTool = new TestChatTool(
+            name: "generate_mermaid_diagram",
+            description: "Generate a Mermaid diagram",
+            isWriteTool: true,
+            result: "graph TD");
+        var toolRegistryWithTools = new ChatToolRegistry([readTool, allowedWriteTool, unrelatedWriteTool]);
+        var mcpSession = new StubMcpToolSession(
+            [
+                new LLMToolDefinition("mcp__repo__search", "Search repository", "{}"),
+            ],
+            ["mcp__repo__search"]);
+        var mcpFactory = new RecordingMcpToolSessionFactory(mcpSession);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            mcpToolSessionFactory: mcpFactory);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Done", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done", It.IsAny<string?>()))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall> { new("call-1", "bulk_update_work_items", "{}") };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse(string.Empty, null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Done", null),
+        });
+        var capturedRequests = new List<LLMRequest>();
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequests.Add(request))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+
+        Assert.IsNull(result.Error);
+        Assert.AreEqual(1, allowedWriteTool.ExecuteCount);
+        Assert.AreEqual(0, mcpFactory.CreateForChatCallCount);
+
+        var generationRequest = capturedRequests.First(request => request.Tools is { Count: > 0 });
+        var toolNames = generationRequest.Tools!.Select(tool => tool.Name).ToArray();
+        CollectionAssert.Contains(toolNames, "list_work_items");
+        CollectionAssert.Contains(toolNames, "bulk_update_work_items");
+        Assert.IsFalse(toolNames.Contains("generate_mermaid_diagram"));
+        Assert.IsFalse(toolNames.Contains("mcp__repo__search"));
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_AzureBadRequest_SurfacesProviderDiagnostic()
+    {
+        var userMsg = new ChatMessageDto("msg-1", "user", "Hello", "2024-01-01");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Hello"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", It.IsAny<string>(), It.IsAny<string?>()))
+            .ReturnsAsync((string _, string _, string _, string content, string? _) =>
+                new ChatMessageDto("msg-2", "assistant", content, "2024-01-01"));
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "Azure OpenAI Responses API returned BadRequest: " +
+                "{\"error\":{\"message\":\"Invalid schema for function 'mcp__playwright_browser_click': schema must be a JSON object.\"}}"));
+
+        var result = await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+
+        Assert.IsNotNull(result.AssistantMessage);
+        StringAssert.Contains(result.AssistantMessage.Content, "The AI service rejected Fleet's request configuration:");
+        StringAssert.Contains(result.AssistantMessage.Content, "Invalid schema for function");
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateWorkItems_AddsExplicitGenerationOverrideToSystemPrompt()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_update_work_items",
+            description: "Bulk update work items",
+            isWriteTool: true,
+            result: "Updated 1 work item.");
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            new ChatToolRegistry([writeTool]),
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Done", "now");
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done", It.IsAny<string?>()))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall> { new("call-1", "bulk_update_work_items", "{}") };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse(string.Empty, null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Done", null),
+        });
+        var capturedRequests = new List<LLMRequest>();
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequests.Add(request))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        await sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+
+        var generationRequest = capturedRequests.First(request => request.Tools is { Count: > 0 });
+        StringAssert.Contains(generationRequest.SystemPrompt, "Work-item generation has been explicitly requested now.");
+        StringAssert.Contains(generationRequest.SystemPrompt, "Do not ask for confirmation before creating or updating backlog items.");
+    }
+
+    [TestMethod]
     public async Task SendMessageAsync_MixedToolBatch_ExecutesAllToolsSequentially()
     {
         var executionOrder = new List<string>();
@@ -1113,6 +1271,41 @@ public class ChatServiceTests
             executionOrder.Add(Name);
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class RecordingMcpToolSessionFactory(IMcpToolSession session) : IMcpToolSessionFactory
+    {
+        public bool? LastIncludeWriteTools { get; private set; }
+        public int CreateForChatCallCount { get; private set; }
+
+        public Task<IMcpToolSession> CreateForChatAsync(int userId, bool includeWriteTools, CancellationToken cancellationToken = default)
+        {
+            LastIncludeWriteTools = includeWriteTools;
+            CreateForChatCallCount++;
+            return Task.FromResult(session);
+        }
+
+        public Task<IMcpToolSession> CreateForAgentAsync(string userId, Fleet.Server.Agents.AgentRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult(session);
+    }
+
+    private sealed class StubMcpToolSession(
+        IReadOnlyList<LLMToolDefinition> definitions,
+        IReadOnlyCollection<string> readOnlyToolNames) : IMcpToolSession
+    {
+        private readonly HashSet<string> _toolNames = definitions.Select(definition => definition.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _readOnlyToolNames = readOnlyToolNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        public IReadOnlyList<LLMToolDefinition> Definitions { get; } = definitions;
+
+        public bool HasTool(string toolName) => _toolNames.Contains(toolName);
+
+        public bool IsReadOnly(string toolName) => _readOnlyToolNames.Contains(toolName);
+
+        public Task<string> ExecuteAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
+            => Task.FromResult($"Executed {toolName}");
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private ChatService CreateBackgroundCapableChatService(ChatToolRegistry? toolRegistry = null)
