@@ -5,10 +5,10 @@ namespace Fleet.Server.Tests.Services;
 [TestClass]
 public class SubFlowPlannerTests
 {
-    [TestMethod]
-    public void Parse_ReturnsNull_WhenSplitIsFalse()
-    {
-        const string output = """
+  [TestMethod]
+  public void Parse_ReturnsNull_WhenSplitIsFalse()
+  {
+    const string output = """
             Plan text
 
             SUBFLOW_PLAN_JSON
@@ -17,15 +17,15 @@ public class SubFlowPlannerTests
             ```
             """;
 
-        var parsed = SubFlowPlanner.Parse(output);
+    var parsed = SubFlowPlanner.Parse(output);
 
-        Assert.IsNull(parsed);
-    }
+    Assert.IsNull(parsed);
+  }
 
-    [TestMethod]
-    public void Parse_ReturnsNestedPlan_WhenJsonIsValid()
-    {
-        const string output = """
+  [TestMethod]
+  public void Parse_ReturnsNestedPlan_WhenJsonIsValid()
+  {
+    const string output = """
             Plan text
 
             SUBFLOW_PLAN_JSON
@@ -58,20 +58,20 @@ public class SubFlowPlannerTests
             ```
             """;
 
-        var parsed = SubFlowPlanner.Parse(output);
+    var parsed = SubFlowPlanner.Parse(output);
 
-        Assert.IsNotNull(parsed);
-        Assert.AreEqual("Need separate backend and frontend executions.", parsed.Reason);
-        Assert.AreEqual(1, parsed.SubFlows.Count);
-        Assert.AreEqual("Backend sync engine", parsed.SubFlows[0].Title);
-        Assert.AreEqual(1, parsed.SubFlows[0].SubFlows.Count);
-        Assert.AreEqual("Conflict resolution", parsed.SubFlows[0].SubFlows[0].Title);
-    }
+    Assert.IsNotNull(parsed);
+    Assert.AreEqual("Need separate backend and frontend executions.", parsed.Reason);
+    Assert.AreEqual(1, parsed.SubFlows.Count);
+    Assert.AreEqual("Backend sync engine", parsed.SubFlows[0].Title);
+    Assert.AreEqual(1, parsed.SubFlows[0].SubFlows.Count);
+    Assert.AreEqual("Conflict resolution", parsed.SubFlows[0].SubFlows[0].Title);
+  }
 
-    [TestMethod]
-    public void Parse_ReturnsPlan_WhenSubflowMarkerIsFollowedByBareJson()
-    {
-        const string output = """
+  [TestMethod]
+  public void Parse_ReturnsPlan_WhenSubflowMarkerIsFollowedByBareJson()
+  {
+    const string output = """
             G. Sub-Flow Decision
             Large scope; split into 3 parallel child work items.
 
@@ -111,19 +111,19 @@ public class SubFlowPlannerTests
             }
             """;
 
-        var parsed = SubFlowPlanner.Parse(output);
+    var parsed = SubFlowPlanner.Parse(output);
 
-        Assert.IsNotNull(parsed);
-        Assert.AreEqual(3, parsed.SubFlows.Count);
-        Assert.AreEqual("Engine core", parsed.SubFlows[0].Title);
-        Assert.AreEqual("AI engine", parsed.SubFlows[1].Title);
-        Assert.AreEqual("UI + Hosting + Docs", parsed.SubFlows[2].Title);
-    }
+    Assert.IsNotNull(parsed);
+    Assert.AreEqual(3, parsed.SubFlows.Count);
+    Assert.AreEqual("Engine core", parsed.SubFlows[0].Title);
+    Assert.AreEqual("AI engine", parsed.SubFlows[1].Title);
+    Assert.AreEqual("UI + Hosting + Docs", parsed.SubFlows[2].Title);
+  }
 
-    [TestMethod]
-    public void Parse_ReturnsNull_WhenPlanDepthExceedsLimit()
-    {
-        const string output = """
+  [TestMethod]
+  public void Parse_ReturnsNull_WhenPlanDepthExceedsLimit()
+  {
+    const string output = """
             ```json
             {
               "split": true,
@@ -158,15 +158,15 @@ public class SubFlowPlannerTests
             ```
             """;
 
-        var parsed = SubFlowPlanner.Parse(output);
+    var parsed = SubFlowPlanner.Parse(output);
 
-        Assert.IsNull(parsed);
-    }
+    Assert.IsNull(parsed);
+  }
 
-    [TestMethod]
-    public void Parse_ReturnsNull_WhenAnyNodeExceedsDirectChildLimit()
-    {
-        const string output = """
+  [TestMethod]
+  public void Parse_ReturnsNull_WhenAnyNodeExceedsDirectChildLimit()
+  {
+    const string output = """
             ```json
             {
               "split": true,
@@ -183,8 +183,8 @@ public class SubFlowPlannerTests
             ```
             """;
 
-        var parsed = SubFlowPlanner.Parse(output);
+    var parsed = SubFlowPlanner.Parse(output);
 
-        Assert.IsNull(parsed);
-    }
+    Assert.IsNull(parsed);
+  }
 }
