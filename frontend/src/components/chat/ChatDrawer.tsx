@@ -121,7 +121,7 @@ export function ChatDrawer({
         pendingMessageSessionIds.length > 0 || optimisticGeneratingSessionIds.length > 0
             ? BUSY_CHAT_FALLBACK_POLL_MS
             : IDLE_CHAT_FALLBACK_POLL_MS
-    const chatPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, chatFallbackPollingInterval)
+    const chatPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, chatFallbackPollingInterval, chatFallbackPollingInterval)
     const { data: chatData, isLoading: loadingChat } = useChatData(projectId, {
         pollingInterval: chatPollingInterval,
     })
@@ -633,4 +633,3 @@ function getVisibleSessionStatus(
             return null
     }
 }
-

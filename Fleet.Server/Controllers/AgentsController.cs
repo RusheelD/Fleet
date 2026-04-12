@@ -4,7 +4,6 @@ using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 
 namespace Fleet.Server.Controllers;
 
@@ -19,7 +18,6 @@ public class AgentsController(
     IServerEventPublisher eventPublisher) : ControllerBase
 {
     [HttpGet("executions")]
-    [OutputCache(Duration = 3)]
     public async Task<IActionResult> GetExecutions(string projectId)
     {
         var executions = await agentService.GetExecutionsAsync(projectId);
@@ -27,7 +25,6 @@ public class AgentsController(
     }
 
     [HttpGet("logs")]
-    [OutputCache(Duration = 3)]
     public async Task<IActionResult> GetLogs(string projectId)
     {
         var logs = await agentService.GetLogsAsync(projectId);

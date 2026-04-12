@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.LLM;
 using Fleet.Server.Models;
 
 namespace Fleet.Server.Memories;
@@ -8,7 +9,8 @@ namespace Fleet.Server.Memories;
 public partial class MemoryService(
     IMemoryRepository repository,
     ILogger<MemoryService> logger,
-    IMemoryReranker? reranker = null) : IMemoryService
+    IMemoryReranker? reranker = null,
+    PromptBlockCache? promptBlockCache = null) : IMemoryService
 {
     private const int IndexEntryLimit = 24;
     private const int SelectedMemoryLimit = 5;
@@ -41,6 +43,7 @@ public partial class MemoryService(
         var memory = await repository.GetUserMemoryAsync(userId, memoryId, cancellationToken)
             ?? throw new KeyNotFoundException("Memory not found.");
         await repository.DeleteAsync(memory, cancellationToken);
+        promptBlockCache?.InvalidateMemoryBlocks(userId);
     }
 
     public Task<MemoryEntryDto> CreateProjectMemoryAsync(int userId, string projectId, UpsertMemoryEntryRequest request, CancellationToken cancellationToken = default)
@@ -58,6 +61,7 @@ public partial class MemoryService(
         var memory = await repository.GetProjectMemoryAsync(userId, projectId, memoryId, cancellationToken)
             ?? throw new KeyNotFoundException("Memory not found.");
         await repository.DeleteAsync(memory, cancellationToken);
+        promptBlockCache?.InvalidateMemoryBlocks(userId);
     }
 
     public async Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
@@ -129,6 +133,7 @@ public partial class MemoryService(
         };
 
         await repository.AddAsync(memory, cancellationToken);
+        promptBlockCache?.InvalidateMemoryBlocks(userId);
         logger.LogInformation("Created {Scope} memory '{MemoryName}' for user {UserId}", GetScope(memory), memory.Name, userId);
         return ToDto(memory);
     }
@@ -144,6 +149,7 @@ public partial class MemoryService(
         memory.UpdatedAtUtc = DateTime.UtcNow;
 
         await repository.SaveChangesAsync(cancellationToken);
+        promptBlockCache?.InvalidateMemoryBlocks(memory.UserProfileId);
         return ToDto(memory);
     }
 

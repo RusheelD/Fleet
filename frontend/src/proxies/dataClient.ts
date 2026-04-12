@@ -162,6 +162,7 @@ export function useDeleteProject() {
 export function useWorkItems(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('work-items', () => getWorkItems(projectId!), [projectId], [], {
     refetchInterval: options?.pollingInterval ?? WORK_ITEMS_POLL_MS,
+    refetchIntervalInBackground: true,
   })
 }
 
@@ -215,18 +216,18 @@ export function useExecutions(projectId: string | undefined, options?: { polling
   return useDataQuery('executions', () => getExecutions(projectId!), [projectId], [], {
     staleTime: 0,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnReconnect: true,
     refetchInterval: options?.pollingInterval ?? EXECUTIONS_POLL_MS,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: true,
   })
 }
 
 export function useLogs(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('logs', () => getLogs(projectId!), [projectId], [], {
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnReconnect: true,
     refetchInterval: options?.pollingInterval ?? LOGS_POLL_MS,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: true,
   })
 }
 
@@ -387,12 +388,14 @@ export function useResumeExecution(projectId: string | undefined) {
 export function useChatData(projectId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('chat-data', () => getChatData(projectId), [], [projectId], {
     refetchInterval: options?.pollingInterval ?? CHAT_DATA_POLL_MS,
+    refetchIntervalInBackground: true,
   })
 }
 
 export function useChatMessages(projectId: string | undefined, sessionId: string | undefined, options?: { pollingInterval?: number | false }) {
   return useDataQuery('chat-messages', () => getMessages(projectId, sessionId!), [sessionId], [projectId], {
     refetchInterval: options?.pollingInterval ?? CHAT_MESSAGES_POLL_MS,
+    refetchIntervalInBackground: true,
   })
 }
 
@@ -1170,5 +1173,3 @@ export function useDeleteAttachment(projectId: string | undefined, sessionId: st
     },
   })
 }
-
-

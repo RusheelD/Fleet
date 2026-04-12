@@ -349,6 +349,21 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsTrue_ForModerateParallelLeafBranches()
+    {
+        var parent = CreateWorkItem(73, "Export workflow overhaul", 4, childNumbers: [74, 75]);
+        var childA = CreateWorkItem(74, "Export API", 3, parent: 73);
+        var childB = CreateWorkItem(75, "Export UI", 3, parent: 73);
+        var descendants = new[] { childA, childB };
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            descendants,
+            descendants,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
     public void ShouldOrchestrateExistingSubFlows_ReturnsTrue_ForHighDifficultyNestedParallelBranches()
     {
         var parent = CreateWorkItem(74, "Cross-platform workspace revamp", 5, childNumbers: [75, 76, 77]);

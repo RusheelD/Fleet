@@ -377,7 +377,7 @@ export function useServerEventConnection(projectId?: string) {
   const [connection, setConnection] = useState<ServerEventConnectionDetail>(() => getCachedServerEventConnection(normalizedProjectId))
 
   useEffect(() => {
-    setConnection(getCachedServerEventConnection(normalizedProjectId))
+    setConnection(buildServerEventConnectionDetail(normalizedProjectId))
 
     if (typeof window === 'undefined') {
       return

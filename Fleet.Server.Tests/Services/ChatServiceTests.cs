@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using System.Reflection;
 
 namespace Fleet.Server.Tests.Services;
@@ -994,6 +995,17 @@ public class ChatServiceTests
             Times.AtLeastOnce);
 
         _eventPublisher.Verify(
+            p => p.PublishProjectEventAsync(
+                UserId,
+                ProjectId,
+                ServerEventTopics.ChatSessionEvent,
+                It.Is<object?>(payload =>
+                    PayloadContains(payload, "\"generationState\":\"completed\"") &&
+                    PayloadContains(payload, "\"isGenerating\":false")),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+
+        _eventPublisher.Verify(
             p => p.PublishUserEventAsync(
                 UserId,
                 ServerEventTopics.ProjectsUpdated,
@@ -1161,5 +1173,8 @@ public class ChatServiceTests
             contentUrl ?? $"/api/chat/attachments/{id}/content",
             markdownReference ?? $"[{fileName}]({contentUrl ?? $"/api/chat/attachments/{id}/content"})",
             isImage);
-}
 
+    private static bool PayloadContains(object? payload, string fragment)
+        => payload is not null &&
+           JsonSerializer.Serialize(payload).Contains(fragment, StringComparison.Ordinal);
+}

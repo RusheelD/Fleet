@@ -59,11 +59,12 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
             }
             else
             {
+                var normalizedQuery = query.ToLowerInvariant();
                 projects = projects.Where(project =>
-                    project.Title.Contains(query) ||
-                    project.Description.Contains(query) ||
-                    project.Slug.Contains(query) ||
-                    project.Repo.Contains(query));
+                    project.Title.ToLower().Contains(normalizedQuery) ||
+                    project.Description.ToLower().Contains(normalizedQuery) ||
+                    project.Slug.ToLower().Contains(normalizedQuery) ||
+                    project.Repo.ToLower().Contains(normalizedQuery));
             }
         }
 
@@ -98,11 +99,12 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
             }
             else
             {
+                var normalizedQuery = query.ToLowerInvariant();
                 workItems = workItems.Where(workItem =>
-                    workItem.Title.Contains(query) ||
-                    workItem.Description.Contains(query) ||
-                    workItem.AcceptanceCriteria.Contains(query) ||
-                    workItem.Project.Title.Contains(query));
+                    workItem.Title.ToLower().Contains(normalizedQuery) ||
+                    workItem.Description.ToLower().Contains(normalizedQuery) ||
+                    workItem.AcceptanceCriteria.ToLower().Contains(normalizedQuery) ||
+                    workItem.Project.Title.ToLower().Contains(normalizedQuery));
             }
         }
 
@@ -136,10 +138,11 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
             }
             else
             {
+                var normalizedQuery = query.ToLowerInvariant();
                 chats = chats.Where(chat =>
-                    chat.Title.Contains(query) ||
-                    chat.LastMessage.Contains(query) ||
-                    (chat.Project != null && chat.Project.Title.Contains(query)));
+                    chat.Title.ToLower().Contains(normalizedQuery) ||
+                    chat.LastMessage.ToLower().Contains(normalizedQuery) ||
+                    (chat.Project != null && chat.Project.Title.ToLower().Contains(normalizedQuery)));
             }
         }
 
@@ -176,11 +179,12 @@ public class SearchService(FleetDbContext context, ILogger<SearchService> logger
             }
             else
             {
+                var normalizedQuery = query.ToLowerInvariant();
                 agents = agents.Where(agent =>
-                    agent.WorkItemTitle.Contains(query) ||
-                    agent.Status.Contains(query) ||
-                    (agent.CurrentPhase != null && agent.CurrentPhase.Contains(query)) ||
-                    agent.Project.Title.Contains(query));
+                    agent.WorkItemTitle.ToLower().Contains(normalizedQuery) ||
+                    agent.Status.ToLower().Contains(normalizedQuery) ||
+                    (agent.CurrentPhase != null && agent.CurrentPhase.ToLower().Contains(normalizedQuery)) ||
+                    agent.Project.Title.ToLower().Contains(normalizedQuery));
             }
         }
 

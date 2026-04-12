@@ -267,9 +267,9 @@ export function AgentMonitorPage() {
     const [tab, setTab] = useState<string>('active')
     const isLiveRunTab = tab === 'active' || tab === 'paused' || tab === 'all'
     const fallbackPollingInterval = isLiveRunTab ? LIVE_FALLBACK_POLL_MS : IDLE_FALLBACK_POLL_MS
-    const executionsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval)
-    const logsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval)
-    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, IDLE_FALLBACK_POLL_MS)
+    const executionsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval, fallbackPollingInterval)
+    const logsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, fallbackPollingInterval, fallbackPollingInterval)
+    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, IDLE_FALLBACK_POLL_MS, IDLE_FALLBACK_POLL_MS)
     const { data: executions, isLoading: loadingExec, refetch: refetchExec } = useExecutions(projectId, {
         pollingInterval: executionsPollingInterval,
     })

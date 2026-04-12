@@ -34,22 +34,7 @@ public class McpToolSessionFactory(
     {
         var userConfigs = await serverService.GetEnabledRuntimeConfigsAsync(userId);
         var systemConfigs = serverService.GetSystemRuntimeConfigs();
-
-        // Merge system configs first, then user configs (user overrides by name)
-        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var configs = new List<McpServerRuntimeConfig>();
-
-        foreach (var cfg in systemConfigs)
-        {
-            if (seenNames.Add(cfg.Name))
-                configs.Add(cfg);
-        }
-
-        foreach (var cfg in userConfigs)
-        {
-            if (seenNames.Add(cfg.Name))
-                configs.Add(cfg);
-        }
+        var configs = MergeConfigs(systemConfigs, userConfigs);
 
         if (configs.Count == 0)
             return EmptyMcpToolSession.Instance;
@@ -97,6 +82,37 @@ public class McpToolSessionFactory(
         }
 
         return new McpToolSession(connections, definitions, toolsByName);
+    }
+
+    internal static IReadOnlyList<McpServerRuntimeConfig> MergeConfigs(
+        IReadOnlyList<McpServerRuntimeConfig> systemConfigs,
+        IReadOnlyList<McpServerRuntimeConfig> userConfigs)
+    {
+        var merged = new List<McpServerRuntimeConfig>(systemConfigs.Count + userConfigs.Count);
+        var indicesByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var config in systemConfigs)
+        {
+            if (indicesByName.ContainsKey(config.Name))
+                continue;
+
+            indicesByName[config.Name] = merged.Count;
+            merged.Add(config);
+        }
+
+        foreach (var config in userConfigs)
+        {
+            if (indicesByName.TryGetValue(config.Name, out var existingIndex))
+            {
+                merged[existingIndex] = config;
+                continue;
+            }
+
+            indicesByName[config.Name] = merged.Count;
+            merged.Add(config);
+        }
+
+        return merged;
     }
 
     private sealed class McpToolSession(

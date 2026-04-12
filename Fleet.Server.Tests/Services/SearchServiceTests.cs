@@ -103,6 +103,28 @@ public class SearchServiceTests
     }
 
     [TestMethod]
+    public async Task SearchAsync_Projects_UsesCaseInsensitiveFallbackForInMemoryProvider()
+    {
+        _db.Projects.Add(new Project
+        {
+            Id = "proj-1",
+            OwnerId = "42",
+            Title = "Alpha Roadmap",
+            Slug = "alpha-roadmap",
+            Description = "Planning workspace",
+            Repo = "owner/alpha",
+            LastActivity = "now",
+        });
+
+        await _db.SaveChangesAsync();
+
+        var results = await _sut.SearchAsync("42", "alpha", "projects");
+
+        Assert.AreEqual(1, results.Count);
+        Assert.AreEqual("Alpha Roadmap", results[0].Title);
+    }
+
+    [TestMethod]
     public async Task SearchAsync_WorkItems_MatchesDescriptionWithoutLoadingUnrelatedRowsIntoResults()
     {
         var project = new Project

@@ -429,7 +429,9 @@ public class ChatService(
                         sessionId,
                         generateWorkItems,
                         ChatGenerationStates.Failed,
-                        "Generation timed out.");
+                        "Generation timed out.",
+                        userId: userId,
+                        publishSessionEvent: true);
                     await PublishChatUpdatedAsync(userId, projectId, sessionId);
                     await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                     return new SendMessageResponseDto(sessionId, timeoutMsg, [.. toolEvents], null);
@@ -446,7 +448,9 @@ public class ChatService(
                         sessionId,
                         generateWorkItems,
                         ChatGenerationStates.Failed,
-                        BuildAssistantErrorStatus(ex));
+                        BuildAssistantErrorStatus(ex),
+                        userId: userId,
+                        publishSessionEvent: true);
                     await PublishChatUpdatedAsync(userId, projectId, sessionId);
                     await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                     return new SendMessageResponseDto(sessionId, errorMsg, [.. toolEvents], ex.Message);
@@ -592,7 +596,9 @@ public class ChatService(
                     ChatGenerationStates.Completed,
                     performedWorkItemMutation
                         ? "Work-item generation completed."
-                        : "Response completed.");
+                        : "Response completed.",
+                    userId: userId,
+                    publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
 
                 // Fire-and-forget: extract memories from the conversation
@@ -616,7 +622,9 @@ public class ChatService(
                     sessionId,
                     generateWorkItems,
                     ChatGenerationStates.Failed,
-                    "No work-item mutation was completed.");
+                    "No work-item mutation was completed.",
+                    userId: userId,
+                    publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
                 return new SendMessageResponseDto(sessionId, failureMsg, [.. toolEvents], "No work-item mutation was completed.");
@@ -631,7 +639,9 @@ public class ChatService(
                 sessionId,
                 generateWorkItems,
                 ChatGenerationStates.Failed,
-                "Generation stopped before a final completion.");
+                "Generation stopped before a final completion.",
+                userId: userId,
+                publishSessionEvent: true);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
             return new SendMessageResponseDto(sessionId, fallbackMsg, [.. toolEvents], null);
@@ -651,7 +661,9 @@ public class ChatService(
                 sessionId,
                 generateWorkItems,
                 ChatGenerationStates.Failed,
-                BuildAssistantErrorStatus(ex));
+                BuildAssistantErrorStatus(ex),
+                userId: userId,
+                publishSessionEvent: true);
             if (userId != 0)
             {
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
@@ -763,7 +775,9 @@ public class ChatService(
                 sessionId,
                 wasGenerating: true,
                 ChatGenerationStates.Failed,
-                BuildAssistantErrorStatus(ex));
+                BuildAssistantErrorStatus(ex),
+                userId: userId,
+                publishSessionEvent: true);
             if (userId != 0)
             {
                 await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
@@ -1038,7 +1052,9 @@ public class ChatService(
                     generationStatus: performedWorkItemMutation
                         ? "Work-item generation completed."
                         : "Response completed.",
-                    ownerId: ownerId);
+                    ownerId: ownerId,
+                    userId: userId,
+                    publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 return;
             }
@@ -1059,7 +1075,9 @@ public class ChatService(
                     wasGenerating: true,
                     generationState: ChatGenerationStates.Failed,
                     generationStatus: "No work-item mutation was completed.",
-                    ownerId: ownerId);
+                    ownerId: ownerId,
+                    userId: userId,
+                    publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
                 return;
@@ -1078,7 +1096,9 @@ public class ChatService(
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
                 generationStatus: "Generation stopped before a final completion.",
-                ownerId: ownerId);
+                ownerId: ownerId,
+                userId: userId,
+                publishSessionEvent: true);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
@@ -1104,7 +1124,9 @@ public class ChatService(
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
                 generationStatus: "Generation timed out.",
-                ownerId: ownerId);
+                ownerId: ownerId,
+                userId: userId,
+                publishSessionEvent: true);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
@@ -1120,7 +1142,9 @@ public class ChatService(
                 wasGenerating: true,
                 generationState: ChatGenerationStates.Failed,
                 generationStatus: BuildAssistantErrorStatus(ex),
-                ownerId: ownerId);
+                ownerId: ownerId,
+                userId: userId,
+                publishSessionEvent: true);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         }
@@ -1191,7 +1215,9 @@ public class ChatService(
             wasGenerating: true,
             generationState: ChatGenerationStates.Failed,
             generationStatus: BuildAssistantErrorStatus(exception),
-            ownerId: ownerId);
+            ownerId: ownerId,
+            userId: userId,
+            publishSessionEvent: true);
         await RefundIfNeededAsync(true, chargedWorkItemRun, userId);
         await PublishChatUpdatedAsync(userId, projectId, sessionId);
     }
@@ -1488,7 +1514,9 @@ public class ChatService(
         bool wasGenerating,
         string generationState = ChatGenerationStates.Idle,
         string? generationStatus = null,
-        string? ownerId = null)
+        string? ownerId = null,
+        int? userId = null,
+        bool publishSessionEvent = false)
     {
         if (!wasGenerating) return;
         try
@@ -1503,6 +1531,17 @@ public class ChatService(
                     ? BuildStatusActivity(generationStatus)
                     : null,
                 ownerId);
+
+            if (publishSessionEvent && userId.HasValue)
+            {
+                await PublishChatSessionEventAsync(
+                    userId.Value,
+                    projectId,
+                    sessionId,
+                    false,
+                    generationState,
+                    generationStatus);
+            }
         }
         catch (Exception ex)
         {

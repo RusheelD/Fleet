@@ -1,11 +1,15 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.LLM;
 using Fleet.Server.Models;
 
 namespace Fleet.Server.Skills;
 
-public partial class SkillService(ISkillRepository repository, ILogger<SkillService> logger) : ISkillService
+public partial class SkillService(
+    ISkillRepository repository,
+    ILogger<SkillService> logger,
+    PromptBlockCache? promptBlockCache = null) : ISkillService
 {
     private const int CatalogLimit = 24;
     private const int SelectedSkillLimit = 3;
@@ -127,6 +131,7 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
         var skill = await repository.GetUserSkillAsync(userId, skillId, cancellationToken)
             ?? throw new KeyNotFoundException("Skill not found.");
         await repository.DeleteAsync(skill, cancellationToken);
+        promptBlockCache?.InvalidateSkillBlocks(userId);
     }
 
     public Task<PromptSkillDto> CreateProjectSkillAsync(int userId, string projectId, UpsertPromptSkillRequest request, CancellationToken cancellationToken = default)
@@ -144,6 +149,7 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
         var skill = await repository.GetProjectSkillAsync(userId, projectId, skillId, cancellationToken)
             ?? throw new KeyNotFoundException("Skill not found.");
         await repository.DeleteAsync(skill, cancellationToken);
+        promptBlockCache?.InvalidateSkillBlocks(userId);
     }
 
     public async Task<string> BuildPromptBlockAsync(int userId, string? projectId, string? query, CancellationToken cancellationToken = default)
@@ -216,6 +222,7 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
         };
 
         await repository.AddAsync(skill, cancellationToken);
+        promptBlockCache?.InvalidateSkillBlocks(userId);
         logger.LogInformation("Created {Scope} playbook '{SkillName}' for user {UserId}", GetScope(skill.ProjectId), skill.Name, userId);
         return ToDto(skill);
     }
@@ -231,6 +238,7 @@ public partial class SkillService(ISkillRepository repository, ILogger<SkillServ
         skill.UpdatedAtUtc = DateTime.UtcNow;
 
         await repository.SaveChangesAsync(cancellationToken);
+        promptBlockCache?.InvalidateSkillBlocks(skill.UserProfileId);
         return ToDto(skill);
     }
 

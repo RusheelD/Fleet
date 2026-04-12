@@ -389,7 +389,11 @@ export function WorkItemsPage() {
     const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
     const isDense = isCompact || isMobile
-    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, WORK_ITEMS_FALLBACK_POLL_MS)
+    const workItemsPollingInterval = resolveConnectionAwarePollingInterval(
+        serverEventState,
+        WORK_ITEMS_FALLBACK_POLL_MS,
+        WORK_ITEMS_FALLBACK_POLL_MS,
+    )
     const { data: workItems, isLoading } = useWorkItems(projectId, {
         pollingInterval: workItemsPollingInterval,
     })
