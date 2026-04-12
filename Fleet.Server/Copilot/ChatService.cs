@@ -88,8 +88,7 @@ public class ChatService(
 
         // Run sequentially — repository methods share a scoped DbContext
         // which does not support concurrent async operations.
-        await RepairStaleGeneratingSessionsAsync(projectId);
-        var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+        var sessions = await RepairStaleGeneratingSessionsAsync(projectId);
         var suggestions = await chatSessionRepository.GetSuggestionsAsync(projectId);
         var activeSession = sessions.FirstOrDefault(s => s.IsActive);
         var messages = activeSession is not null
@@ -1316,15 +1315,31 @@ public class ChatService(
         return new ChatTooling(mcpToolSession, definitions);
     }
 
-    private async Task RepairStaleGeneratingSessionsAsync(string projectId)
+    private async Task<IReadOnlyList<ChatSessionDto>> RepairStaleGeneratingSessionsAsync(string projectId)
     {
         try
         {
-            await chatSessionRepository.MarkStaleGeneratingSessionsAsync(
-                projectId,
-                DateTime.UtcNow - GenerationStaleAfter,
-                ChatGenerationStates.Interrupted,
-                "Generation was interrupted. You can start it again.");
+            var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+            var cutoffUtc = DateTime.UtcNow - GenerationStaleAfter;
+            var staleSessions = sessions
+                .Where(session => IsSessionStaleForRepair(projectId, session, cutoffUtc))
+                .ToList();
+
+            if (staleSessions.Count == 0)
+                return sessions;
+
+            foreach (var staleSession in staleSessions)
+            {
+                await chatSessionRepository.UpdateSessionGenerationStateAsync(
+                    projectId,
+                    staleSession.Id,
+                    false,
+                    ChatGenerationStates.Interrupted,
+                    "Generation was interrupted. You can start it again.",
+                    BuildStatusActivity("Generation was interrupted. You can start it again."));
+            }
+
+            return await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
         }
         catch (Exception ex)
         {
@@ -1332,7 +1347,22 @@ public class ChatService(
                 ex,
                 "Failed to repair stale generating sessions for project scope {ProjectId}",
                 projectId.SanitizeForLogging());
+            return await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
         }
+    }
+
+    private static bool IsSessionStaleForRepair(string projectId, ChatSessionDto session, DateTime cutoffUtc)
+    {
+        if (!session.IsGenerating)
+            return false;
+
+        if (HasActiveInFlightRequest(projectId, session.Id))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(session.GenerationUpdatedAtUtc))
+            return true;
+
+        return !DateTimeOffset.TryParse(session.GenerationUpdatedAtUtc, out var updatedAtUtc) || updatedAtUtc.UtcDateTime < cutoffUtc;
     }
 
     private async Task UpdateGenerationProgressAsync(
@@ -1390,26 +1420,57 @@ public class ChatService(
             while (!cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(GenerationHeartbeatInterval, cancellationToken);
-                await chatSessionRepository.UpdateSessionGenerationStateAsync(
-                    projectId,
-                    sessionId,
-                    progress.IsGenerating,
-                    progress.GenerationState,
-                    progress.GenerationStatus,
-                    ownerId: ownerId);
+
+                try
+                {
+                    await UpdateGenerationHeartbeatAsync(
+                        projectId,
+                        sessionId,
+                        progress,
+                        ownerId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(
+                        ex,
+                        "Failed to heartbeat chat generation for session {SessionId}",
+                        sessionId.SanitizeForLogging());
+                }
             }
         }
         catch (OperationCanceledException)
         {
             // Expected when the generation completes or is canceled.
         }
-        catch (Exception ex)
+    }
+
+    private async Task UpdateGenerationHeartbeatAsync(
+        string projectId,
+        string sessionId,
+        GenerationProgressState progress,
+        string? ownerId)
+    {
+        if (_serviceScopeFactory is not null)
         {
-            logger.LogDebug(
-                ex,
-                "Failed to heartbeat chat generation for session {SessionId}",
-                sessionId.SanitizeForLogging());
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var scopedRepository = scope.ServiceProvider.GetRequiredService<IChatSessionRepository>();
+            await scopedRepository.UpdateSessionGenerationStateAsync(
+                projectId,
+                sessionId,
+                progress.IsGenerating,
+                progress.GenerationState,
+                progress.GenerationStatus,
+                ownerId: ownerId);
+            return;
         }
+
+        await chatSessionRepository.UpdateSessionGenerationStateAsync(
+            projectId,
+            sessionId,
+            progress.IsGenerating,
+            progress.GenerationState,
+            progress.GenerationStatus,
+            ownerId: ownerId);
     }
 
     private static Task AwaitHeartbeatCompletionAsync(Task heartbeatTask)
@@ -1661,6 +1722,9 @@ public class ChatService(
             removed.Dispose();
         }
     }
+
+    private static bool HasActiveInFlightRequest(string projectId, string sessionId)
+        => ActiveSessionRequests.ContainsKey(BuildSessionRequestKey(projectId, sessionId));
 
     private async Task PublishChatUpdatedAsync(int userId, string projectId, string sessionId)
     {

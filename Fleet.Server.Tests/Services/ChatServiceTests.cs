@@ -159,6 +159,93 @@ public class ChatServiceTests
         Assert.AreEqual(0, result.Messages.Length);
     }
 
+    [TestMethod]
+    public async Task GetChatDataAsync_SkipsStaleRepair_WhenSessionStillHasInFlightRequest()
+    {
+        var staleSession = new ChatSessionDto(
+            SessionId,
+            "Chat 1",
+            "Generating",
+            "2024-01-01",
+            true,
+            true,
+            ChatGenerationStates.Running,
+            "Generating...",
+            DateTime.UtcNow.AddMinutes(-5).ToString("O"));
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new List<ChatSessionDto> { staleSession });
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto>());
+        _chatRepo.Setup(r => r.GetSuggestionsAsync(ProjectId)).ReturnsAsync([]);
+
+        var activeRequests = GetActiveSessionRequests();
+        var requestKey = $"{ProjectId}::{SessionId}";
+        using var inFlightCts = new CancellationTokenSource();
+        activeRequests[requestKey] = inFlightCts;
+
+        try
+        {
+            var result = await _sut.GetChatDataAsync(ProjectId);
+
+            Assert.AreEqual(1, result.Sessions.Length);
+            Assert.IsTrue(result.Sessions[0].IsGenerating);
+            _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+                ProjectId,
+                SessionId,
+                false,
+                ChatGenerationStates.Interrupted,
+                "Generation was interrupted. You can start it again.",
+                It.IsAny<ChatSessionActivityDto?>(),
+                It.IsAny<string?>()), Times.Never);
+        }
+        finally
+        {
+            activeRequests.TryRemove(requestKey, out _);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetChatDataAsync_RepairsTrulyStaleGeneratingSession()
+    {
+        var staleSession = new ChatSessionDto(
+            SessionId,
+            "Chat 1",
+            "Generating",
+            "2024-01-01",
+            true,
+            true,
+            ChatGenerationStates.Running,
+            "Generating...",
+            DateTime.UtcNow.AddMinutes(-5).ToString("O"));
+        var repairedSession = staleSession with
+        {
+            IsGenerating = false,
+            GenerationState = ChatGenerationStates.Interrupted,
+            GenerationStatus = "Generation was interrupted. You can start it again.",
+            GenerationUpdatedAtUtc = DateTime.UtcNow.ToString("O"),
+        };
+        _chatRepo.SetupSequence(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new List<ChatSessionDto> { staleSession })
+            .ReturnsAsync(new List<ChatSessionDto> { repairedSession });
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto>());
+        _chatRepo.Setup(r => r.GetSuggestionsAsync(ProjectId)).ReturnsAsync([]);
+
+        var result = await _sut.GetChatDataAsync(ProjectId);
+
+        Assert.AreEqual(1, result.Sessions.Length);
+        Assert.AreEqual(ChatGenerationStates.Interrupted, result.Sessions[0].GenerationState);
+        Assert.AreEqual("Generation was interrupted. You can start it again.", result.Sessions[0].GenerationStatus);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            ChatGenerationStates.Interrupted,
+            "Generation was interrupted. You can start it again.",
+            It.IsAny<ChatSessionActivityDto?>(),
+            It.IsAny<string?>()), Times.Once);
+    }
+
     // ── GetMessagesAsync ─────────────────────────────────────
 
     [TestMethod]
