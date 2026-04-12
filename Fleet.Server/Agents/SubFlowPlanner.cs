@@ -6,8 +6,8 @@ namespace Fleet.Server.Agents;
 
 internal static partial class SubFlowPlanner
 {
-    private const int MaxTotalSubFlows = 24;
-    private const int MaxNestedDepth = 3;
+    private const int MaxTotalSubFlows = 32;
+    private const int MaxNestedDepth = 4;
     private const int MaxDirectSubFlowsPerNode = AgentOrchestrationService.MaxSubFlowChildrenPerExecution;
 
     public static GeneratedSubFlowPlan? Parse(string? output)

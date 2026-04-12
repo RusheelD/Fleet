@@ -458,6 +458,39 @@ public class AgentOrchestrationRetryTests
             executionDepth: 0));
     }
 
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsTrue_ForModerateTaskWithSubstantialBranches()
+    {
+        var workItem = CreateWorkItem(95, "Add search feature", 4);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Split into backend search and frontend UI work",
+            [
+                new GeneratedSubFlowSpec("Search API", "Build the search endpoint.", 1, 3, [], "", []),
+                new GeneratedSubFlowSpec("Search UI", "Build the search results page.", 1, 3, [], "", []),
+            ]);
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            executionDepth: 0));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsTrue_ForModerateTaskWithSubstantialChildren()
+    {
+        var parent = CreateWorkItem(96, "Add export feature", 4, childNumbers: [97, 98]);
+        var childA = CreateWorkItem(97, "Export backend endpoint", 3, parent: 96, childNumbers: [99]);
+        var childB = CreateWorkItem(98, "Export UI dialog", 3, parent: 96);
+        var grandchild = CreateWorkItem(99, "Data serialization", 2, parent: 97);
+        var descendants = new[] { childA, childB, grandchild };
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            new[] { childA, childB },
+            descendants,
+            executionDepth: 0));
+    }
+
     private static Models.WorkItemDto CreateWorkItem(
         int number,
         string title,

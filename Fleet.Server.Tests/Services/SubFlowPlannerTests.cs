@@ -140,7 +140,12 @@ public class SubFlowPlannerTests
                           "subflows": [
                             {
                               "title": "Level 4",
-                              "subflows": []
+                              "subflows": [
+                                {
+                                  "title": "Level 5",
+                                  "subflows": []
+                                }
+                              ]
                             }
                           ]
                         }
@@ -170,7 +175,9 @@ public class SubFlowPlannerTests
                 { "title": "Branch 1", "subflows": [] },
                 { "title": "Branch 2", "subflows": [] },
                 { "title": "Branch 3", "subflows": [] },
-                { "title": "Branch 4", "subflows": [] }
+                { "title": "Branch 4", "subflows": [] },
+                { "title": "Branch 5", "subflows": [] },
+                { "title": "Branch 6", "subflows": [] }
               ]
             }
             ```

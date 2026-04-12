@@ -151,8 +151,8 @@ public class AgentOrchestrationService(
         [AgentRole.Documentation] = 9,
     };
 
-    internal const int MaxSubFlowChildrenPerExecution = 3;
-    internal const int MaxSubFlowExecutionDepth = 3;
+    internal const int MaxSubFlowChildrenPerExecution = 5;
+    internal const int MaxSubFlowExecutionDepth = 4;
     private const int MaxParallelSubFlows = MaxSubFlowChildrenPerExecution;
     private const string StagedChatAssetDirectory = ".fleet-assets";
     private static readonly Regex ChatAttachmentReferenceRegex = new(
@@ -2996,10 +2996,10 @@ public class AgentOrchestrationService(
         if (directChildWorkItems.Count < 2 || directChildWorkItems.Count > MaxSubFlowChildrenPerExecution)
             return false;
 
-        if (workItem.Difficulty <= 3)
+        if (workItem.Difficulty <= 2)
             return false;
 
-        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 4)
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
             return false;
 
         var childLookup = BuildChildWorkItemLookup(descendants);
@@ -3034,7 +3034,7 @@ public class AgentOrchestrationService(
             .ToArray();
 
         var substantialDirectBranches = branchAnalyses.Count(branch =>
-            branch.Child.Difficulty >= 3 ||
+            branch.Child.Difficulty >= 2 ||
             branch.DirectGrandchildren > 0 ||
             branch.LeafDescendants > 1);
         if (substantialDirectBranches < 2)
@@ -3044,19 +3044,19 @@ public class AgentOrchestrationService(
         var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.Child.Difficulty);
         var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
         var highValueParallelBranches = branchAnalyses.Count(branch =>
-            branch.Child.Difficulty >= 4 &&
+            branch.Child.Difficulty >= 3 &&
             (branch.DirectGrandchildren > 0 || branch.LeafDescendants > 1));
 
-        if (!hasNestedChildren && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
+        if (!hasNestedChildren && workItem.Difficulty <= 3 && totalDirectDifficulty <= 5)
             return false;
 
-        if (!hasNestedChildren && branchAnalyses.All(branch => branch.Child.Difficulty <= 3))
+        if (!hasNestedChildren && branchAnalyses.All(branch => branch.Child.Difficulty <= 2))
             return false;
 
         if (highValueParallelBranches >= 2)
             return true;
 
-        var minimumComplexityThreshold = hasNestedChildren ? 11 : 13;
+        var minimumComplexityThreshold = hasNestedChildren ? 8 : 10;
         if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
@@ -3074,10 +3074,10 @@ public class AgentOrchestrationService(
         if (generatedPlan.SubFlows.Count < 2 || generatedPlan.SubFlows.Count > MaxSubFlowChildrenPerExecution)
             return false;
 
-        if (workItem.Difficulty <= 3)
+        if (workItem.Difficulty <= 2)
             return false;
 
-        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 4)
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
             return false;
 
         var flattenedSubFlows = FlattenGeneratedSubFlows(generatedPlan.SubFlows).ToArray();
@@ -3117,7 +3117,7 @@ public class AgentOrchestrationService(
             .ToArray();
 
         var substantialDirectBranches = branchAnalyses.Count(branch =>
-            branch.SubFlow.Difficulty >= 3 ||
+            branch.SubFlow.Difficulty >= 2 ||
             branch.DirectChildren > 0 ||
             branch.LeafDescendants > 1);
         if (substantialDirectBranches < 2)
@@ -3125,8 +3125,8 @@ public class AgentOrchestrationService(
 
         var materiallyReducesComplexity =
             flattenedSubFlows.Any(subFlow => subFlow.Difficulty < workItem.Difficulty) ||
-            (generatedPlan.SubFlows.Count >= 3 &&
-             branchAnalyses.Count(branch => branch.SubFlow.Difficulty >= workItem.Difficulty) >= 2);
+            (generatedPlan.SubFlows.Count >= 2 &&
+             branchAnalyses.Count(branch => branch.SubFlow.Difficulty >= workItem.Difficulty - 1) >= 2);
         if (!materiallyReducesComplexity)
             return false;
 
@@ -3134,18 +3134,18 @@ public class AgentOrchestrationService(
         var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.SubFlow.Difficulty);
         var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
         var highValueParallelBranches = branchAnalyses.Count(branch =>
-            branch.SubFlow.Difficulty >= 4 &&
+            branch.SubFlow.Difficulty >= 3 &&
             (branch.DirectChildren > 0 || branch.LeafDescendants > 1));
-        if (!hasNestedDirectBranch && workItem.Difficulty <= 4 && totalDirectDifficulty <= 7)
+        if (!hasNestedDirectBranch && workItem.Difficulty <= 3 && totalDirectDifficulty <= 5)
             return false;
 
-        if (!hasNestedDirectBranch && branchAnalyses.All(branch => branch.SubFlow.Difficulty <= 3))
+        if (!hasNestedDirectBranch && branchAnalyses.All(branch => branch.SubFlow.Difficulty <= 2))
             return false;
 
         if (highValueParallelBranches >= 2)
             return true;
 
-        var minimumComplexityThreshold = hasNestedDirectBranch ? 11 : 9;
+        var minimumComplexityThreshold = hasNestedDirectBranch ? 8 : 6;
         if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
