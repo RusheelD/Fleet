@@ -45,10 +45,14 @@ export function cacheServerEventConnection(detail: ServerEventConnectionDetail):
     return normalized
 }
 
+/** Default safety-net polling interval (ms) when SSE is live.
+ *  Keeps data fresh even if SSE cache mutations fail silently. */
+const DEFAULT_LIVE_SAFETY_POLL_MS = 30_000
+
 export function resolveConnectionAwarePollingInterval(
     state: ServerEventConnectionState,
     fallbackInterval: number | false,
-    liveInterval: number | false = false,
+    liveInterval: number | false = DEFAULT_LIVE_SAFETY_POLL_MS,
 ): number | false {
     return state === 'live' ? liveInterval : fallbackInterval
 }

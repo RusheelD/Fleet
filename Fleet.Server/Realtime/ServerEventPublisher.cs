@@ -9,6 +9,7 @@ public sealed class ServerEventPublisher(
     ILogger<ServerEventPublisher> logger) : IServerEventPublisher
 {
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(10);
+    private static readonly JsonSerializerOptions CamelCaseOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<Guid, Subscription> _subscriptions = new();
 
     public async Task SubscribeAsync(
@@ -45,7 +46,7 @@ public sealed class ServerEventPublisher(
                         userId,
                         projectId = normalizedProjectId,
                         connectedAtUtc = DateTime.UtcNow,
-                    })),
+                    }, CamelCaseOptions)),
                 cancellationToken);
 
             logger.LogInformation(
@@ -77,7 +78,7 @@ public sealed class ServerEventPublisher(
                             JsonSerializer.Serialize(new
                             {
                                 timestampUtc = DateTime.UtcNow,
-                            })),
+                            }, CamelCaseOptions)),
                         cancellationToken);
                 }
             }
@@ -141,7 +142,7 @@ public sealed class ServerEventPublisher(
 
         var envelope = new ServerEventEnvelope(
             eventName,
-            JsonSerializer.Serialize(payload ?? new { }));
+            JsonSerializer.Serialize(payload ?? new { }, CamelCaseOptions));
 
         foreach (var subscription in _subscriptions.Values)
         {

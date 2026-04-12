@@ -38,10 +38,11 @@ describe('server event connection state helpers', () => {
         expect(getCachedServerEventConnection(' project-abc ')).toEqual(cached)
     })
 
-    it('disables polling only while the SSE stream is healthy', () => {
-        expect(resolveConnectionAwarePollingInterval('live', 8000)).toBe(false)
+    it('uses safety-net polling while SSE is live and respects explicit overrides', () => {
+        expect(resolveConnectionAwarePollingInterval('live', 8000)).toBe(30_000)
         expect(resolveConnectionAwarePollingInterval('connecting', 8000)).toBe(8000)
         expect(resolveConnectionAwarePollingInterval('reconnecting', 8000)).toBe(8000)
         expect(resolveConnectionAwarePollingInterval('live', 8000, 2000)).toBe(2000)
+        expect(resolveConnectionAwarePollingInterval('live', 8000, false)).toBe(false)
     })
 })
