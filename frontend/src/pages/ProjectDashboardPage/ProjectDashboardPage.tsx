@@ -25,8 +25,8 @@ import {
     LinkRegular,
     OpenRegular,
 } from '@fluentui/react-icons'
-import { FleetRocketLogo, MemoryWorkspace, PageHeader, PlaybookWorkspace } from '../../components/shared'
-import { MetricCard, ActivityItem, AgentStatusRow, QuickActionCard } from './'
+import { MemoryWorkspace, PageHeader, PlaybookWorkspace } from '../../components/shared'
+import { MetricCard, ActivityItem, AgentStatusRow } from './'
 import {
     useProjectDashboardBySlug,
     useDeleteProject,
@@ -152,20 +152,6 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '0.75rem',
     },
-    quickActions: {
-        display: 'grid',
-        gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${appTokens.width.quickActionMin}), 1fr))`,
-        gap: appTokens.space.md,
-        marginBottom: appTokens.space.xl,
-    },
-    quickActionsCompact: {
-        gridTemplateColumns: '1fr 1fr',
-        gap: '0.5rem',
-        marginBottom: '1rem',
-    },
-    quickActionsMobile: {
-        gridTemplateColumns: '1fr',
-    },
     metricsGridMobile: {
         gridTemplateColumns: '1fr 1fr',
     },
@@ -189,9 +175,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: appTokens.space.sm,
-        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
-        border: appTokens.border.subtle,
-        boxShadow: appTokens.shadow.card,
+        backgroundColor: appTokens.color.surface,
     },
     projectOverviewSignals: {
         display: 'grid',
@@ -203,8 +187,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: appTokens.space.xxs,
-        backgroundColor: appTokens.color.surface,
-        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.pageBackground,
     },
     signalValue: {
         fontSize: appTokens.fontSize.xl,
@@ -321,6 +304,20 @@ export function ProjectDashboardPage() {
                         >
                             Open Chat
                         </Button>
+                        <Button
+                            icon={<BoardRegular />}
+                            onClick={() => navigate(`/projects/${slug}/work-items`)}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
+                        >
+                            Work Items
+                        </Button>
+                        <Button
+                            icon={<BotRegular />}
+                            onClick={() => navigate(`/projects/${slug}/agents`)}
+                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
+                        >
+                            Agents
+                        </Button>
                         {dashboard.repo ? (
                             <Button
                                 appearance="secondary"
@@ -339,19 +336,13 @@ export function ProjectDashboardPage() {
                         >
                             Delete Project
                         </Button>
-                        <Button icon={<BoardRegular />} onClick={() => navigate(`/projects/${slug}/work-items`)} className={mergeClasses(isMobile && styles.headerActionButtonMobile)}>
-                            Work Items
-                        </Button>
                     </div>
                 }
             />
 
             <div className={styles.projectOverview}>
                 <Card className={styles.projectOverviewPrimary}>
-                    <Text weight="semibold">Project context</Text>
-                    <Text size={400}>
-                        Keep planning, execution, memory, and repo-linked delivery together so the team never has to reconstruct context from scratch.
-                    </Text>
+                    <Text weight="semibold">Repository</Text>
                     {dashboard.repo ? (
                         <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
                             <LinkRegular />
@@ -359,10 +350,10 @@ export function ProjectDashboardPage() {
                             <OpenRegular className={styles.openLinkIcon} />
                         </span>
                     ) : (
-                        <Text size={200}>No repository linked to this project yet. Link one to unlock PR-driven execution.</Text>
+                        <Text size={200}>No repository linked to this project.</Text>
                     )}
                     <Text size={200} className={styles.overviewCaption}>
-                        The quick actions below are tuned for the most common next steps: shape work, open chat, and monitor execution.
+                        Use the project pages to shape work, monitor runs, and keep context close to the code.
                     </Text>
                 </Card>
                 <div className={styles.projectOverviewSignals}>
@@ -389,34 +380,6 @@ export function ProjectDashboardPage() {
                 </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className={mergeClasses(styles.quickActions, isDense && styles.quickActionsCompact, isMobile && styles.quickActionsMobile)}>
-                <QuickActionCard
-                    icon={<ChatRegular />}
-                    title="AI Chat"
-                    description="Define specs & generate items"
-                    onClick={() => navigate(`/projects/${slug}/work-items`, { state: { openChat: true } })}
-                />
-                <QuickActionCard
-                    icon={<BoardRegular />}
-                    title="Work Items"
-                    description="View board & backlog"
-                    onClick={() => navigate(`/projects/${slug}/work-items`)}
-                />
-                <QuickActionCard
-                    icon={<BotRegular />}
-                    title="Agent Monitor"
-                    description="Track agent activity"
-                    onClick={() => navigate(`/projects/${slug}/agents`)}
-                />
-                <QuickActionCard
-                    icon={<FleetRocketLogo size={20} title="Run agents" variant="outline" />}
-                    title="Run Agents"
-                    description="Start new agent execution"
-                    onClick={() => navigate(`/projects/${slug}/agents`)}
-                />
-            </div>
-
             {/* Metrics */}
             <div className={mergeClasses(styles.metricsGrid, isDense && styles.metricsGridCompact, isMobile && styles.metricsGridMobile)}>
                 {dashboard.metrics.map((metric) => (
@@ -437,7 +400,6 @@ export function ProjectDashboardPage() {
                 <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
                     <div className={mergeClasses(styles.sectionHeader, isMobile && styles.sectionHeaderMobile)}>
                         <Title3>Recent Activity</Title3>
-                        <Button appearance="transparent" size="small" onClick={() => navigate(`/projects/${slug}/agents`)}>View all</Button>
                     </div>
                     <Divider />
                     <div className={styles.activityList}>
@@ -451,13 +413,6 @@ export function ProjectDashboardPage() {
                 <Card className={mergeClasses(styles.sectionCard, isDense && styles.sectionCardCompact)}>
                     <div className={mergeClasses(styles.sectionHeader, isMobile && styles.sectionHeaderMobile)}>
                         <Title3>Agent Status</Title3>
-                        <Button
-                            appearance="transparent"
-                            size="small"
-                            onClick={() => navigate(`/projects/${slug}/agents`)}
-                        >
-                            Monitor all
-                        </Button>
                     </div>
                     <Divider />
                     <div className={styles.agentList}>

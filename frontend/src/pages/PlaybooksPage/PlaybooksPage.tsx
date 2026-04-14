@@ -5,7 +5,7 @@ export function PlaybooksPage() {
   return (
     <PageShell
       title="Playbooks"
-      subtitle="Reusable execution patterns deserve first-class space, not a buried settings tab."
+      subtitle="Reusable instructions for how Fleet should handle recurring kinds of work."
       maxWidth="medium"
     >
       <PlaybooksTab />

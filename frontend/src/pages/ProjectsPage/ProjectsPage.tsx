@@ -9,9 +9,6 @@ import {
     Button,
     Dropdown,
     Option,
-    Toolbar,
-    ToolbarButton,
-    ToolbarDivider,
     Spinner,
     Text,
 } from '@fluentui/react-components'
@@ -21,7 +18,6 @@ import {
     FolderRegular,
     GridRegular,
     TextAlignJustifyRegular,
-    ArrowSortRegular,
     ArrowUploadRegular,
     ArrowDownloadRegular,
 } from '@fluentui/react-icons'
@@ -134,10 +130,6 @@ const useStyles = makeStyles({
     toolbarRight: {
         display: 'flex',
         alignItems: 'center',
-    },
-    toolbarRightMobile: {
-        width: '100%',
-        justifyContent: 'space-between',
     },
     summaryGrid: {
         display: 'grid',
@@ -299,7 +291,7 @@ export function ProjectsPage() {
         <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
             <PageHeader
                 title="Projects"
-                subtitle="Organize repositories, backlog, memory, and agent execution across your full portfolio."
+                subtitle="Projects, backlog, and active execution."
                 actions={
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <input
@@ -383,33 +375,26 @@ export function ProjectsPage() {
                         ))}
                     </Dropdown>
                 </div>
-                <Toolbar className={mergeClasses(styles.toolbarRight, isMobile && styles.toolbarRightMobile)}>
+                <div className={styles.toolbarRight}>
                     {!isDense && (
                         <>
-                            <ToolbarButton
+                            <Button
                                 icon={<GridRegular />}
                                 aria-label="Grid view"
                                 onClick={() => setViewMode('grid')}
                                 appearance={viewMode === 'grid' ? 'primary' : undefined}
+                                size="small"
                             />
-                            <ToolbarButton
+                            <Button
                                 icon={<TextAlignJustifyRegular />}
                                 aria-label="List view"
                                 onClick={() => setViewMode('list')}
                                 appearance={viewMode === 'list' ? 'primary' : undefined}
+                                size="small"
                             />
-                            <ToolbarDivider />
                         </>
                     )}
-                    <ToolbarButton
-                        icon={<ArrowSortRegular />}
-                        aria-label="Sort"
-                        onClick={() => {
-                            const idx = SORT_OPTIONS.indexOf(sortKey)
-                            setSortKey(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length])
-                        }}
-                    />
-                </Toolbar>
+                </div>
             </div>
 
             {filteredProjects.length === 0 ? (

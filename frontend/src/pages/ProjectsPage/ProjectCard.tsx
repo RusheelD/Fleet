@@ -28,7 +28,7 @@ const useStyles = makeStyles({
         minWidth: 0,
         overflow: 'hidden',
         border: appTokens.border.subtle,
-        backgroundImage: `linear-gradient(155deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        backgroundColor: appTokens.color.surface,
         ':hover': {
             boxShadow: appTokens.shadow.cardHover,
             transform: 'translateY(-2px)',
@@ -86,10 +86,8 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.25rem',
-        padding: appTokens.space.sm,
-        borderRadius: appTokens.radius.md,
-        backgroundColor: appTokens.color.pageBackground,
-        border: appTokens.border.subtle,
+        paddingTop: appTokens.space.xxs,
+        paddingBottom: appTokens.space.xxs,
     },
     statValue: {
         fontWeight: 700,
@@ -127,14 +125,6 @@ const useStyles = makeStyles({
         fontSize: '12px',
         color: appTokens.color.textMuted,
     },
-    topStripe: {
-        height: '4px',
-        width: '100%',
-        backgroundImage: `linear-gradient(90deg, ${appTokens.color.brand} 0%, ${appTokens.color.info} 100%)`,
-    },
-    repoBadge: {
-        width: 'fit-content',
-    },
 })
 
 interface ProjectCardProps {
@@ -148,7 +138,6 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
 
     return (
         <Card className={mergeClasses(styles.projectCard, isMobile && styles.projectCardMobile)} onClick={onClick}>
-            <div className={styles.topStripe} />
             <CardHeader
                 header={<Title3 className={styles.title}>{project.title}</Title3>}
                 description={<Caption1 className={styles.description}>{project.description}</Caption1>}
@@ -192,9 +181,6 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
                         <Caption1>{project.lastActivity}</Caption1>
                     </div>
                 </div>
-                <InfoBadge appearance="tint" className={styles.repoBadge}>
-                    {project.repo ? 'Repo linked' : 'Needs repo'}
-                </InfoBadge>
             </CardPreview>
         </Card>
     )

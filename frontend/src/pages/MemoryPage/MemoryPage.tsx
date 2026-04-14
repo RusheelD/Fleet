@@ -5,7 +5,7 @@ export function MemoryPage() {
   return (
     <PageShell
       title="Memory"
-      subtitle="Keep durable context, working preferences, and important references somewhere Fleet can actually find them."
+      subtitle="Saved context and references that should stay available across sessions."
       maxWidth="medium"
     >
       <MemoryTab />

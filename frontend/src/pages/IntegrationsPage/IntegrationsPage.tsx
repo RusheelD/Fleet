@@ -9,7 +9,7 @@ export function IntegrationsPage() {
   return (
     <PageShell
       title="Integrations"
-      subtitle="Manage linked accounts, MCP servers, and the external systems Fleet relies on during runs."
+      subtitle="Linked accounts, MCP servers, and external systems."
       maxWidth="large"
     >
       {isLoading || !settings ? (

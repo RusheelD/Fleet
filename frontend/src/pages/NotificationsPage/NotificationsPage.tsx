@@ -75,14 +75,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
   },
   inboxActions: {
-    display: 'flex',
-    gap: appTokens.space.sm,
-    flexWrap: 'wrap',
-  },
-  inboxActionsMobile: {
-    width: '100%',
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+    display: 'none',
   },
   filterTabs: {
     marginTop: appTokens.space.xxs,
@@ -201,7 +194,7 @@ export function NotificationsPage() {
   return (
     <PageShell
       title="Notifications"
-      subtitle="A proper inbox for execution updates, pull request activity, and project events across Fleet."
+      subtitle="Execution updates, pull request activity, and project events."
       maxWidth="large"
       actions={unreadCount > 0 ? (
         <Button
@@ -241,11 +234,6 @@ export function NotificationsPage() {
               <Tab value="unread">Unread</Tab>
               <Tab value="all">All</Tab>
             </TabList>
-          </div>
-          <div className={mergeClasses(styles.inboxActions, isMobile && styles.inboxActionsMobile)}>
-            <Button appearance="secondary" onClick={() => setView(view === 'unread' ? 'all' : 'unread')}>
-              {view === 'unread' ? 'Show All' : 'Focus Unread'}
-            </Button>
           </div>
         </div>
 
