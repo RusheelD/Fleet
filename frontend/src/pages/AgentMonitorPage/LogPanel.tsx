@@ -15,6 +15,7 @@ import { compareLogEntriesByTime, normalizeLogEntries, type AgentExecution, type
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
+import { parseStructuredLogMessage } from './logFormatting'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
     info: 'logLevelInfo',
@@ -121,7 +122,7 @@ const useStyles = makeStyles({
         display: 'grid',
         gridTemplateColumns: '62px auto 14px 1fr',
         gap: appTokens.space.md,
-        alignItems: 'baseline',
+        alignItems: 'start',
         paddingTop: appTokens.space.xs,
         paddingBottom: appTokens.space.xs,
         paddingLeft: appTokens.space.sm,
@@ -176,6 +177,7 @@ const useStyles = makeStyles({
     },
     logMessage: {
         wordBreak: 'break-word',
+        whiteSpace: 'pre-wrap',
     },
     logMessageMobile: {
         gridColumnStart: 2,
@@ -222,6 +224,80 @@ const useStyles = makeStyles({
     runTabsList: {
         overflowX: 'auto',
         whiteSpace: 'nowrap',
+    },
+    structuredMessage: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        paddingTop: appTokens.space.xs,
+        paddingRight: appTokens.space.sm,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceRaised,
+    },
+    structuredMessageError: {
+        boxShadow: `inset 3px 0 0 ${appTokens.color.danger}`,
+    },
+    structuredMessageWarn: {
+        boxShadow: `inset 3px 0 0 ${appTokens.color.warning}`,
+    },
+    structuredHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: appTokens.space.sm,
+        flexWrap: 'wrap',
+    },
+    structuredHeadline: {
+        fontWeight: 600,
+        color: appTokens.color.textPrimary,
+    },
+    structuredContext: {
+        color: appTokens.color.textSecondary,
+    },
+    structuredBody: {
+        color: appTokens.color.textPrimary,
+    },
+    structuredBadgeRow: {
+        display: 'flex',
+        gap: appTokens.space.xs,
+        flexWrap: 'wrap',
+    },
+    structuredBadge: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        paddingTop: '2px',
+        paddingRight: appTokens.space.xs,
+        paddingBottom: '2px',
+        paddingLeft: appTokens.space.xs,
+        borderRadius: appTokens.radius.full,
+        backgroundColor: appTokens.color.surfaceAlt,
+        color: appTokens.color.textSecondary,
+        fontSize: appTokens.fontSize.xs,
+        lineHeight: appTokens.lineHeight.snug,
+    },
+    structuredMetaGrid: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.xs,
+    },
+    structuredMetaItem: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        paddingTop: '2px',
+        paddingRight: appTokens.space.xs,
+        paddingBottom: '2px',
+        paddingLeft: appTokens.space.xs,
+        borderRadius: appTokens.radius.sm,
+        backgroundColor: appTokens.color.pageBackground,
+        color: appTokens.color.textSecondary,
+        fontSize: appTokens.fontSize.xs,
+    },
+    structuredMetaKey: {
+        color: appTokens.color.textMuted,
     },
 })
 
@@ -591,12 +667,56 @@ export function LogPanel({
                     </div>
                 )}
                 {sortedVisibleLogs.map((log, i) => (
-                    <div key={i} className={mergeClasses(styles.logEntry, isMobile && styles.logEntryMobile)}>
-                        <span className={styles.logTime}>{formatLogTime(log.time)}</span>
-                        <span className={mergeClasses(styles.logAgent, isMobile && styles.logAgentMobile)}>{log.agent}</span>
-                        <span className={mergeClasses(styles.levelDot, styles[LEVEL_DOT_CLASSES[log.level]])} />
-                        <span className={mergeClasses(styles.logMessage, styles[LOG_LEVEL_CLASSES[log.level]], isMobile && styles.logMessageMobile)}>{log.message}</span>
-                    </div>
+                    (() => {
+                        const structuredLog = parseStructuredLogMessage(log.message, log.level)
+
+                        return (
+                            <div key={i} className={mergeClasses(styles.logEntry, isMobile && styles.logEntryMobile)}>
+                                <span className={styles.logTime}>{formatLogTime(log.time)}</span>
+                                <span className={mergeClasses(styles.logAgent, isMobile && styles.logAgentMobile)}>{log.agent}</span>
+                                <span className={mergeClasses(styles.levelDot, styles[LEVEL_DOT_CLASSES[log.level]])} />
+                                {structuredLog ? (
+                                    <div
+                                        className={mergeClasses(
+                                            styles.structuredMessage,
+                                            log.level === 'error' && styles.structuredMessageError,
+                                            log.level === 'warn' && styles.structuredMessageWarn,
+                                            isMobile && styles.logMessageMobile,
+                                        )}
+                                    >
+                                        <div className={styles.structuredHeader}>
+                                            <span className={styles.structuredHeadline}>{structuredLog.headline}</span>
+                                            {structuredLog.badges.length > 0 ? (
+                                                <div className={styles.structuredBadgeRow}>
+                                                    {structuredLog.badges.map((badge) => (
+                                                        <span key={badge.label} className={styles.structuredBadge}>{badge.label}</span>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                        {structuredLog.context ? (
+                                            <Caption1 className={styles.structuredContext}>{structuredLog.context}</Caption1>
+                                        ) : null}
+                                        {structuredLog.body ? (
+                                            <span className={styles.structuredBody}>{structuredLog.body}</span>
+                                        ) : null}
+                                        {structuredLog.metadata.length > 0 ? (
+                                            <div className={styles.structuredMetaGrid}>
+                                                {structuredLog.metadata.map((item) => (
+                                                    <span key={`${item.key}:${item.value}`} className={styles.structuredMetaItem}>
+                                                        <span className={styles.structuredMetaKey}>{item.key}:</span>
+                                                        <span>{item.value}</span>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : (
+                                    <span className={mergeClasses(styles.logMessage, styles[LOG_LEVEL_CLASSES[log.level]], isMobile && styles.logMessageMobile)}>{log.message}</span>
+                                )}
+                            </div>
+                        )
+                    })()
                 ))}
             </div>
         </div>
