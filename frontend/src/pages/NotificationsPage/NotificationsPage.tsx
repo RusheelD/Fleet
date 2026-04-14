@@ -74,6 +74,11 @@ const useStyles = makeStyles({
     gap: appTokens.space.md,
     flexWrap: 'wrap',
   },
+  inboxTitleBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.xxs,
+  },
   inboxActions: {
     display: 'none',
   },
@@ -222,7 +227,7 @@ export function NotificationsPage() {
 
       <Card className={mergeClasses(styles.inboxCard, isMobile && styles.inboxCardMobile)}>
         <div className={styles.inboxHeader}>
-          <div>
+          <div className={styles.inboxTitleBlock}>
             <Text weight="semibold" size={500}>Inbox</Text>
             <Caption1>Open a notification to jump back into the relevant project context.</Caption1>
             <TabList

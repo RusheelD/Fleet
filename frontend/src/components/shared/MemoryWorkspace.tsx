@@ -130,6 +130,7 @@ const useStyles = makeStyles({
   },
   helperText: {
     color: appTokens.color.textMuted,
+    display: 'block',
   },
   errorText: {
     color: appTokens.color.danger,
@@ -161,6 +162,9 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: appTokens.space.xxxs,
+  },
+  sectionTitle: {
+    display: 'block',
   },
 })
 
@@ -281,7 +285,7 @@ export function MemoryWorkspace({
     <Card className={mergeClasses(styles.section, isMobile && styles.sectionMobile)}>
       <div className={styles.header}>
         <div className={styles.titleGroup}>
-          <Title3>{title}</Title3>
+          <Title3 className={styles.sectionTitle}>{title}</Title3>
           <Caption1 className={styles.helperText}>{subtitle}</Caption1>
         </div>
         <Button appearance="secondary" onClick={resetDraft} disabled={isSaving}>

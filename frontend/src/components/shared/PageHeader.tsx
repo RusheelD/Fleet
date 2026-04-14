@@ -30,6 +30,7 @@ const useStyles = makeStyles({
         letterSpacing: '0.08em',
     },
     title: {
+        display: 'block',
         fontSize: 'clamp(1.65rem, 1.6vw + 1rem, 2.2rem)',
         lineHeight: 1.05,
         fontWeight: appTokens.fontWeight.bold,
@@ -37,6 +38,7 @@ const useStyles = makeStyles({
         color: appTokens.color.textPrimary,
     },
     subtitle: {
+        display: 'block',
         color: appTokens.color.textSecondary,
         maxWidth: '44rem',
     },
