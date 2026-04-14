@@ -8,14 +8,12 @@ import {
 } from '@fluentui/react-components'
 import {
     SearchRegular,
-    GridRegular,
     ChatRegular,
     AlertRegular,
     NavigationRegular,
 } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
 import { UserMenu } from './'
-import { useMarkAllNotificationsAsRead, useNotifications } from '../../proxies/dataClient'
 import { useAuth } from '../../hooks/useAuthHook'
 import { usePreferences } from '../../hooks/PreferencesContext'
 import { appTokens } from '../../styles/appTokens'
@@ -164,17 +162,22 @@ interface TopBarProps {
     onToggleChat?: () => void
     isMobile?: boolean
     onToggleSidebar?: () => void
+    unreadCount?: number
 }
 
-export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, onToggleSidebar }: TopBarProps) {
+export function TopBar({
+    breadcrumbs,
+    chatOpen,
+    onToggleChat,
+    isMobile = false,
+    onToggleSidebar,
+    unreadCount = 0,
+}: TopBarProps) {
     const styles = useStyles()
     const navigate = useNavigate()
     const { user } = useAuth()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
-    const { data: notifications } = useNotifications(true)
-    const markAllRead = useMarkAllNotificationsAsRead()
-    const unreadCount = notifications?.length ?? 0
     const tier = (user?.role ?? 'free').toString().toUpperCase()
     const visibleBreadcrumbs = isMobile
         ? breadcrumbs.slice(Math.max(0, breadcrumbs.length - 2))
@@ -233,16 +236,6 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, 
                         onClick={() => navigate('/search')}
                     />
                 </Tooltip>
-                {!isMobile && (
-                    <Tooltip content="View all projects" relationship="label">
-                        <Button
-                            appearance="subtle"
-                            icon={<GridRegular />}
-                            size="small"
-                            onClick={() => navigate('/projects')}
-                        />
-                    </Tooltip>
-                )}
                 <Tooltip content={chatOpen ? 'Close AI Chat' : 'Open AI Chat'} relationship="label">
                     <Button
                         appearance={chatOpen ? 'primary' : 'subtle'}
@@ -252,7 +245,7 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, 
                     />
                 </Tooltip>
                 <Tooltip
-                    content={unreadCount > 0 ? `${unreadCount} unread notifications (click to mark all read)` : 'No unread notifications'}
+                    content={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
                     relationship="label"
                 >
                     <span className={styles.notificationWrapper}>
@@ -260,11 +253,7 @@ export function TopBar({ breadcrumbs, chatOpen, onToggleChat, isMobile = false, 
                             appearance={unreadCount > 0 ? 'primary' : 'subtle'}
                             icon={<AlertRegular />}
                             size="small"
-                            onClick={() => {
-                                if (unreadCount > 0 && !markAllRead.isPending) {
-                                    markAllRead.mutate()
-                                }
-                            }}
+                            onClick={() => navigate('/notifications')}
                         />
                         {unreadCount > 0 && (
                             <Badge appearance="filled" color="danger" size="tiny" className={styles.notificationBadge}>

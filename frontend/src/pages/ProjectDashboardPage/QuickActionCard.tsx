@@ -1,4 +1,5 @@
 import {
+    Badge,
     makeStyles,
     mergeClasses,
     Caption1,
@@ -16,8 +17,12 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '0.75rem',
         cursor: 'pointer',
+        border: appTokens.border.subtle,
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        boxShadow: appTokens.shadow.card,
         ':hover': {
-            boxShadow: appTokens.shadow.card,
+            boxShadow: appTokens.shadow.cardHover,
+            transform: 'translateY(-1px)',
         },
     },
     quickActionCardCompact: {
@@ -56,6 +61,9 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '0.125rem',
     },
+    quickActionLabel: {
+        width: 'fit-content',
+    },
 })
 
 interface QuickActionCardProps {
@@ -82,6 +90,7 @@ export function QuickActionCard({ icon, title, description, onClick }: QuickActi
         >
             <span className={mergeClasses(styles.quickActionIcon, isCompact && styles.quickActionIconCompact)}>{icon}</span>
             <div className={styles.quickActionContent}>
+                <Badge appearance="outline" className={styles.quickActionLabel}>Shortcut</Badge>
                 <Text weight="semibold" block className={isCompact ? styles.quickActionTitleCompact : undefined}>
                     {title}
                 </Text>

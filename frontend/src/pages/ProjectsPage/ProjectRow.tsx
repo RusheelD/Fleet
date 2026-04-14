@@ -27,6 +27,8 @@ const useStyles = makeStyles({
         gap: appTokens.space.md,
         borderRadius: appTokens.radius.md,
         cursor: 'pointer',
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surface,
         ':hover': {
             backgroundColor: appTokens.color.surfaceHover,
         },

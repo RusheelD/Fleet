@@ -21,6 +21,7 @@ import { getApiErrorMessage } from '../../proxies/proxy'
 import type { UpsertMemoryEntryRequest } from '../../proxies/userProxy'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
+import { EmptyState } from './EmptyState'
 
 const memoryTypeOptions: Array<{ value: UpsertMemoryEntryRequest['type']; label: string }> = [
   { value: 'user', label: 'User' },
@@ -132,6 +133,34 @@ const useStyles = makeStyles({
   },
   errorText: {
     color: appTokens.color.danger,
+  },
+  bodyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1.1fr) minmax(320px, 0.9fr)',
+    gap: appTokens.space.lg,
+    '@media (max-width: 980px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  panel: {
+    padding: appTokens.space.md,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.md,
+    backgroundColor: appTokens.color.pageBackground,
+    border: appTokens.border.subtle,
+  },
+  panelHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: appTokens.space.sm,
+    flexWrap: 'wrap',
+  },
+  panelHeaderCopy: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.xxxs,
   },
 })
 
@@ -262,108 +291,127 @@ export function MemoryWorkspace({
 
       <Divider />
 
-      <div className={styles.memoryList}>
-        {isLoading ? (
-          <Text>Loading memories...</Text>
-        ) : orderedMemories.length === 0 ? (
-          <Text>{emptyMessage}</Text>
-        ) : (
-          orderedMemories.map((memory) => (
-            <Card key={memory.id} className={styles.memoryCard}>
-              <div className={styles.memoryHeader}>
-                <div className={styles.titleGroup}>
-                  <Text weight="semibold">{memory.name}</Text>
-                  <Caption1>{memory.description}</Caption1>
-                </div>
-                <div className={styles.memoryActions}>
-                  <Button appearance="secondary" size="small" onClick={() => handleEdit(memory)} disabled={isSaving}>
-                    Edit
-                  </Button>
-                  <Button appearance="subtle" size="small" onClick={() => void handleDelete(memory)} disabled={isSaving}>
-                    Delete
-                  </Button>
-                </div>
-              </div>
-
-              <div className={styles.memoryBadges}>
-                <Badge appearance="outline">{memory.type}</Badge>
-                <Badge appearance="outline">{memory.scope}</Badge>
-                {memory.alwaysInclude ? <Badge color="important">Pinned</Badge> : null}
-              </div>
-
-              <Text size={200} className={styles.memoryBody}>{createPreview(memory.content)}</Text>
-              <Caption1>Updated {formatTimestamp(memory.updatedAtUtc)}</Caption1>
-              {memory.stalenessMessage ? (
-                <Caption1 className={styles.staleText}>{memory.stalenessMessage}</Caption1>
-              ) : null}
-            </Card>
-          ))
-        )}
-      </div>
-
-      <Divider />
-
-      <div className={styles.form}>
-        <div className={styles.titleGroup}>
-          <Text weight="semibold">{isEditing ? 'Edit memory' : 'Add memory'}</Text>
-          <Caption1 className={styles.helperText}>
-            Keep the description concise so Fleet can decide when this memory matters.
-          </Caption1>
-        </div>
-
-        <div className={styles.twoColumn}>
-          <Field label="Name" required>
-            <Input value={draft.name} onChange={(_event, data) => setDraft((current) => ({ ...current, name: data.value }))} />
-          </Field>
-          <Field label="Type" required>
-            <Dropdown
-              value={memoryTypeOptions.find((option) => option.value === draft.type)?.label ?? draft.type}
-              selectedOptions={[draft.type]}
-              onOptionSelect={(_event, data) => setDraft((current) => ({ ...current, type: (data.optionValue ?? 'feedback') as DraftState['type'] }))}
-            >
-              {memoryTypeOptions.map((option) => (
-                <Option key={option.value} value={option.value}>
-                  {option.label}
-                </Option>
-              ))}
-            </Dropdown>
-          </Field>
-        </div>
-
-        <Field label="Description" required>
-          <Input value={draft.description} onChange={(_event, data) => setDraft((current) => ({ ...current, description: data.value }))} />
-        </Field>
-
-        <Field label="Memory content" required hint="Use exact dates for deadlines or milestones so the note stays interpretable later.">
-          <Textarea
-            resize="vertical"
-            rows={8}
-            value={draft.content}
-            onChange={(_event, data) => setDraft((current) => ({ ...current, content: data.value }))}
-          />
-        </Field>
-
-        <Switch
-          checked={draft.alwaysInclude}
-          label="Always include this memory when it might affect the answer"
-          onChange={(_event, data) => setDraft((current) => ({ ...current, alwaysInclude: data.checked }))}
-        />
-
-        <div className={styles.formActions}>
-          <div>
-            {error ? <Caption1 className={styles.errorText}>{error}</Caption1> : null}
+      <div className={styles.bodyGrid}>
+        <Card className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelHeaderCopy}>
+              <Text weight="semibold">Saved memories</Text>
+              <Caption1 className={styles.helperText}>Browse what Fleet can already recall before creating a new note.</Caption1>
+            </div>
+            <Badge appearance="outline">{orderedMemories.length} saved</Badge>
           </div>
-          <div className={styles.memoryActions}>
-            {isEditing ? (
-              <Button appearance="secondary" onClick={resetDraft} disabled={isSaving}>
-                Cancel
-              </Button>
-            ) : null}
-            <Button appearance="primary" onClick={() => void handleSubmit()} disabled={isSaving}>
-              {isSaving ? 'Saving...' : isEditing ? 'Update Memory' : 'Save Memory'}
-            </Button>
+          <Divider />
+          <div className={styles.memoryList}>
+            {isLoading ? (
+              <Text>Loading memories...</Text>
+            ) : orderedMemories.length === 0 ? (
+              <EmptyState
+                title="No saved memory yet"
+                description={emptyMessage}
+              />
+            ) : (
+              orderedMemories.map((memory) => (
+                <Card key={memory.id} className={styles.memoryCard}>
+                  <div className={styles.memoryHeader}>
+                    <div className={styles.titleGroup}>
+                      <Text weight="semibold">{memory.name}</Text>
+                      <Caption1>{memory.description}</Caption1>
+                    </div>
+                    <div className={styles.memoryActions}>
+                      <Button appearance="secondary" size="small" onClick={() => handleEdit(memory)} disabled={isSaving}>
+                        Edit
+                      </Button>
+                      <Button appearance="subtle" size="small" onClick={() => void handleDelete(memory)} disabled={isSaving}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className={styles.memoryBadges}>
+                    <Badge appearance="outline">{memory.type}</Badge>
+                    <Badge appearance="outline">{memory.scope}</Badge>
+                    {memory.alwaysInclude ? <Badge color="important">Pinned</Badge> : null}
+                  </div>
+
+                  <Text size={200} className={styles.memoryBody}>{createPreview(memory.content)}</Text>
+                  <Caption1>Updated {formatTimestamp(memory.updatedAtUtc)}</Caption1>
+                  {memory.stalenessMessage ? (
+                    <Caption1 className={styles.staleText}>{memory.stalenessMessage}</Caption1>
+                  ) : null}
+                </Card>
+              ))
+            )}
           </div>
-        </div>
+        </Card>
+
+        <Card className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelHeaderCopy}>
+              <Text weight="semibold">{isEditing ? 'Edit memory' : 'Add memory'}</Text>
+              <Caption1 className={styles.helperText}>
+                Keep the description concise so Fleet can decide when this memory matters.
+              </Caption1>
+            </div>
+            {isEditing ? <Badge appearance="tint">Editing</Badge> : <Badge appearance="outline">New</Badge>}
+          </div>
+          <Divider />
+
+          <div className={styles.form}>
+            <div className={styles.twoColumn}>
+              <Field label="Name" required>
+                <Input value={draft.name} onChange={(_event, data) => setDraft((current) => ({ ...current, name: data.value }))} />
+              </Field>
+              <Field label="Type" required>
+                <Dropdown
+                  value={memoryTypeOptions.find((option) => option.value === draft.type)?.label ?? draft.type}
+                  selectedOptions={[draft.type]}
+                  onOptionSelect={(_event, data) => setDraft((current) => ({ ...current, type: (data.optionValue ?? 'feedback') as DraftState['type'] }))}
+                >
+                  {memoryTypeOptions.map((option) => (
+                    <Option key={option.value} value={option.value}>
+                      {option.label}
+                    </Option>
+                  ))}
+                </Dropdown>
+              </Field>
+            </div>
+
+            <Field label="Description" required>
+              <Input value={draft.description} onChange={(_event, data) => setDraft((current) => ({ ...current, description: data.value }))} />
+            </Field>
+
+            <Field label="Memory content" required hint="Use exact dates for deadlines or milestones so the note stays interpretable later.">
+              <Textarea
+                resize="vertical"
+                rows={8}
+                value={draft.content}
+                onChange={(_event, data) => setDraft((current) => ({ ...current, content: data.value }))}
+              />
+            </Field>
+
+            <Switch
+              checked={draft.alwaysInclude}
+              label="Always include this memory when it might affect the answer"
+              onChange={(_event, data) => setDraft((current) => ({ ...current, alwaysInclude: data.checked }))}
+            />
+
+            <div className={styles.formActions}>
+              <div>
+                {error ? <Caption1 className={styles.errorText}>{error}</Caption1> : null}
+              </div>
+              <div className={styles.memoryActions}>
+                {isEditing ? (
+                  <Button appearance="secondary" onClick={resetDraft} disabled={isSaving}>
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button appearance="primary" onClick={() => void handleSubmit()} disabled={isSaving}>
+                  {isSaving ? 'Saving...' : isEditing ? 'Update Memory' : 'Save Memory'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
       </div>
     </Card>
   )

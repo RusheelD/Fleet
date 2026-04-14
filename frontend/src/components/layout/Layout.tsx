@@ -10,6 +10,9 @@ import {
 import {
     FolderRegular,
     SearchRegular,
+    AlertRegular,
+    PlugConnectedRegular,
+    BookmarkRegular,
     SettingsRegular,
     CreditCardPersonRegular,
     BoardRegular,
@@ -26,6 +29,7 @@ import { useCurrentProject } from '../../hooks/useCurrentProject'
 import { usePreferences } from '../../hooks/PreferencesContext'
 import { useServerEvents } from '../../hooks/useServerEvents'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useNotifications } from '../../proxies'
 import { appTokens } from '../../styles/appTokens'
 
 import type { NavItemConfig } from '../../models'
@@ -179,6 +183,9 @@ const useStyles = makeStyles({
     sidebarFooterCompact: {
         padding: appTokens.space.xxs,
     },
+    sidebarFooterLabel: {
+        paddingTop: 0,
+    },
     collapsedTopSlot: {
         marginTop: appTokens.space.xs,
         marginLeft: appTokens.space.xs,
@@ -280,6 +287,7 @@ export function Layout() {
     const [chatOpen, setChatOpen] = useState(false)
 
     const { projectId, projectTitle } = useCurrentProject()
+    const unreadNotifications = useNotifications(true)
     useServerEvents(projectId)
     const desktopContentRef = useRef<HTMLDivElement | null>(null)
     const [desktopContentWidth, setDesktopContentWidth] = useState<number | null>(null)
@@ -428,10 +436,19 @@ export function Layout() {
         },
         [location.pathname],
     )
+    const unreadNotificationCount = unreadNotifications.data?.length ?? 0
+    const projectDisplayName = projectTitle
+        ?? (slug ? slug.split('-').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : undefined)
 
-    const globalNav: NavItemConfig[] = [
+    const portfolioNav: NavItemConfig[] = [
         { icon: <FolderRegular />, label: 'All Projects', path: '/projects', exact: true },
         { icon: <SearchRegular />, label: 'Search', path: '/search' },
+    ]
+    const workspaceNav: NavItemConfig[] = [
+        { icon: <AlertRegular />, label: 'Notifications', path: '/notifications', badge: unreadNotificationCount || null, exact: true },
+        { icon: <PlugConnectedRegular />, label: 'Integrations', path: '/integrations', exact: true },
+        { icon: <BookmarkRegular />, label: 'Memory', path: '/memory', exact: true },
+        { icon: <BotRegular />, label: 'Playbooks', path: '/playbooks', exact: true },
     ]
 
     const projectNav: NavItemConfig[] = slug
@@ -442,7 +459,7 @@ export function Layout() {
         ]
         : []
 
-    const bottomNav: NavItemConfig[] = [
+    const accountNav: NavItemConfig[] = [
         { icon: <SettingsRegular />, label: 'Settings', path: '/settings' },
         { icon: <CreditCardPersonRegular />, label: 'Subscription', path: '/subscription' },
     ]
@@ -452,8 +469,7 @@ export function Layout() {
 
         if (slug) {
             parts.push({ label: 'Projects', path: '/projects' })
-            const displayName = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-            parts.push({ label: displayName, path: `/projects/${slug}` })
+            parts.push({ label: projectDisplayName ?? 'Project', path: `/projects/${slug}` })
 
             if (location.pathname.includes('/work-items')) {
                 parts.push({ label: 'Work Items' })
@@ -462,6 +478,14 @@ export function Layout() {
             } else {
                 parts.push({ label: 'Overview' })
             }
+        } else if (location.pathname === '/notifications') {
+            parts.push({ label: 'Notifications' })
+        } else if (location.pathname === '/integrations') {
+            parts.push({ label: 'Integrations' })
+        } else if (location.pathname === '/memory') {
+            parts.push({ label: 'Memory' })
+        } else if (location.pathname === '/playbooks') {
+            parts.push({ label: 'Playbooks' })
         } else if (location.pathname === '/settings') {
             parts.push({ label: 'Settings' })
         } else if (location.pathname === '/subscription') {
@@ -514,7 +538,7 @@ export function Layout() {
             />
 
             {sidebarIsExpanded && slug && (
-                <ProjectSelector projectName={projectTitle ?? slug} expanded={sidebarIsExpanded} />
+                <ProjectSelector projectName={projectDisplayName ?? slug} expanded={sidebarIsExpanded} />
             )}
 
             {!sidebarIsExpanded && !isMobile && (
@@ -538,10 +562,26 @@ export function Layout() {
             <div className={mergeClasses(styles.navSection, isCompact && styles.navSectionCompact)}>
                 {sidebarIsExpanded && (
                     <Text className={mergeClasses(styles.navSectionLabel, isCompact && styles.navSectionLabelCompact)}>
-                        Navigate
+                        Portfolio
                     </Text>
                 )}
-                {globalNav.map((item) => (
+                {portfolioNav.map((item) => (
+                    <SidebarNavItem
+                        key={item.path}
+                        item={item}
+                        active={isActive(item.path, item.exact)}
+                        expanded={sidebarIsExpanded}
+                    />
+                ))}
+            </div>
+
+            <div className={mergeClasses(styles.navSection, isCompact && styles.navSectionCompact)}>
+                {sidebarIsExpanded && (
+                    <Text className={mergeClasses(styles.navSectionLabel, isCompact && styles.navSectionLabelCompact)}>
+                        Workspace
+                    </Text>
+                )}
+                {workspaceNav.map((item) => (
                     <SidebarNavItem
                         key={item.path}
                         item={item}
@@ -570,7 +610,12 @@ export function Layout() {
             )}
 
             <div className={mergeClasses(styles.sidebarFooter, isCompact && styles.sidebarFooterCompact)}>
-                {bottomNav.map((item) => (
+                {sidebarIsExpanded && (
+                    <Text className={mergeClasses(styles.navSectionLabel, styles.sidebarFooterLabel, isCompact && styles.navSectionLabelCompact)}>
+                        Account
+                    </Text>
+                )}
+                {accountNav.map((item) => (
                     <SidebarNavItem
                         key={item.path}
                         item={item}
@@ -590,6 +635,7 @@ export function Layout() {
                 onToggleChat={() => setChatOpen((prev) => !prev)}
                 isMobile={isMobile}
                 onToggleSidebar={isMobile ? () => setMobileSidebarOpen(true) : undefined}
+                unreadCount={unreadNotificationCount}
             />
 
             <div className={chatOpen && !isMobile ? styles.contentWithChat : styles.mainContent}>

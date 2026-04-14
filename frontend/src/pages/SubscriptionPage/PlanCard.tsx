@@ -28,6 +28,9 @@ const useStyles = makeStyles({
         gap: '1rem',
         position: 'relative',
         overflow: 'visible',
+        border: appTokens.border.subtle,
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        boxShadow: appTokens.shadow.card,
     },
     planCardCompact: {
         paddingTop: '0.75rem',
@@ -60,6 +63,17 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
+    },
+    iconShell: {
+        width: '2.25rem',
+        height: '2.25rem',
+        borderRadius: appTokens.radius.md,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: appTokens.color.surfaceRaised,
+        color: appTokens.color.brand,
+        flexShrink: 0,
     },
     planNameCompact: {
         gap: '0.375rem',
@@ -164,7 +178,7 @@ export function PlanCard({ plan }: PlanCardProps) {
                 </Badge>
             )}
             <div className={mergeClasses(styles.planName, isCompact && styles.planNameCompact)}>
-                {resolveIcon(plan.icon)}
+                <span className={styles.iconShell}>{resolveIcon(plan.icon)}</span>
                 <Title3>{plan.name}</Title3>
             </div>
             <div className={styles.planPrice}>

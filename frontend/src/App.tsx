@@ -11,6 +11,10 @@ const AgentMonitorPage = lazy(() => import('./pages/AgentMonitorPage').then((mod
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const SubscriptionPage = lazy(() => import('./pages/SubscriptionPage').then((module) => ({ default: module.SubscriptionPage })))
 const SearchPage = lazy(() => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then((module) => ({ default: module.NotificationsPage })))
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsPage })))
+const MemoryPage = lazy(() => import('./pages/MemoryPage').then((module) => ({ default: module.MemoryPage })))
+const PlaybooksPage = lazy(() => import('./pages/PlaybooksPage').then((module) => ({ default: module.PlaybooksPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
 const SignUpPage = lazy(() => import('./pages/SignUpPage').then((module) => ({ default: module.SignUpPage })))
 const GitHubCallbackPage = lazy(() => import('./pages/GitHubCallbackPage').then((module) => ({ default: module.GitHubCallbackPage })))
@@ -49,6 +53,10 @@ function App() {
               <Route element={<Layout />}>
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/search" element={<SearchPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/integrations" element={<IntegrationsPage />} />
+                <Route path="/memory" element={<MemoryPage />} />
+                <Route path="/playbooks" element={<PlaybooksPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/subscription" element={<SubscriptionPage />} />
               </Route>

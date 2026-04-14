@@ -1,40 +1,33 @@
 import {
+    Card,
     makeStyles,
     mergeClasses,
     Title3,
     Divider,
     Spinner,
     Text,
+    Caption1,
 } from '@fluentui/react-components'
-import { PageHeader } from '../../components/shared'
+import { PageShell } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
 import { useSubscription } from '../../proxies'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
-    page: {
-        paddingTop: appTokens.space.xl,
-        paddingRight: appTokens.space.pageX,
-        paddingBottom: appTokens.space.xl,
-        paddingLeft: appTokens.space.pageX,
-        maxWidth: appTokens.width.pageMedium,
-        margin: '0 auto',
-        width: '100%',
-        minWidth: 0,
-    },
-    pageCompact: {
-        paddingTop: appTokens.space.lg,
-        paddingBottom: appTokens.space.lg,
-        paddingLeft: appTokens.space.lg,
-        paddingRight: appTokens.space.lg,
-        maxWidth: '980px',
-    },
     usageSection: {
+        padding: appTokens.space.lg,
         marginBottom: '1.5rem',
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
     },
     usageSectionCompact: {
         marginBottom: '1rem',
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
     },
     usageGrid: {
         display: 'grid',
@@ -53,6 +46,12 @@ const useStyles = makeStyles({
     dividerSpacingCompact: {
         marginBottom: '1rem',
     },
+    planSectionCard: {
+        padding: appTokens.space.lg,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
+    },
     plansGrid: {
         display: 'grid',
         gridTemplateColumns: `repeat(auto-fill, minmax(${appTokens.width.planCardMin}, 1fr))`,
@@ -70,6 +69,30 @@ const useStyles = makeStyles({
     planSectionSubtextCompact: {
         marginTop: '0.125rem',
     },
+    summaryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: appTokens.space.md,
+    },
+    summaryCard: {
+        padding: appTokens.space.md,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
+    },
+    summaryLabel: {
+        color: appTokens.color.textTertiary,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+    },
+    summaryValue: {
+        fontSize: appTokens.fontSize.xl,
+        fontWeight: appTokens.fontWeight.bold,
+        lineHeight: 1,
+    },
 })
 
 export function SubscriptionPage() {
@@ -82,22 +105,43 @@ export function SubscriptionPage() {
 
     if (isLoading || !subscription) {
         return (
-            <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
+            <PageShell
+                title="Subscription"
+                subtitle="Manage plan details, track usage, and understand what capacity is available right now."
+                maxWidth="large"
+            >
                 <Spinner label="Loading subscription..." />
-            </div>
+            </PageShell>
         )
     }
 
     return (
-        <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
-            <PageHeader
+        <PageShell
                 title="Subscription"
-                subtitle="Manage your plan, usage, and billing"
-            />
+                subtitle="Manage plan details, track usage, and understand what capacity is available right now."
+                maxWidth="large"
+            >
+            <div className={styles.summaryGrid}>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Current plan</Caption1>
+                    <Text className={styles.summaryValue}>{subscription.currentPlan.name}</Text>
+                    <Caption1>{subscription.currentPlan.description}</Caption1>
+                </Card>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Usage meters</Caption1>
+                    <Text className={styles.summaryValue}>{subscription.usage.length}</Text>
+                    <Caption1>Tracked limits and burn for this billing period.</Caption1>
+                </Card>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Plan choices</Caption1>
+                    <Text className={styles.summaryValue}>{subscription.plans.length}</Text>
+                    <Caption1>Available upgrade paths and plan tiers in this version.</Caption1>
+                </Card>
+            </div>
 
             <CurrentPlanBanner currentPlan={subscription.currentPlan} />
 
-            <div className={mergeClasses(styles.usageSection, isDense && styles.usageSectionCompact)}>
+            <Card className={mergeClasses(styles.usageSection, isDense && styles.usageSectionCompact)}>
                 <Title3>This Month&apos;s Usage</Title3>
                 <div className={mergeClasses(styles.usageGrid, isDense && styles.usageGridCompact)}>
                     {subscription.usage.map((meter) => (
@@ -111,24 +155,26 @@ export function SubscriptionPage() {
                         />
                     ))}
                 </div>
-            </div>
+            </Card>
 
             <Divider className={mergeClasses(styles.dividerSpacing, isDense && styles.dividerSpacingCompact)} />
 
-            <div className={isDense ? styles.planSectionCompact : undefined}>
-                <Title3>Available Plans</Title3>
-                <div className={isDense ? styles.planSectionSubtextCompact : undefined} style={!isDense ? { marginTop: '0.25rem' } : undefined}>
-                    <Text>
-                        Pricing scales based on agents and simultaneous agents purchased. All plans include the same core features.
-                    </Text>
+            <Card className={styles.planSectionCard}>
+                <div className={isDense ? styles.planSectionCompact : undefined}>
+                    <Title3>Available Plans</Title3>
+                    <div className={isDense ? styles.planSectionSubtextCompact : undefined} style={!isDense ? { marginTop: '0.25rem' } : undefined}>
+                        <Text>
+                            Pricing scales based on agents and simultaneous agents purchased. All plans include the same core features.
+                        </Text>
+                    </div>
                 </div>
-            </div>
 
-            <div className={mergeClasses(styles.plansGrid, isDense && styles.plansGridCompact)}>
-                {subscription.plans.map((plan) => (
-                    <PlanCard key={plan.name} plan={plan} />
-                ))}
-            </div>
-        </div>
+                <div className={mergeClasses(styles.plansGrid, isDense && styles.plansGridCompact)}>
+                    {subscription.plans.map((plan) => (
+                        <PlanCard key={plan.name} plan={plan} />
+                    ))}
+                </div>
+            </Card>
+        </PageShell>
     )
 }

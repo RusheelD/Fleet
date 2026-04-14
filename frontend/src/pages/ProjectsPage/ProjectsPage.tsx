@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useCallback, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+    Card,
     makeStyles,
     mergeClasses,
     Caption1,
@@ -12,10 +13,12 @@ import {
     ToolbarButton,
     ToolbarDivider,
     Spinner,
+    Text,
 } from '@fluentui/react-components'
 import {
     AddRegular,
     SearchRegular,
+    FolderRegular,
     GridRegular,
     TextAlignJustifyRegular,
     ArrowSortRegular,
@@ -23,6 +26,7 @@ import {
     ArrowDownloadRegular,
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
+import { EmptyState } from '../../components/shared'
 import { ProjectCard, ProjectRow, NewProjectDialog } from './'
 import { useProjects, useExportProjects, useImportProjects } from '../../proxies'
 import { usePreferences, useIsMobile } from '../../hooks'
@@ -135,6 +139,31 @@ const useStyles = makeStyles({
         width: '100%',
         justifyContent: 'space-between',
     },
+    summaryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: appTokens.space.md,
+        marginBottom: appTokens.space.lg,
+    },
+    summaryCard: {
+        padding: appTokens.space.lg,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
+    },
+    summaryLabel: {
+        color: appTokens.color.textTertiary,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+    },
+    summaryValue: {
+        fontSize: '28px',
+        lineHeight: 1,
+        fontWeight: appTokens.fontWeight.bold,
+    },
     projectGrid: {
         display: 'grid',
         gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${appTokens.width.projectCardMin}), 1fr))`,
@@ -194,6 +223,19 @@ export function ProjectsPage() {
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [newProjectOpen, setNewProjectOpen] = useState(false)
     const effectiveViewMode: 'grid' | 'list' = isMobile ? 'grid' : (isCompact ? 'list' : viewMode)
+    const hasProjects = (projects?.length ?? 0) > 0
+    const linkedRepoCount = useMemo(
+        () => (projects ?? []).filter((project) => project.repo.trim().length > 0).length,
+        [projects],
+    )
+    const totalActiveItems = useMemo(
+        () => (projects ?? []).reduce((total, project) => total + project.workItems.active, 0),
+        [projects],
+    )
+    const totalRunningAgents = useMemo(
+        () => (projects ?? []).reduce((total, project) => total + project.agents.running, 0),
+        [projects],
+    )
 
     const filteredProjects = useMemo(() => {
         const list = projects ?? []
@@ -257,7 +299,7 @@ export function ProjectsPage() {
         <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
             <PageHeader
                 title="Projects"
-                subtitle="Manage your projects and track AI agent progress"
+                subtitle="Organize repositories, backlog, memory, and agent execution across your full portfolio."
                 actions={
                     <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                         <input
@@ -296,6 +338,29 @@ export function ProjectsPage() {
                     </div>
                 }
             />
+
+            <div className={styles.summaryGrid}>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Projects</Caption1>
+                    <Text className={styles.summaryValue}>{projects?.length ?? 0}</Text>
+                    <Caption1>Every active workspace under Fleet management.</Caption1>
+                </Card>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Open Work</Caption1>
+                    <Text className={styles.summaryValue}>{totalActiveItems}</Text>
+                    <Caption1>Work items currently in active motion across your portfolio.</Caption1>
+                </Card>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Running Agents</Caption1>
+                    <Text className={styles.summaryValue}>{totalRunningAgents}</Text>
+                    <Caption1>Agent executions currently working in the background.</Caption1>
+                </Card>
+                <Card className={styles.summaryCard}>
+                    <Caption1 className={styles.summaryLabel}>Linked Repos</Caption1>
+                    <Text className={styles.summaryValue}>{linkedRepoCount}</Text>
+                    <Caption1>Projects already wired to a repository and ready for PR-driven work.</Caption1>
+                </Card>
+            </div>
 
             <div className={mergeClasses(styles.toolbar, isMobile && styles.toolbarMobile)}>
                 <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
@@ -347,7 +412,24 @@ export function ProjectsPage() {
                 </Toolbar>
             </div>
 
-            {effectiveViewMode === 'grid' ? (
+            {filteredProjects.length === 0 ? (
+                <EmptyState
+                    icon={<FolderRegular style={{ fontSize: '48px' }} />}
+                    title={hasProjects ? 'No projects match this view' : 'No projects yet'}
+                    description={hasProjects
+                        ? 'Try a different search term or sort option.'
+                        : 'Create your first project to start organizing work, memory, playbooks, and agent runs.'}
+                    actions={hasProjects ? (
+                        <Button appearance="secondary" onClick={() => setSearchQuery('')}>
+                            Clear Search
+                        </Button>
+                    ) : (
+                        <Button appearance="primary" icon={<AddRegular />} onClick={() => setNewProjectOpen(true)}>
+                            New Project
+                        </Button>
+                    )}
+                />
+            ) : effectiveViewMode === 'grid' ? (
                 <div className={mergeClasses(styles.projectGrid, isMobile && styles.projectGridMobile)}>
                     {filteredProjects.map((project) => (
                         <ProjectCard

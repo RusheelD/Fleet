@@ -14,9 +14,12 @@ const useStyles = makeStyles({
     sidebarHeader: {
         display: 'flex',
         alignItems: 'center',
-        gap: '0.625rem',
-        padding: '0 0.625rem',
-        height: appTokens.size.sidebarHeader,
+        gap: '0.75rem',
+        paddingTop: '0.75rem',
+        paddingRight: '0.75rem',
+        paddingBottom: '0.75rem',
+        paddingLeft: '0.75rem',
+        minHeight: appTokens.size.sidebarHeader,
         flexShrink: 0,
         borderBottom: appTokens.border.subtle,
         position: 'relative',
@@ -39,6 +42,20 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         letterSpacing: '0.01em',
     },
+    brandCopy: {
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        gap: '0.125rem',
+    },
+    brandTagline: {
+        fontSize: '11px',
+        lineHeight: '14px',
+        color: appTokens.color.textMuted,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+    },
     collapseButton: {
         marginLeft: 'auto',
         flexShrink: 0,
@@ -58,7 +75,10 @@ export function SidebarHeader({ expanded, onToggle }: SidebarHeaderProps) {
             {expanded ? (
                 <>
                     <FleetRocketLogo className={styles.brandIcon} size={22} title="Fleet" />
-                    <Text className={styles.brandName}>Fleet</Text>
+                    <div className={styles.brandCopy}>
+                        <Text className={styles.brandName}>Fleet</Text>
+                        <Text className={styles.brandTagline}>Agent workspace</Text>
+                    </div>
                 </>
             ) : (
                 <FleetRocketLogo className={styles.brandIcon} size={22} title="Fleet" />

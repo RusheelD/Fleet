@@ -1,4 +1,5 @@
 import {
+    Badge,
     makeStyles,
     mergeClasses,
     Tooltip,
@@ -81,9 +82,20 @@ const useStyles = makeStyles({
         width: '16px',
     },
     navItemLabel: {
+        flex: 1,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    navItemBadge: {
+        marginLeft: 'auto',
+        maxWidth: '64px',
+    },
+    navItemBadgeCollapsed: {
+        position: 'absolute',
+        top: '4px',
+        right: '4px',
+        pointerEvents: 'none',
     },
 })
 
@@ -98,6 +110,8 @@ export function SidebarNavItem({ item, active, expanded }: SidebarNavItemProps) 
     const navigate = useNavigate()
     const { preferences } = usePreferences()
     const isCompact = preferences?.compactMode ?? false
+    const hasBadge = item.badge !== undefined && item.badge !== null && item.badge !== '' && item.badge !== 0
+    const badgeLabel = typeof item.badge === 'number' && item.badge > 99 ? '99+' : item.badge
 
     const button = (
         <button
@@ -113,6 +127,16 @@ export function SidebarNavItem({ item, active, expanded }: SidebarNavItemProps) 
             {active && <span className={styles.navItemAccent} />}
             <span className={mergeClasses(styles.navItemIcon, isCompact && styles.navItemIconCompact)}>{item.icon}</span>
             {expanded && <span className={styles.navItemLabel}>{item.label}</span>}
+            {hasBadge && (
+                <Badge
+                    appearance="filled"
+                    color="danger"
+                    size="tiny"
+                    className={expanded ? styles.navItemBadge : styles.navItemBadgeCollapsed}
+                >
+                    {badgeLabel}
+                </Badge>
+            )}
         </button>
     )
 

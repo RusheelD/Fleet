@@ -19,6 +19,7 @@ import { getApiErrorMessage } from '../../proxies/proxy'
 import type { UpsertPromptSkillRequest } from '../../proxies/userProxy'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { appTokens } from '../../styles/appTokens'
+import { EmptyState } from './EmptyState'
 
 interface PlaybookWorkspaceProps {
   title: string
@@ -128,6 +129,34 @@ const useStyles = makeStyles({
   },
   errorText: {
     color: appTokens.color.danger,
+  },
+  bodyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1.1fr) minmax(320px, 0.9fr)',
+    gap: appTokens.space.lg,
+    '@media (max-width: 980px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  panel: {
+    padding: appTokens.space.md,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.md,
+    backgroundColor: appTokens.color.pageBackground,
+    border: appTokens.border.subtle,
+  },
+  panelHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: appTokens.space.sm,
+    flexWrap: 'wrap',
+  },
+  panelHeaderCopy: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appTokens.space.xxxs,
   },
 })
 
@@ -296,99 +325,118 @@ export function PlaybookWorkspace({
 
       <Divider />
 
-      <div className={styles.playbookList}>
-        {isLoading ? (
-          <Text>Loading playbooks...</Text>
-        ) : orderedPlaybooks.length === 0 ? (
-          <Text>{emptyMessage}</Text>
-        ) : (
-          orderedPlaybooks.map((playbook) => (
-            <Card key={playbook.id} className={styles.playbookCard}>
-              <div className={styles.playbookHeader}>
-                <div className={styles.titleGroup}>
-                  <Text weight="semibold">{playbook.name}</Text>
-                  <Caption1>{playbook.description}</Caption1>
-                </div>
-                <div className={styles.playbookActions}>
-                  <Button appearance="secondary" size="small" onClick={() => handleEdit(playbook)} disabled={isSaving}>
-                    Edit
-                  </Button>
-                  <Button appearance="subtle" size="small" onClick={() => void handleDelete(playbook)} disabled={isSaving}>
-                    Delete
-                  </Button>
-                </div>
-              </div>
-
-              <div className={styles.playbookBadges}>
-                <Badge appearance="outline">{playbook.scope}</Badge>
-                {playbook.enabled ? <Badge color="success">Enabled</Badge> : <Badge appearance="outline">Disabled</Badge>}
-              </div>
-
-              <Caption1 className={styles.helperText}>Use when: {playbook.whenToUse}</Caption1>
-              <Text size={200} className={styles.bodyPreview}>{createPreview(playbook.content)}</Text>
-              <Caption1>Updated {formatTimestamp(playbook.updatedAtUtc)}</Caption1>
-            </Card>
-          ))
-        )}
-      </div>
-
-      <Divider />
-
-      <div className={styles.form}>
-        <div className={styles.titleGroup}>
-          <Text weight="semibold">{isEditing ? 'Edit playbook' : 'Add playbook'}</Text>
-          <Caption1 className={styles.helperText}>
-            Keep the description and usage guidance crisp so Fleet knows when to apply this playbook.
-          </Caption1>
-        </div>
-
-        <Field label="Name" required>
-          <Input value={draft.name} onChange={(_event, data) => setDraft((current) => ({ ...current, name: data.value }))} />
-        </Field>
-
-        <Field label="Description" required>
-          <Input value={draft.description} onChange={(_event, data) => setDraft((current) => ({ ...current, description: data.value }))} />
-        </Field>
-
-        <Field label="When to use" required hint="Describe the kinds of requests or situations that should activate this playbook.">
-          <Textarea
-            resize="vertical"
-            rows={3}
-            value={draft.whenToUse}
-            onChange={(_event, data) => setDraft((current) => ({ ...current, whenToUse: data.value }))}
-          />
-        </Field>
-
-        <Field label="Playbook instructions" required>
-          <Textarea
-            resize="vertical"
-            rows={8}
-            value={draft.content}
-            onChange={(_event, data) => setDraft((current) => ({ ...current, content: data.value }))}
-          />
-        </Field>
-
-        <Switch
-          checked={draft.enabled}
-          label="Enable this playbook"
-          onChange={(_event, data) => setDraft((current) => ({ ...current, enabled: data.checked }))}
-        />
-
-        <div className={styles.formActions}>
-          <div>
-            {error ? <Caption1 className={styles.errorText}>{error}</Caption1> : null}
+      <div className={styles.bodyGrid}>
+        <Card className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelHeaderCopy}>
+              <Text weight="semibold">Saved playbooks</Text>
+              <Caption1 className={styles.helperText}>Review what Fleet can already reuse before shaping a new workflow.</Caption1>
+            </div>
+            <Badge appearance="outline">{orderedPlaybooks.length} saved</Badge>
           </div>
-          <div className={styles.playbookActions}>
-            {isEditing ? (
-              <Button appearance="secondary" onClick={resetDraft} disabled={isSaving}>
-                Cancel
-              </Button>
-            ) : null}
-            <Button appearance="primary" onClick={() => void handleSubmit()} disabled={isSaving}>
-              {isSaving ? 'Saving...' : isEditing ? 'Update Playbook' : 'Save Playbook'}
-            </Button>
+          <Divider />
+          <div className={styles.playbookList}>
+            {isLoading ? (
+              <Text>Loading playbooks...</Text>
+            ) : orderedPlaybooks.length === 0 ? (
+              <EmptyState
+                title="No saved playbooks yet"
+                description={emptyMessage}
+              />
+            ) : (
+              orderedPlaybooks.map((playbook) => (
+                <Card key={playbook.id} className={styles.playbookCard}>
+                  <div className={styles.playbookHeader}>
+                    <div className={styles.titleGroup}>
+                      <Text weight="semibold">{playbook.name}</Text>
+                      <Caption1>{playbook.description}</Caption1>
+                    </div>
+                    <div className={styles.playbookActions}>
+                      <Button appearance="secondary" size="small" onClick={() => handleEdit(playbook)} disabled={isSaving}>
+                        Edit
+                      </Button>
+                      <Button appearance="subtle" size="small" onClick={() => void handleDelete(playbook)} disabled={isSaving}>
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className={styles.playbookBadges}>
+                    <Badge appearance="outline">{playbook.scope}</Badge>
+                    {playbook.enabled ? <Badge color="success">Enabled</Badge> : <Badge appearance="outline">Disabled</Badge>}
+                  </div>
+
+                  <Caption1 className={styles.helperText}>Use when: {playbook.whenToUse}</Caption1>
+                  <Text size={200} className={styles.bodyPreview}>{createPreview(playbook.content)}</Text>
+                  <Caption1>Updated {formatTimestamp(playbook.updatedAtUtc)}</Caption1>
+                </Card>
+              ))
+            )}
           </div>
-        </div>
+        </Card>
+
+        <Card className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelHeaderCopy}>
+              <Text weight="semibold">{isEditing ? 'Edit playbook' : 'Add playbook'}</Text>
+              <Caption1 className={styles.helperText}>
+                Keep the description and usage guidance crisp so Fleet knows when to apply this playbook.
+              </Caption1>
+            </div>
+            {isEditing ? <Badge appearance="tint">Editing</Badge> : <Badge appearance="outline">New</Badge>}
+          </div>
+          <Divider />
+
+          <div className={styles.form}>
+            <Field label="Name" required>
+              <Input value={draft.name} onChange={(_event, data) => setDraft((current) => ({ ...current, name: data.value }))} />
+            </Field>
+
+            <Field label="Description" required>
+              <Input value={draft.description} onChange={(_event, data) => setDraft((current) => ({ ...current, description: data.value }))} />
+            </Field>
+
+            <Field label="When to use" required hint="Describe the kinds of requests or situations that should activate this playbook.">
+              <Textarea
+                resize="vertical"
+                rows={3}
+                value={draft.whenToUse}
+                onChange={(_event, data) => setDraft((current) => ({ ...current, whenToUse: data.value }))}
+              />
+            </Field>
+
+            <Field label="Playbook instructions" required>
+              <Textarea
+                resize="vertical"
+                rows={8}
+                value={draft.content}
+                onChange={(_event, data) => setDraft((current) => ({ ...current, content: data.value }))}
+              />
+            </Field>
+
+            <Switch
+              checked={draft.enabled}
+              label="Enable this playbook"
+              onChange={(_event, data) => setDraft((current) => ({ ...current, enabled: data.checked }))}
+            />
+
+            <div className={styles.formActions}>
+              <div>
+                {error ? <Caption1 className={styles.errorText}>{error}</Caption1> : null}
+              </div>
+              <div className={styles.playbookActions}>
+                {isEditing ? (
+                  <Button appearance="secondary" onClick={resetDraft} disabled={isSaving}>
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button appearance="primary" onClick={() => void handleSubmit()} disabled={isSaving}>
+                  {isSaving ? 'Saving...' : isEditing ? 'Update Playbook' : 'Save Playbook'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
       </div>
     </Card>
   )

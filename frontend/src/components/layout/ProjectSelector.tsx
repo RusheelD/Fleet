@@ -34,8 +34,14 @@ const useStyles = makeStyles({
         cursor: 'pointer',
         backgroundColor: appTokens.color.surfaceAlt,
         border: appTokens.border.subtle,
+        width: 'calc(100% - 1rem)',
+        textAlign: 'left',
         ':hover': {
             backgroundColor: appTokens.color.surfaceAltHover,
+        },
+        ':focus-visible': {
+            outline: `2px solid ${appTokens.color.focusOutline}`,
+            outlineOffset: '-2px',
         },
     },
     projectSelectorIcon: {
@@ -132,6 +138,10 @@ const useStyles = makeStyles({
         letterSpacing: '0.05em',
         color: appTokens.color.textMuted,
     },
+    dropdownMeta: {
+        fontSize: appTokens.fontSize.xs,
+        color: appTokens.color.textMuted,
+    },
     allProjectsLink: {
         fontSize: appTokens.fontSize.xs,
         color: appTokens.color.brand,
@@ -191,6 +201,13 @@ const useStyles = makeStyles({
         width: appTokens.fontSize.sm,
         flexShrink: 0,
     },
+    emptyProjects: {
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        color: appTokens.color.textMuted,
+    },
 })
 
 interface ProjectSelectorProps {
@@ -218,7 +235,12 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
     const dropdown = (
         <PopoverSurface className={styles.dropdownSurface}>
             <div className={styles.dropdownHeader}>
-                <Text className={styles.dropdownTitle}>Switch Project</Text>
+                <div>
+                    <Text className={styles.dropdownTitle}>Switch Project</Text>
+                    <Text className={styles.dropdownMeta}>
+                        {projects?.length ?? 0} project{projects?.length === 1 ? '' : 's'}
+                    </Text>
+                </div>
                 <Text
                     className={styles.allProjectsLink}
                     onClick={() => {
@@ -229,7 +251,7 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
                     View all
                 </Text>
             </div>
-            {projects?.map((project) => {
+            {projects?.length ? projects.map((project) => {
                 const isActive = project.slug === currentSlug
                 return (
                     <div
@@ -261,7 +283,9 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
                         )}
                     </div>
                 )
-            })}
+            }) : (
+                <Text className={styles.emptyProjects}>No projects available yet.</Text>
+            )}
         </PopoverSurface>
     )
 
@@ -274,10 +298,9 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
                 trapFocus
             >
                 <PopoverTrigger disableButtonEnhancement>
-                    <div
+                    <button
+                        type="button"
                         className={styles.projectSelector}
-                        role="button"
-                        tabIndex={0}
                     >
                         <FolderOpenRegular className={styles.projectSelectorIcon} />
                         <div className={styles.projectSelectorInfo}>
@@ -289,7 +312,7 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
                         ) : (
                             <ChevronDownRegular className={styles.projectSelectorChevron} />
                         )}
-                    </div>
+                    </button>
                 </PopoverTrigger>
                 {dropdown}
             </Popover>

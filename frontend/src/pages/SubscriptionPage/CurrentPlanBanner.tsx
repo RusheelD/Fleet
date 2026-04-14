@@ -27,6 +27,9 @@ const useStyles = makeStyles({
         marginBottom: '1.5rem',
         flexWrap: 'wrap',
         gap: '1rem',
+        border: appTokens.border.subtle,
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        boxShadow: appTokens.shadow.card,
     },
     currentPlanCompact: {
         paddingTop: '0.625rem',

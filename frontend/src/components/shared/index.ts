@@ -1,4 +1,6 @@
+export { AuthShell } from './AuthShell'
 export { PageHeader } from './PageHeader'
+export { PageShell } from './PageShell'
 export { EmptyState } from './EmptyState'
 export { ErrorBoundary } from './ErrorBoundary'
 export { FleetRocketLogo } from './FleetRocketLogo'

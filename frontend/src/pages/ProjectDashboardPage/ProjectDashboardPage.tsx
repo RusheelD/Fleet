@@ -9,6 +9,7 @@ import {
     Divider,
     Spinner,
     Text,
+    Caption1,
     Dialog,
     DialogSurface,
     DialogBody,
@@ -174,6 +175,44 @@ const useStyles = makeStyles({
         marginBottom: '0.75rem',
         wordBreak: 'break-word',
     },
+    projectOverview: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1.4fr) minmax(280px, 0.9fr)',
+        gap: appTokens.space.md,
+        marginBottom: appTokens.space.xl,
+        '@media (max-width: 980px)': {
+            gridTemplateColumns: '1fr',
+        },
+    },
+    projectOverviewPrimary: {
+        padding: appTokens.space.lg,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
+    },
+    projectOverviewSignals: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: appTokens.space.md,
+    },
+    signalCard: {
+        padding: appTokens.space.md,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxs,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+    },
+    signalValue: {
+        fontSize: appTokens.fontSize.xl,
+        fontWeight: appTokens.fontWeight.bold,
+    },
+    overviewCaption: {
+        color: appTokens.color.textTertiary,
+    },
 })
 
 export function ProjectDashboardPage() {
@@ -200,6 +239,9 @@ export function ProjectDashboardPage() {
     const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
     const isMemorySaving = createProjectMemory.isPending || updateProjectMemory.isPending || deleteProjectMemory.isPending
     const isPlaybookSaving = createProjectSkill.isPending || updateProjectSkill.isPending || deleteProjectSkill.isPending
+    const projectMemoryCount = projectMemories.data?.length ?? 0
+    const projectPlaybookCount = projectSkills.data?.length ?? 0
+    const activeAgentCount = dashboard?.agents.filter((agent) => agent.status.toLowerCase() === 'running').length ?? 0
 
     const handleUnlinkRepo = useCallback(() => {
         if (!dashboard) {
@@ -304,15 +346,48 @@ export function ProjectDashboardPage() {
                 }
             />
 
-            {dashboard.repo ? (
-                <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
-                    <LinkRegular />
-                    {dashboard.repo}
-                    <OpenRegular className={styles.openLinkIcon} />
-                </span>
-            ) : (
-                <Text size={200}>No repository linked to this project.</Text>
-            )}
+            <div className={styles.projectOverview}>
+                <Card className={styles.projectOverviewPrimary}>
+                    <Text weight="semibold">Project context</Text>
+                    <Text size={400}>
+                        Keep planning, execution, memory, and repo-linked delivery together so the team never has to reconstruct context from scratch.
+                    </Text>
+                    {dashboard.repo ? (
+                        <span className={mergeClasses(styles.repoLink, isMobile && styles.repoLinkMobile)} onClick={() => window.open(`https://github.com/${dashboard.repo}`, '_blank')}>
+                            <LinkRegular />
+                            {dashboard.repo}
+                            <OpenRegular className={styles.openLinkIcon} />
+                        </span>
+                    ) : (
+                        <Text size={200}>No repository linked to this project yet. Link one to unlock PR-driven execution.</Text>
+                    )}
+                    <Text size={200} className={styles.overviewCaption}>
+                        The quick actions below are tuned for the most common next steps: shape work, open chat, and monitor execution.
+                    </Text>
+                </Card>
+                <div className={styles.projectOverviewSignals}>
+                    <Card className={styles.signalCard}>
+                        <Caption1>Project memory</Caption1>
+                        <Text className={styles.signalValue}>{projectMemoryCount}</Text>
+                        <Caption1>Durable notes and references saved for this project.</Caption1>
+                    </Card>
+                    <Card className={styles.signalCard}>
+                        <Caption1>Playbooks</Caption1>
+                        <Text className={styles.signalValue}>{projectPlaybookCount}</Text>
+                        <Caption1>Reusable project-specific workflows available to Fleet.</Caption1>
+                    </Card>
+                    <Card className={styles.signalCard}>
+                        <Caption1>Active agents</Caption1>
+                        <Text className={styles.signalValue}>{activeAgentCount}</Text>
+                        <Caption1>Agents currently moving work forward in this project.</Caption1>
+                    </Card>
+                    <Card className={styles.signalCard}>
+                        <Caption1>Recent activity</Caption1>
+                        <Text className={styles.signalValue}>{dashboard.activities.length}</Text>
+                        <Caption1>Recent events surfaced on the dashboard right now.</Caption1>
+                    </Card>
+                </div>
+            </div>
 
             {/* Quick Actions */}
             <div className={mergeClasses(styles.quickActions, isDense && styles.quickActionsCompact, isMobile && styles.quickActionsMobile)}>

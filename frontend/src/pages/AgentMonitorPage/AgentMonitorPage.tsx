@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
+    Card,
     makeStyles,
     mergeClasses,
     Tab,
@@ -254,6 +255,48 @@ const useStyles = makeStyles({
     emptyExecutionStateDetail: {
         color: appTokens.color.textTertiary,
     },
+    statusStrip: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: appTokens.space.md,
+        flexWrap: 'wrap',
+        paddingTop: appTokens.space.md,
+        paddingRight: appTokens.space.lg,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.lg,
+        marginBottom: appTokens.space.md,
+        borderRadius: appTokens.radius.lg,
+        border: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surface,
+        boxShadow: appTokens.shadow.card,
+    },
+    statusStripMobile: {
+        paddingTop: appTokens.space.sm,
+        paddingRight: appTokens.space.md,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+    },
+    statusStripLive: {
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+    },
+    statusStripReconnecting: {
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.infoSurface} 100%)`,
+    },
+    statusStripConnecting: {
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceBrand} 120%)`,
+    },
+    statusStripMeta: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xxxs,
+        minWidth: 0,
+    },
+    statusStripPills: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: appTokens.space.xs,
+    },
 })
 
 export function AgentMonitorPage() {
@@ -356,6 +399,16 @@ export function AgentMonitorPage() {
 
         return `${filteredExecutions.length} run${filteredExecutions.length === 1 ? '' : 's'} in view`
     }, [currentTabLabel, filteredByTab.length, filteredExecutions.length, searchQuery])
+    const connectionStatusLabel = serverEventState === 'live'
+        ? 'Live event stream connected'
+        : serverEventState === 'reconnecting'
+            ? 'Live stream reconnecting'
+            : 'Connecting to live stream'
+    const connectionStatusDetail = serverEventState === 'live'
+        ? 'Runs, logs, and work-item updates should appear with minimal delay.'
+        : serverEventState === 'reconnecting'
+            ? 'Fleet is temporarily leaning on fallback polling while the stream reconnects.'
+            : 'Fleet is warming up the event stream before switching to live updates.'
 
     const emptyExecutionState = useMemo(() => {
         if (searchQuery.trim()) {
@@ -639,6 +692,30 @@ export function AgentMonitorPage() {
                     </div>
                 }
             />
+            <Card
+                className={mergeClasses(
+                    styles.statusStrip,
+                    isMobile && styles.statusStripMobile,
+                    serverEventState === 'live'
+                        ? styles.statusStripLive
+                        : serverEventState === 'reconnecting'
+                            ? styles.statusStripReconnecting
+                            : styles.statusStripConnecting,
+                )}
+            >
+                <div className={styles.statusStripMeta}>
+                    <Text weight="semibold">{connectionStatusLabel}</Text>
+                    <Caption1>{connectionStatusDetail}</Caption1>
+                </div>
+                <div className={styles.statusStripPills}>
+                    <InfoBadge appearance={serverEventState === 'live' ? 'filled' : 'tint'}>
+                        {serverEventState}
+                    </InfoBadge>
+                    <InfoBadge appearance="tint">{allExecutions.length} total runs</InfoBadge>
+                    <InfoBadge appearance="tint">{allLogs.length} log entries</InfoBadge>
+                    <InfoBadge appearance="tint">{workItems?.length ?? 0} executable items</InfoBadge>
+                </div>
+            </Card>
 
             <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact, isMobile && styles.summaryRowMobile)}>
                 <SummaryCard

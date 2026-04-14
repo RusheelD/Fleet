@@ -23,6 +23,8 @@ const useStyles = makeStyles({
         border: appTokens.border.subtle,
         transitionProperty: 'background-color, box-shadow, border-color, transform',
         transitionDuration: appTokens.motion.fast,
+        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
+        boxShadow: appTokens.shadow.card,
     },
     summaryCardCompact: {
         paddingTop: appTokens.space.xs,
@@ -39,6 +41,13 @@ const useStyles = makeStyles({
     },
     summaryIcon: {
         fontSize: appTokens.fontSize.iconLg,
+        width: '2rem',
+        height: '2rem',
+        borderRadius: appTokens.radius.md,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: appTokens.color.surfaceRaised,
     },
     summaryIconCompact: {
         fontSize: appTokens.fontSize.iconSm,

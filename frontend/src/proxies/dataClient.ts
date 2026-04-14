@@ -35,6 +35,7 @@ const EXECUTIONS_POLL_MS = 10000
 const LOGS_POLL_MS = 10000
 const CHAT_DATA_POLL_MS = 4000
 const CHAT_MESSAGES_POLL_MS = 5000
+const NOTIFICATIONS_POLL_MS = 15000
 
 export type DataResult<T> = Pick<UseQueryResult<T>, 'data' | 'error' | 'isError' | 'isLoading' | 'status'>
 
@@ -878,7 +879,12 @@ export function useValidateMcpServer() {
 }
 
 export function useNotifications(unreadOnly = false) {
-  return useDataQuery('notifications', () => getNotifications(unreadOnly), [], [unreadOnly])
+  return useDataQuery('notifications', () => getNotifications(unreadOnly), [], [unreadOnly], {
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: NOTIFICATIONS_POLL_MS,
+    refetchIntervalInBackground: true,
+  })
 }
 
 export function useMarkNotificationAsRead() {

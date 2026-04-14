@@ -1,9 +1,6 @@
 import {
     makeStyles,
-    Card,
-    CardHeader,
     Button,
-    Title3,
     Body1,
     Caption1,
     Spinner,
@@ -16,58 +13,9 @@ import { InteractionStatus } from '@azure/msal-browser'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { appTokens } from '../../styles/appTokens'
+import { AuthShell } from '../../components/shared'
 
 const useStyles = makeStyles({
-    root: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100dvh',
-        padding: appTokens.space.xxl,
-        backgroundImage: `radial-gradient(circle at top left, ${appTokens.color.authGlowA}, transparent 38%), radial-gradient(circle at bottom right, ${appTokens.color.authGlowB}, transparent 34%)`,
-        backgroundColor: appTokens.color.pageBackground,
-        overflow: 'auto',
-        '@media (max-width: 900px)': {
-            alignItems: 'flex-start',
-            paddingTop: appTokens.space.xl,
-            paddingBottom: appTokens.space.xl,
-            paddingLeft: appTokens.space.lg,
-            paddingRight: appTokens.space.lg,
-        },
-    },
-    card: {
-        width: '100%',
-        maxWidth: '420px',
-        padding: appTokens.space.xl,
-        borderRadius: appTokens.radius.xl,
-        boxShadow: appTokens.shadow.overlay,
-        borderTopWidth: '1px',
-        borderRightWidth: '1px',
-        borderBottomWidth: '1px',
-        borderLeftWidth: '1px',
-        borderTopStyle: 'solid',
-        borderRightStyle: 'solid',
-        borderBottomStyle: 'solid',
-        borderLeftStyle: 'solid',
-        borderTopColor: appTokens.color.border,
-        borderRightColor: appTokens.color.border,
-        borderBottomColor: appTokens.color.border,
-        borderLeftColor: appTokens.color.border,
-        backgroundColor: appTokens.color.surface,
-        '@media (max-width: 900px)': {
-            paddingTop: appTokens.space.md,
-            paddingBottom: appTokens.space.md,
-            marginTop: appTokens.space.sm,
-        },
-    },
-    header: {
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: appTokens.space.sm,
-        marginBottom: appTokens.space.md,
-        textAlign: 'center',
-    },
     actions: {
         display: 'flex',
         flexDirection: 'column',
@@ -129,55 +77,53 @@ export function SignUpPage() {
     const authDisabled = isLoading || !isAuthConfigured
 
     return (
-        <div className={styles.root}>
-            <Card className={styles.card}>
-                <CardHeader
-                    header={
-                        <div className={styles.header}>
-                            <Title3>Create your Fleet account</Title3>
-                            <Body1>Choose email or Google to get started. It&apos;s free.</Body1>
+        <AuthShell
+            eyebrow="Start planning with clarity"
+            title="Create your Fleet account"
+            subtitle="Choose email or Google to start organizing work, memory, playbooks, and agent execution in one place."
+            footer={(
+                <Body1 align="center" className={styles.footer}>
+                    Already have an account? <Link onClick={() => void navigate('/login')}>Log in</Link>
+                </Body1>
+            )}
+        >
+            <div className={styles.actions}>
+                {isLoading ? (
+                    <Spinner label="Setting up your account..." />
+                ) : (
+                    <>
+                        <Button
+                            appearance="primary"
+                            size="large"
+                            icon={<MicrosoftIcon className={styles.providerIcon} />}
+                            disabled={authDisabled}
+                            onClick={() => void signUp('email')}
+                        >
+                            Sign up with email
+                        </Button>
+                        <Button
+                            appearance="secondary"
+                            size="large"
+                            icon={<GoogleIcon className={styles.providerIcon} />}
+                            disabled={authDisabled}
+                            onClick={() => void signUp('google')}
+                        >
+                            Sign up with Google
+                        </Button>
+                        {authConfigError && (
+                            <Caption1 className={styles.configError}>
+                                {authConfigError}
+                            </Caption1>
+                        )}
+                        <div className={styles.dividerRow}>
+                            <Divider />
                         </div>
-                    }
-                />
-                <div className={styles.actions}>
-                    {isLoading ? (
-                        <Spinner label="Setting up your account..." />
-                    ) : (
-                        <>
-                            <Button
-                                appearance="primary"
-                                size="large"
-                                icon={<MicrosoftIcon className={styles.providerIcon} />}
-                                disabled={authDisabled}
-                                onClick={() => void signUp('email')}
-                            >
-                                Sign up with email
-                            </Button>
-                            <Button
-                                appearance="secondary"
-                                size="large"
-                                icon={<GoogleIcon className={styles.providerIcon} />}
-                                disabled={authDisabled}
-                                onClick={() => void signUp('google')}
-                            >
-                                Sign up with Google
-                            </Button>
-                            {authConfigError && (
-                                <Caption1 className={styles.configError}>
-                                    {authConfigError}
-                                </Caption1>
-                            )}
-                            <div className={styles.dividerRow}>
-                                <Divider />
-                            </div>
-                            <Body1 align="center" className={styles.footer}>
-                                Already have an account?{' '}
-                                <Link onClick={() => void navigate('/login')}>Log in</Link>
-                            </Body1>
-                        </>
-                    )}
-                </div>
-            </Card>
-        </div>
+                        <Body1 align="center">
+                            Start free, connect your repos later, and shape the workspace around how your team already works.
+                        </Body1>
+                    </>
+                )}
+            </div>
+        </AuthShell>
     )
 }

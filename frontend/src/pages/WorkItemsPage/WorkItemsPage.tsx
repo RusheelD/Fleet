@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from 'react'
 import {
+    Card,
     makeStyles,
     mergeClasses,
     Button,
@@ -18,6 +19,7 @@ import {
     Divider,
     Dropdown,
     Option,
+    Caption1,
 } from '@fluentui/react-components'
 import {
     SearchRegular,
@@ -31,7 +33,7 @@ import {
     ArrowDownloadRegular,
     DeleteRegular,
 } from '@fluentui/react-icons'
-import { PageHeader } from '../../components/shared'
+import { EmptyState, PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
 import {
     useWorkItems,
@@ -304,6 +306,31 @@ const useStyles = makeStyles({
     },
     filterTriggerActive: {
         color: appTokens.color.brand,
+    },
+    summaryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: appTokens.space.md,
+        marginBottom: appTokens.space.md,
+    },
+    summaryCard: {
+        padding: appTokens.space.md,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.xs,
+        backgroundColor: appTokens.color.surface,
+        border: appTokens.border.subtle,
+        boxShadow: appTokens.shadow.card,
+    },
+    summaryLabel: {
+        color: appTokens.color.textTertiary,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+    },
+    summaryValue: {
+        fontSize: appTokens.fontSize.xl,
+        lineHeight: 1,
+        fontWeight: appTokens.fontWeight.bold,
     },
 })
 
@@ -635,6 +662,15 @@ export function WorkItemsPage() {
 
         return all
     }, [workItems, searchQuery, filters])
+    const totalWorkItemCount = workItems?.length ?? 0
+    const openWorkItemCount = useMemo(
+        () => (workItems ?? []).filter((item) => !['Resolved', 'Resolved (AI)', 'Closed'].includes(item.state)).length,
+        [workItems],
+    )
+    const aiOwnedWorkItemCount = useMemo(
+        () => (workItems ?? []).filter((item) => item.isAI).length,
+        [workItems],
+    )
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
     const selectedCount = selectedWorkItemNumbers.size
@@ -741,7 +777,7 @@ export function WorkItemsPage() {
             <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
                 <PageHeader
                     title="Work Items"
-                    subtitle="Manage your backlog, track progress, and assign agents"
+                    subtitle="Shape the backlog, filter what matters, and keep execution-ready work easy to act on."
                     actions={
                         <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
                             <input
@@ -780,6 +816,29 @@ export function WorkItemsPage() {
                         </div>
                     }
                 />
+
+                <div className={styles.summaryGrid}>
+                    <Card className={styles.summaryCard}>
+                        <Caption1 className={styles.summaryLabel}>Visible work</Caption1>
+                        <Text className={styles.summaryValue}>{items.length}</Text>
+                        <Caption1>Items currently shown after search and filters.</Caption1>
+                    </Card>
+                    <Card className={styles.summaryCard}>
+                        <Caption1 className={styles.summaryLabel}>Total backlog</Caption1>
+                        <Text className={styles.summaryValue}>{totalWorkItemCount}</Text>
+                        <Caption1>Everything tracked in this project right now.</Caption1>
+                    </Card>
+                    <Card className={styles.summaryCard}>
+                        <Caption1 className={styles.summaryLabel}>Open work</Caption1>
+                        <Text className={styles.summaryValue}>{openWorkItemCount}</Text>
+                        <Caption1>Items not yet resolved or closed.</Caption1>
+                    </Card>
+                    <Card className={styles.summaryCard}>
+                        <Caption1 className={styles.summaryLabel}>AI-owned</Caption1>
+                        <Text className={styles.summaryValue}>{aiOwnedWorkItemCount}</Text>
+                        <Caption1>Items already routed into AI-assisted execution.</Caption1>
+                    </Card>
+                </div>
 
                 <div className={mergeClasses(styles.toolbarRow, isMobile && styles.toolbarRowMobile)}>
                     <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
@@ -1041,7 +1100,30 @@ export function WorkItemsPage() {
                     </div>
                 </div>
 
-                {viewMode === 'backlog' && (
+                {items.length === 0 ? (
+                    <EmptyState
+                        icon={<BoardRegular style={{ fontSize: '48px' }} />}
+                        title={totalWorkItemCount === 0 ? 'No work items yet' : 'No work items match this view'}
+                        description={totalWorkItemCount === 0
+                            ? 'Create the first item or generate backlog from chat to start shaping execution.'
+                            : 'Clear the active search or filters to bring matching work back into view.'}
+                        actions={totalWorkItemCount === 0 ? (
+                            <Button appearance="primary" icon={<AddRegular />} onClick={() => setCreateDialogOpen(true)}>
+                                New Work Item
+                            </Button>
+                        ) : (
+                            <Button
+                                appearance="secondary"
+                                onClick={() => {
+                                    setSearchQuery('')
+                                    setFilters(EMPTY_FILTERS)
+                                }}
+                            >
+                                Clear Filters
+                            </Button>
+                        )}
+                    />
+                ) : viewMode === 'backlog' && (
                     <BacklogTreeTable
                         items={items}
                         levelMap={levelMap}

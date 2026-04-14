@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import {
+    Button,
+    Card,
+    Caption1,
     makeStyles,
     mergeClasses,
     Input,
@@ -14,36 +17,25 @@ import {
     ChatRegular,
     BotRegular,
 } from '@fluentui/react-icons'
-import { PageHeader, EmptyState } from '../../components/shared'
+import { EmptyState, PageShell } from '../../components/shared'
 import { SearchResultCard } from './'
 import { useSearch } from '../../proxies'
 import { getSearchTypeForCategory, type SearchCategory } from './searchCategory'
-import { usePreferences, useIsMobile } from '../../hooks'
+import { usePreferences } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 
 const useStyles = makeStyles({
-    page: {
-        paddingTop: appTokens.space.xl,
-        paddingRight: appTokens.space.pageX,
-        paddingBottom: appTokens.space.xl,
-        paddingLeft: appTokens.space.pageX,
-        maxWidth: appTokens.width.pageNarrow,
-        margin: '0 auto',
-        width: '100%',
-        minWidth: 0,
+    searchPanel: {
+        padding: appTokens.space.lg,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.md,
     },
-    pageCompact: {
-        paddingTop: appTokens.space.lg,
-        paddingBottom: appTokens.space.lg,
-        paddingLeft: appTokens.space.lg,
-        paddingRight: appTokens.space.lg,
-        maxWidth: '760px',
-    },
-    searchBox: {
-        marginBottom: '1rem',
-    },
-    searchBoxCompact: {
-        marginBottom: '0.5rem',
+    searchPanelCompact: {
+        paddingTop: appTokens.space.md,
+        paddingBottom: appTokens.space.md,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
     },
     fullWidth: {
         width: '100%',
@@ -51,75 +43,91 @@ const useStyles = makeStyles({
     resultsList: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
-        marginTop: '1rem',
+        gap: appTokens.space.sm,
     },
     resultsListCompact: {
-        gap: '0.375rem',
-        marginTop: '0.5rem',
+        gap: appTokens.space.xs,
     },
     tabList: {
         overflowX: 'auto',
-        paddingBottom: '0.25rem',
+        paddingBottom: appTokens.space.xxs,
+    },
+    resultsHeader: {
+        color: appTokens.color.textTertiary,
     },
 })
 
 export function SearchPage() {
     const styles = useStyles()
     const { preferences } = usePreferences()
-    const isMobile = useIsMobile()
     const isCompact = preferences?.compactMode ?? false
-    const isDense = isCompact || isMobile
     const [query, setQuery] = useState('')
     const [category, setCategory] = useState<SearchCategory>('all')
     const { data: results, isLoading } = useSearch(query, getSearchTypeForCategory(category))
-
     const filtered = results ?? []
+    const hasQuery = query.trim().length > 0
 
     return (
-        <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
-            <PageHeader
-                title="Search"
-                subtitle="Search across projects, work items, chats, and agents"
-            />
+        <PageShell
+            title="Search"
+            subtitle="Find projects, work items, chats, and agent activity from one focused place."
+            maxWidth="medium"
+        >
+            <Card className={mergeClasses(styles.searchPanel, isCompact && styles.searchPanelCompact)}>
+                <Caption1>Search across your workspace without bouncing between pages.</Caption1>
+                <Input
+                    className={styles.fullWidth}
+                    contentBefore={<SearchRegular />}
+                    placeholder="Search everything..."
+                    size={isCompact ? 'medium' : 'large'}
+                    value={query}
+                    onChange={(_e, data) => setQuery(data.value)}
+                />
+                <TabList
+                    selectedValue={category}
+                    onTabSelect={(_e, data) => setCategory(data.value as SearchCategory)}
+                    size={isCompact ? 'small' : 'medium'}
+                    className={styles.tabList}
+                >
+                    <Tab value="all">All ({filtered.length})</Tab>
+                    <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
+                    <Tab value="workitems" icon={<BoardRegular />}>Work Items</Tab>
+                    <Tab value="chats" icon={<ChatRegular />}>Chats</Tab>
+                    <Tab value="agents" icon={<BotRegular />}>Agents</Tab>
+                </TabList>
+            </Card>
 
-            <Input
-                className={mergeClasses(styles.searchBox, isDense && styles.searchBoxCompact, styles.fullWidth)}
-                contentBefore={<SearchRegular />}
-                placeholder="Search everything..."
-                size={isDense ? 'medium' : 'large'}
-                value={query}
-                onChange={(_e, data) => setQuery(data.value)}
-            />
-
-            <TabList
-                selectedValue={category}
-                onTabSelect={(_e, data) => setCategory(data.value as SearchCategory)}
-                size={isDense ? 'small' : 'medium'}
-                className={styles.tabList}
-            >
-                <Tab value="all">All ({filtered.length})</Tab>
-                <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
-                <Tab value="workitems" icon={<BoardRegular />}>Work Items</Tab>
-                <Tab value="chats" icon={<ChatRegular />}>Chats</Tab>
-                <Tab value="agents" icon={<BotRegular />}>Agents</Tab>
-            </TabList>
-
-            {isLoading ? (
+            {!hasQuery ? (
+                <EmptyState
+                    icon={<SearchRegular style={{ fontSize: '48px' }} />}
+                    title="Start with a project, work item, chat, or agent"
+                    description="Enter a search term above and Fleet will narrow results across the parts of the workspace that matter."
+                />
+            ) : isLoading ? (
                 <Spinner label="Searching..." />
             ) : filtered.length > 0 ? (
-                <div className={mergeClasses(styles.resultsList, isDense && styles.resultsListCompact)}>
-                    {filtered.map((result, i) => (
-                        <SearchResultCard key={i} result={result} />
-                    ))}
-                </div>
+                <>
+                    <Caption1 className={styles.resultsHeader}>
+                        {filtered.length} result{filtered.length === 1 ? '' : 's'} for "{query}"
+                    </Caption1>
+                    <div className={mergeClasses(styles.resultsList, isCompact && styles.resultsListCompact)}>
+                        {filtered.map((result, i) => (
+                            <SearchResultCard key={i} result={result} />
+                        ))}
+                    </div>
+                </>
             ) : (
                 <EmptyState
                     icon={<SearchRegular style={{ fontSize: '48px' }} />}
-                    title="No results found"
-                    description="Try a different search term or category"
+                    title={`No matches for "${query}"`}
+                    description="Try a different keyword, switch categories, or broaden the search a bit."
+                    actions={(
+                        <Button appearance="secondary" onClick={() => setQuery('')}>
+                            Clear Search
+                        </Button>
+                    )}
                 />
             )}
-        </div>
+        </PageShell>
     )
 }

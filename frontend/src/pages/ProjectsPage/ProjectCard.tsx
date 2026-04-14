@@ -26,6 +26,9 @@ const useStyles = makeStyles({
         transitionProperty: 'transform, box-shadow',
         transitionDuration: appTokens.motion.fast,
         minWidth: 0,
+        overflow: 'hidden',
+        border: appTokens.border.subtle,
+        backgroundImage: `linear-gradient(155deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
         ':hover': {
             boxShadow: appTokens.shadow.cardHover,
             transform: 'translateY(-2px)',
@@ -78,13 +81,15 @@ const useStyles = makeStyles({
         display: 'grid',
         gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
         gap: '0.5rem',
-        textAlign: 'center',
     },
     stat: {
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        gap: '0.125rem',
+        gap: '0.25rem',
+        padding: appTokens.space.sm,
+        borderRadius: appTokens.radius.md,
+        backgroundColor: appTokens.color.pageBackground,
+        border: appTokens.border.subtle,
     },
     statValue: {
         fontWeight: 700,
@@ -122,6 +127,14 @@ const useStyles = makeStyles({
         fontSize: '12px',
         color: appTokens.color.textMuted,
     },
+    topStripe: {
+        height: '4px',
+        width: '100%',
+        backgroundImage: `linear-gradient(90deg, ${appTokens.color.brand} 0%, ${appTokens.color.info} 100%)`,
+    },
+    repoBadge: {
+        width: 'fit-content',
+    },
 })
 
 interface ProjectCardProps {
@@ -135,6 +148,7 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
 
     return (
         <Card className={mergeClasses(styles.projectCard, isMobile && styles.projectCardMobile)} onClick={onClick}>
+            <div className={styles.topStripe} />
             <CardHeader
                 header={<Title3 className={styles.title}>{project.title}</Title3>}
                 description={<Caption1 className={styles.description}>{project.description}</Caption1>}
@@ -142,7 +156,7 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
             <CardPreview className={mergeClasses(styles.cardPreview, isMobile && styles.cardPreviewMobile)}>
                 <div className={styles.repoRow}>
                     <FolderRegular />
-                    <Text size={200} className={styles.repoText}>{project.repo}</Text>
+                    <Text size={200} className={styles.repoText}>{project.repo || 'Repository not linked yet'}</Text>
                 </div>
 
                 <div className={styles.statsRow}>
@@ -178,6 +192,9 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
                         <Caption1>{project.lastActivity}</Caption1>
                     </div>
                 </div>
+                <InfoBadge appearance="tint" className={styles.repoBadge}>
+                    {project.repo ? 'Repo linked' : 'Needs repo'}
+                </InfoBadge>
             </CardPreview>
         </Card>
     )
