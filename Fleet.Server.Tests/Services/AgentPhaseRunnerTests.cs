@@ -202,6 +202,81 @@ public class AgentPhaseRunnerTests
             executionOrder);
     }
 
+    [TestMethod]
+    public async Task RunPhaseAsync_ModelResponseTimeout_FailsAttemptBeforeWholePhaseTimeout()
+    {
+        var promptLoader = new Mock<IAgentPromptLoader>();
+        promptLoader.Setup(loader => loader.GetPrompt(It.IsAny<AgentRole>())).Returns("system");
+
+        var llmClient = new Mock<ILLMClient>();
+        llmClient
+            .Setup(client => client.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<LLMRequest, CancellationToken>(async (_, token) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), token);
+                return new LLMResponse("done", null);
+            });
+
+        var runner = new AgentPhaseRunner(
+            promptLoader.Object,
+            llmClient.Object,
+            new AgentToolRegistry([new ReportProgressTool()]),
+            Options.Create(new LLMOptions { GenerateModel = "test-model" }),
+            NullLogger<AgentPhaseRunner>.Instance,
+            progressHeartbeatInterval: TimeSpan.FromMilliseconds(25),
+            phaseTimeoutResolver: _ => TimeSpan.FromSeconds(1),
+            modelResponseTimeoutResolver: _ => TimeSpan.FromMilliseconds(120));
+
+        var progressSummaries = new List<string>();
+        var result = await runner.RunPhaseAsync(
+            AgentRole.Contracts,
+            "Review the contracts",
+            new AgentToolContext(Mock.Of<IRepoSandbox>(), "proj", "user", "token", "owner/repo", "exec"),
+            onProgress: (_, summary) =>
+            {
+                progressSummaries.Add(summary);
+                return Task.CompletedTask;
+            });
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("Model response timed out after 1 second.", result.Error);
+        Assert.IsTrue(progressSummaries.Any(summary => summary.StartsWith("Waiting for model response (", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task RunPhaseAsync_PhaseTimeoutStillWinsWhenOverallBudgetExpiresFirst()
+    {
+        var promptLoader = new Mock<IAgentPromptLoader>();
+        promptLoader.Setup(loader => loader.GetPrompt(It.IsAny<AgentRole>())).Returns("system");
+
+        var llmClient = new Mock<ILLMClient>();
+        llmClient
+            .Setup(client => client.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<LLMRequest, CancellationToken>(async (_, token) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), token);
+                return new LLMResponse("done", null);
+            });
+
+        var runner = new AgentPhaseRunner(
+            promptLoader.Object,
+            llmClient.Object,
+            new AgentToolRegistry([new ReportProgressTool()]),
+            Options.Create(new LLMOptions { GenerateModel = "test-model" }),
+            NullLogger<AgentPhaseRunner>.Instance,
+            progressHeartbeatInterval: TimeSpan.FromMilliseconds(25),
+            phaseTimeoutResolver: _ => TimeSpan.FromMilliseconds(120),
+            modelResponseTimeoutResolver: _ => TimeSpan.FromSeconds(5));
+
+        var result = await runner.RunPhaseAsync(
+            AgentRole.Contracts,
+            "Review the contracts",
+            new AgentToolContext(Mock.Of<IRepoSandbox>(), "proj", "user", "token", "owner/repo", "exec"));
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("Phase timed out after 1 second.", result.Error);
+    }
+
     private sealed class StubAgentTool(string name, string result, bool isReadOnly) : IAgentTool
     {
         public string Name => name;

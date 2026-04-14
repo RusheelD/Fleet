@@ -25,13 +25,19 @@ public class AgentPhaseRunner(
     ISkillService? skillService = null,
     ITokenTracker? tokenTracker = null,
     ToolResultStore? toolResultStore = null,
-    PromptBlockCache? promptBlockCache = null) : IAgentPhaseRunner
+    PromptBlockCache? promptBlockCache = null,
+    TimeSpan? progressHeartbeatInterval = null,
+    Func<AgentRole, TimeSpan>? phaseTimeoutResolver = null,
+    Func<AgentRole, TimeSpan>? modelResponseTimeoutResolver = null) : IAgentPhaseRunner
 {
     private readonly IMcpToolSessionFactory _mcpToolSessionFactory = mcpToolSessionFactory ?? NoOpMcpToolSessionFactory.Instance;
     private readonly IMemoryService _memoryService = memoryService ?? NoOpMemoryService.Instance;
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
+    private readonly TimeSpan _progressHeartbeatInterval = progressHeartbeatInterval ?? DefaultProgressHeartbeatInterval;
+    private readonly Func<AgentRole, TimeSpan> _phaseTimeoutResolver = phaseTimeoutResolver ?? GetPhaseTimeout;
+    private readonly Func<AgentRole, TimeSpan> _modelResponseTimeoutResolver = modelResponseTimeoutResolver ?? GetModelResponseTimeout;
     /// <summary>Default max tool-calling loops per phase.</summary>
     private const int DefaultMaxToolLoops = 200;
 
@@ -76,6 +82,26 @@ public class AgentPhaseRunner(
     };
 
     /// <summary>
+    /// Maximum time a single model turn can wait before the attempt fails and the
+    /// orchestrator gets a chance to retry with a fresh prompt.
+    /// </summary>
+    private static TimeSpan GetModelResponseTimeout(AgentRole role) => role switch
+    {
+        AgentRole.Backend => TimeSpan.FromMinutes(5),
+        AgentRole.Frontend => TimeSpan.FromMinutes(5),
+        AgentRole.Research => TimeSpan.FromMinutes(4),
+        AgentRole.Consolidation => TimeSpan.FromMinutes(4),
+        AgentRole.Testing => TimeSpan.FromMinutes(4),
+        AgentRole.Styling => TimeSpan.FromMinutes(4),
+        AgentRole.Contracts => TimeSpan.FromMinutes(3),
+        AgentRole.Manager => TimeSpan.FromMinutes(3),
+        AgentRole.Planner => TimeSpan.FromMinutes(3),
+        AgentRole.Review => TimeSpan.FromMinutes(3),
+        AgentRole.Documentation => TimeSpan.FromMinutes(3),
+        _ => TimeSpan.FromMinutes(4),
+    };
+
+    /// <summary>
     /// Max characters per tool result for agent phases. Lower than the interactive
     /// chat limit to keep context windows lean and inference fast.
     /// </summary>
@@ -88,7 +114,7 @@ public class AgentPhaseRunner(
     private const double MinimumProgressIncrementPercent = 0.05;
     private const double ProgressComparisonEpsilon = 0.0001;
     private const int FallbackProgressCadenceToolCalls = 1;
-    private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan DefaultProgressHeartbeatInterval = TimeSpan.FromSeconds(20);
 
     public async Task<PhaseResult> RunPhaseAsync(
         AgentRole role,
@@ -146,10 +172,12 @@ public class AgentPhaseRunner(
         var totalToolCalls = 0;
         var maxToolCalls = GetMaxToolCalls(role);
         var maxToolLoops = GetMaxToolLoops(role);
-        var phaseTimeout = GetPhaseTimeout(role);
+        var phaseTimeout = _phaseTimeoutResolver(role);
+        var modelResponseTimeout = _modelResponseTimeoutResolver(role);
         var lastReportedPercent = 0.0;
         var lastProgressSummary = "Starting phase";
         var nonProgressToolCallsSinceLastReport = 0;
+        var phaseStartedAtUtc = DateTime.UtcNow;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(phaseTimeout);
@@ -278,20 +306,42 @@ public class AgentPhaseRunner(
 
                 try
                 {
-                    var responseTask = llmClient.CompleteAsync(request, cts.Token);
-                    var heartbeatCount = 0;
+                    var elapsedPhaseTime = DateTime.UtcNow - phaseStartedAtUtc;
+                    var remainingPhaseBudget = phaseTimeout - elapsedPhaseTime;
+                    if (remainingPhaseBudget <= TimeSpan.Zero)
+                    {
+                        logger.LogWarning("Phase {Role} timed out after {Timeout}", role, phaseTimeout);
+                        return new PhaseResult(role, string.Empty, totalToolCalls, false,
+                            $"Phase timed out after {FormatDuration(phaseTimeout)}.",
+                            lastReportedPercent,
+                            lastProgressSummary,
+                            tokenTracker?.TotalInputTokens ?? 0,
+                            tokenTracker?.TotalOutputTokens ?? 0);
+                    }
+
+                    var responseTimeoutUsesPhaseBudget = modelResponseTimeout <= TimeSpan.Zero ||
+                                                         remainingPhaseBudget <= modelResponseTimeout;
+                    var effectiveResponseTimeout = responseTimeoutUsesPhaseBudget
+                        ? remainingPhaseBudget
+                        : modelResponseTimeout;
+                    using var responseCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                    responseCts.CancelAfter(effectiveResponseTimeout);
+
+                    var responseTask = llmClient.CompleteAsync(request, responseCts.Token);
+                    var responseWaitStartedAtUtc = DateTime.UtcNow;
                     while (!responseTask.IsCompleted)
                     {
                         var completedTask = await Task.WhenAny(
                             responseTask,
-                            Task.Delay(ProgressHeartbeatInterval, cts.Token));
-                        if (completedTask == responseTask)
+                            Task.Delay(_progressHeartbeatInterval, responseCts.Token));
+                        if (completedTask == responseTask || responseCts.IsCancellationRequested)
                         {
                             break;
                         }
 
-                        heartbeatCount++;
-                        var waitedSeconds = heartbeatCount * (int)ProgressHeartbeatInterval.TotalSeconds;
+                        var waitedSeconds = Math.Max(
+                            1,
+                            (int)Math.Floor((DateTime.UtcNow - responseWaitStartedAtUtc).TotalSeconds));
                         await ReportProgressAsync(
                             lastReportedPercent,
                             $"Waiting for model response ({waitedSeconds}s)",
@@ -302,11 +352,40 @@ public class AgentPhaseRunner(
                     tokenTracker?.Record(response.Usage);
                     outputTokenCap = AdaptiveTokenCap.GetNextCap(outputTokenCap, response.WasTruncated);
                 }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !cts.IsCancellationRequested)
+                {
+                    var elapsedPhaseTime = DateTime.UtcNow - phaseStartedAtUtc;
+                    var remainingPhaseBudget = phaseTimeout - elapsedPhaseTime;
+                    var responseTimeoutUsesPhaseBudget = modelResponseTimeout <= TimeSpan.Zero ||
+                                                         remainingPhaseBudget <= modelResponseTimeout;
+                    var normalizedTimeout = responseTimeoutUsesPhaseBudget
+                        ? (remainingPhaseBudget <= TimeSpan.Zero ? phaseTimeout : remainingPhaseBudget)
+                        : modelResponseTimeout;
+
+                    if (responseTimeoutUsesPhaseBudget)
+                    {
+                        logger.LogWarning("Phase {Role} timed out after {Timeout}", role, phaseTimeout);
+                        return new PhaseResult(role, string.Empty, totalToolCalls, false,
+                            $"Phase timed out after {FormatDuration(normalizedTimeout)}.",
+                            lastReportedPercent,
+                            lastProgressSummary,
+                            tokenTracker?.TotalInputTokens ?? 0,
+                            tokenTracker?.TotalOutputTokens ?? 0);
+                    }
+
+                    logger.LogWarning("Phase {Role} model response timed out after {Timeout}", role, normalizedTimeout);
+                    return new PhaseResult(role, string.Empty, totalToolCalls, false,
+                        $"Model response timed out after {FormatDuration(normalizedTimeout)}.",
+                        lastReportedPercent,
+                        lastProgressSummary,
+                        tokenTracker?.TotalInputTokens ?? 0,
+                        tokenTracker?.TotalOutputTokens ?? 0);
+                }
                 catch (OperationCanceledException)
                 {
                     logger.LogWarning("Phase {Role} timed out after {Timeout}", role, phaseTimeout);
                     return new PhaseResult(role, string.Empty, totalToolCalls, false,
-                        $"Phase timed out after {phaseTimeout.TotalMinutes} minutes.",
+                        $"Phase timed out after {FormatDuration(phaseTimeout)}.",
                         lastReportedPercent,
                         lastProgressSummary,
                         tokenTracker?.TotalInputTokens ?? 0,
@@ -540,6 +619,25 @@ public class AgentPhaseRunner(
                 tokenTracker?.TotalInputTokens ?? 0,
                 tokenTracker?.TotalOutputTokens ?? 0);
         }
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return "0 seconds";
+
+        if (duration.TotalMinutes >= 1)
+        {
+            var roundedMinutes = Math.Round(duration.TotalMinutes, 1, MidpointRounding.AwayFromZero);
+            return roundedMinutes == 1
+                ? "1 minute"
+                : $"{roundedMinutes:0.#} minutes";
+        }
+
+        var roundedSeconds = Math.Max(1, Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero));
+        return roundedSeconds == 1
+            ? "1 second"
+            : $"{roundedSeconds:0} seconds";
     }
 
     private async Task<string> ExecuteToolAsync(
