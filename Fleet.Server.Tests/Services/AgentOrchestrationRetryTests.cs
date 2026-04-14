@@ -186,9 +186,29 @@ public class AgentOrchestrationRetryTests
     {
         var pipeline = AgentOrchestrationService.ResolveDefaultPipeline(AgentExecutionModes.Orchestration);
 
-        Assert.AreEqual(2, pipeline.Length);
+        Assert.AreEqual(3, pipeline.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+    }
+
+    [TestMethod]
+    public void EnsureContractsInOrchestrationPipeline_AddsContractsForLegacyOrchestrationRuns()
+    {
+        AgentRole[][] legacyPipeline =
+        [
+            [AgentRole.Manager],
+            [AgentRole.Planner],
+        ];
+
+        var normalized = AgentOrchestrationService.EnsureContractsInOrchestrationPipeline(
+            legacyPipeline,
+            AgentExecutionModes.Orchestration);
+
+        Assert.AreEqual(3, normalized.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, normalized[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, normalized[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, normalized[2]);
     }
 
     [TestMethod]
@@ -203,6 +223,129 @@ public class AgentOrchestrationRetryTests
     {
         Assert.IsFalse(AgentOrchestrationService.ShouldCreatePullRequestForExecution("parent-execution"));
         Assert.IsTrue(AgentOrchestrationService.ShouldCreatePullRequestForExecution(null));
+    }
+
+    [TestMethod]
+    public void ResolveRetryStartOptions_PreservesSubFlowLineageAndSkipsBilling()
+    {
+        var priorExecution = new AgentExecution
+        {
+            Id = "child-execution",
+            ParentExecutionId = "parent-execution",
+            Status = "failed",
+        };
+
+        var options = AgentOrchestrationService.ResolveRetryStartOptions(priorExecution);
+
+        Assert.AreEqual("parent-execution", options.ParentExecutionId);
+        Assert.IsTrue(options.SkipQuotaCharge);
+        Assert.IsTrue(options.SkipActiveExecutionCap);
+    }
+
+    [TestMethod]
+    public void ResolveRetryStartOptions_LeavesTopLevelRetriesTopLevelAndBillable()
+    {
+        var priorExecution = new AgentExecution
+        {
+            Id = "top-level",
+            ParentExecutionId = null,
+            Status = "failed",
+        };
+
+        var options = AgentOrchestrationService.ResolveRetryStartOptions(priorExecution);
+
+        Assert.IsNull(options.ParentExecutionId);
+        Assert.IsFalse(options.SkipQuotaCharge);
+        Assert.IsFalse(options.SkipActiveExecutionCap);
+    }
+
+    [TestMethod]
+    public void BuildReusableSubFlowParentExecutionIds_IncludesRetrySourceExecution()
+    {
+        var ids = AgentOrchestrationService.BuildReusableSubFlowParentExecutionIds("current-parent", "failed-parent");
+
+        CollectionAssert.AreEqual(new[] { "current-parent", "failed-parent" }, ids.ToArray());
+    }
+
+    [TestMethod]
+    public void ShouldPropagateSuccessfulRetryToParent_ReturnsTrue_ForRetriedSubFlow()
+    {
+        Assert.IsTrue(AgentOrchestrationService.ShouldPropagateSuccessfulRetryToParent(
+            "parent-execution",
+            "failed",
+            hasRetryPlan: true,
+            resumeInPlace: false));
+    }
+
+    [TestMethod]
+    public void ShouldPropagateSuccessfulRetryToParent_ReturnsFalse_ForResumedExecution()
+    {
+        Assert.IsFalse(AgentOrchestrationService.ShouldPropagateSuccessfulRetryToParent(
+            "parent-execution",
+            "failed",
+            hasRetryPlan: true,
+            resumeInPlace: true));
+    }
+
+    [TestMethod]
+    public void BuildFallbackAdaptiveRetryDirective_UsesObservedFailures()
+    {
+        var attempts = new List<PhaseResult>
+        {
+            new(AgentRole.Backend, "", 3, false, "Command timed out", 48, "Running tests", 100, 50),
+            new(AgentRole.Backend, "", 2, false, "Wrong file edited", 61, "Updating API", 120, 40),
+        };
+
+        var directive = AgentOrchestrationService.BuildFallbackAdaptiveRetryDirective(AgentRole.Backend, attempts);
+
+        StringAssert.Contains(directive.StrategySummary, "Backend");
+        StringAssert.Contains(directive.PromptAddendum, "Command timed out");
+        StringAssert.Contains(directive.PromptAddendum, "Wrong file edited");
+    }
+
+    [TestMethod]
+    public void BuildAdaptiveRetryPlannerInput_IncludesFailureMetadata()
+    {
+        var attempts = new List<PhaseResult>
+        {
+            new(AgentRole.Contracts, "Partial output", 4, false, "Schema mismatch", 35, "Drafting interfaces", 220, 140),
+        };
+
+        var input = AgentOrchestrationService.BuildAdaptiveRetryPlannerInput(
+            AgentRole.Contracts,
+            "Implement the contracts phase.",
+            attempts);
+
+        StringAssert.Contains(input, "Role: Contracts");
+        StringAssert.Contains(input, "Schema mismatch");
+        StringAssert.Contains(input, "Tool calls: 4");
+        StringAssert.Contains(input, "Tokens: in=220, out=140");
+    }
+
+    [TestMethod]
+    public void BuildRetryAwarePhaseMessage_IncludesSmartRetryAdjustment()
+    {
+        var attempts = new List<PhaseResult>
+        {
+            new(AgentRole.Backend, "output", 2, false, "Bad assumption", 20, "Inspecting API", 0, 0),
+        };
+
+        var message = typeof(AgentOrchestrationService)
+            .GetMethod("BuildRetryAwarePhaseMessage", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .Invoke(null, new object?[]
+            {
+                "Base prompt",
+                AgentRole.Backend,
+                attempts,
+                new AgentOrchestrationService.AdaptiveRetryDirective(
+                    "Use a narrower plan.",
+                    "## Smart Retry Instructions\n- Validate the API contract first."),
+            }) as string;
+
+        Assert.IsNotNull(message);
+        StringAssert.Contains(message, "Smart Retry Adjustment");
+        StringAssert.Contains(message, "Use a narrower plan.");
+        StringAssert.Contains(message, "Validate the API contract first.");
     }
 
     [TestMethod]
@@ -303,6 +446,52 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_ForNestedPlanAtDepthTwo()
+    {
+        var workItem = CreateWorkItem(41, "Deep sync branch", 5, parent: 12);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Still trying to split the nested work",
+            [
+                new GeneratedSubFlowSpec(
+                    "Client branch",
+                    "Refactor the nested client path.",
+                    1,
+                    4,
+                    [],
+                    "",
+                    [
+                        new GeneratedSubFlowSpec("Leaf A", "More nested work.", 2, 3, [], "", []),
+                    ]),
+                new GeneratedSubFlowSpec("Server branch", "Refactor the nested server path.", 1, 4, [], "", []),
+            ]);
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            executionDepth: 2));
+    }
+
+    [TestMethod]
+    public void ShouldMaterializeGeneratedSubFlows_ReturnsFalse_WhenDepthOnePlanIsTooWide()
+    {
+        var workItem = CreateWorkItem(42, "Nested large feature", 5, parent: 10);
+        var generatedPlan = new GeneratedSubFlowPlan(
+            "Too many direct branches for a nested flow",
+            [
+                new GeneratedSubFlowSpec("Branch 1", "A", 1, 4, [], "", []),
+                new GeneratedSubFlowSpec("Branch 2", "B", 1, 4, [], "", []),
+                new GeneratedSubFlowSpec("Branch 3", "C", 1, 4, [], "", []),
+                new GeneratedSubFlowSpec("Branch 4", "D", 1, 4, [], "", []),
+                new GeneratedSubFlowSpec("Branch 5", "E", 1, 4, [], "", []),
+            ]);
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldMaterializeGeneratedSubFlows(
+            workItem,
+            generatedPlan,
+            executionDepth: 1));
+    }
+
+    [TestMethod]
     public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_ForSingleChildChain()
     {
         var parent = CreateWorkItem(50, "Feature shell", 5, childNumbers: [51]);
@@ -395,6 +584,42 @@ public class AgentOrchestrationRetryTests
             descendants,
             descendants,
             AgentOrchestrationService.MaxSubFlowExecutionDepth));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_ForNestedBranchesAtDepthTwo()
+    {
+        var parent = CreateWorkItem(81, "Nested sync work", 5, parent: 70, childNumbers: [82, 83]);
+        var childA = CreateWorkItem(82, "Desktop branch", 4, parent: 81, childNumbers: [84]);
+        var childB = CreateWorkItem(83, "Mobile branch", 4, parent: 81);
+        var grandchild = CreateWorkItem(84, "Conflict handling", 3, parent: 82);
+        var descendants = new[] { childA, childB, grandchild };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            new[] { childA, childB },
+            descendants,
+            executionDepth: 2));
+    }
+
+    [TestMethod]
+    public void ShouldOrchestrateExistingSubFlows_ReturnsFalse_WhenDepthOneHasTooManyDirectChildren()
+    {
+        var parent = CreateWorkItem(82, "Nested feature shell", 5, parent: 60, childNumbers: [83, 84, 85, 86, 87]);
+        var children = new[]
+        {
+            CreateWorkItem(83, "Branch A", 4, parent: 82),
+            CreateWorkItem(84, "Branch B", 4, parent: 82),
+            CreateWorkItem(85, "Branch C", 4, parent: 82),
+            CreateWorkItem(86, "Branch D", 4, parent: 82),
+            CreateWorkItem(87, "Branch E", 4, parent: 82),
+        };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldOrchestrateExistingSubFlows(
+            parent,
+            children,
+            children,
+            executionDepth: 1));
     }
 
     [TestMethod]

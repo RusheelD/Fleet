@@ -40,7 +40,9 @@ public class AgentOrchestrationService(
     IUsageLedgerService? usageLedgerService = null) : IAgentOrchestrationService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
-    private const int MaxAgentRetries = 2;
+    private const int MaxStandardPhaseAttempts = 3;
+    private const int MaxSmartRetryAttempts = 3;
+    private const int MaxPhaseAttempts = MaxStandardPhaseAttempts + MaxSmartRetryAttempts;
     private const int MaxAutomaticReviewLoops = 2;
     private const double IncompleteProgressCeiling = 0.9995;
     private static readonly HashSet<string> InPrOrBeyondStates = new(StringComparer.OrdinalIgnoreCase)
@@ -121,6 +123,7 @@ public class AgentOrchestrationService(
     [
         [AgentRole.Manager],
         [AgentRole.Planner],
+        [AgentRole.Contracts],
     ];
 
     /// <summary>
@@ -165,6 +168,26 @@ public class AgentOrchestrationService(
     private static bool IsRecoverableInterruptedExecutionStatus(string? status)
         => string.Equals(status, "running", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record SubFlowStrictnessProfile(
+        int MaxDirectChildren,
+        int MinimumParentDifficulty,
+        int MinimumNestedParentDifficulty,
+        int MinimumModerateBranchDifficulty,
+        int MinimumHighValueBranchDifficulty,
+        int MinimumTotalDirectDifficulty,
+        int ComplexityThresholdSurcharge,
+        int MaxGeneratedBranchDepth,
+        bool AllowNestedBranching);
+
+    internal sealed record AdaptiveRetryDirective(
+        string StrategySummary,
+        string PromptAddendum);
+
+    internal sealed record RetryStartOptions(
+        string? ParentExecutionId,
+        bool SkipQuotaCharge,
+        bool SkipActiveExecutionCap);
 
     /// <summary>
     /// Uses a cheap LLM call to determine which agent roles are needed for the work item.
@@ -970,7 +993,9 @@ public class AgentOrchestrationService(
                     : "Paused execution is missing its branch name and cannot be resumed.");
         }
 
-        var pipeline = BuildPipelineFromExecutionAgents(persistedExecution.Agents);
+        var pipeline = EnsureContractsInOrchestrationPipeline(
+            BuildPipelineFromExecutionAgents(persistedExecution.Agents),
+            persistedExecution.ExecutionMode);
         if (pipeline.Length == 0)
         {
             pipeline = ResolveDefaultPipeline(persistedExecution.ExecutionMode);
@@ -1323,11 +1348,26 @@ public class AgentOrchestrationService(
         return true;
     }
 
-    public async Task<string?> RetryExecutionAsync(
+    public Task<string?> RetryExecutionAsync(
         string projectId,
         string executionId,
         int userId,
         CancellationToken cancellationToken = default)
+        => RetryExecutionInternalAsync(
+            projectId,
+            executionId,
+            userId,
+            skipQuotaCharge: false,
+            skipActiveExecutionCap: false,
+            cancellationToken);
+
+    private async Task<string?> RetryExecutionInternalAsync(
+        string projectId,
+        string executionId,
+        int userId,
+        bool skipQuotaCharge,
+        bool skipActiveExecutionCap,
+        CancellationToken cancellationToken)
     {
         var priorExecution = await db.AgentExecutions
             .AsNoTracking()
@@ -1373,6 +1413,10 @@ public class AgentOrchestrationService(
         }
         var shouldReuseExistingPullRequest =
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
+        var retryStartOptions = ResolveRetryStartOptions(
+            priorExecution,
+            skipQuotaCharge,
+            skipActiveExecutionCap);
 
         var retryPlan = new RetryExecutionPlan(
             SourceExecutionId: priorExecution.Id,
@@ -1394,9 +1438,9 @@ public class AgentOrchestrationService(
             userId,
             targetBranch: null,
             retryPlan,
-            parentExecutionId: null,
-            skipQuotaCharge: false,
-            skipActiveExecutionCap: false,
+            parentExecutionId: retryStartOptions.ParentExecutionId,
+            skipQuotaCharge: retryStartOptions.SkipQuotaCharge,
+            skipActiveExecutionCap: retryStartOptions.SkipActiveExecutionCap,
             cancellationToken);
     }
 
@@ -1586,12 +1630,16 @@ public class AgentOrchestrationService(
 
         async Task<string> EnsureSubFlowExecutionRunningAsync(Models.WorkItemDto childWorkItem)
         {
+            var reusableParentExecutionIds = BuildReusableSubFlowParentExecutionIds(
+                executionId,
+                retryPlan?.SourceExecutionId);
             var existingExecution = await WithDbResultAsync(async queuedDb =>
                 await queuedDb.AgentExecutions
                     .AsNoTracking()
                     .Where(execution =>
                         execution.ProjectId == projectId &&
-                        execution.ParentExecutionId == executionId &&
+                        execution.ParentExecutionId != null &&
+                        reusableParentExecutionIds.Contains(execution.ParentExecutionId) &&
                         execution.WorkItemId == childWorkItem.WorkItemNumber)
                     .OrderByDescending(execution => execution.StartedAtUtc)
                     .FirstOrDefaultAsync(externalCancellation));
@@ -1644,8 +1692,142 @@ public class AgentOrchestrationService(
                 return existingExecution.Id;
             }
 
+            var cameFromReusableParentContext =
+                !string.Equals(existingExecution.ParentExecutionId, executionId, StringComparison.OrdinalIgnoreCase);
+            if (cameFromReusableParentContext &&
+                (string.Equals(existingExecution.Status, "failed", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(existingExecution.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
+            {
+                var retriedExecutionId = await RetryExecutionInternalAsync(
+                    projectId,
+                    existingExecution.Id,
+                    userId,
+                    skipQuotaCharge: true,
+                    skipActiveExecutionCap: true,
+                    externalCancellation);
+                if (!string.IsNullOrWhiteSpace(retriedExecutionId))
+                {
+                    await WithDbLockAsync(async queuedDb =>
+                        await WriteLogEntryAsync(
+                            queuedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Retrying reusable sub-flow execution {existingExecution.Id} as {retriedExecutionId} for work item #{childWorkItem.WorkItemNumber}.",
+                            executionId: executionId));
+                    await PublishLogsUpdatedAsync();
+                    return retriedExecutionId;
+                }
+            }
+
             throw new InvalidOperationException(
                 $"Sub-flow #{childWorkItem.WorkItemNumber} is blocked by prior execution {existingExecution.Id} in status '{existingExecution.Status}'.");
+        }
+
+        async Task TryPropagateSuccessfulRetryToParentAsync()
+        {
+            if (!ShouldPropagateSuccessfulRetryToParent(
+                    parentExecutionId,
+                    retryPlan?.SourceStatus,
+                    retryPlan is not null,
+                    retryPlan?.ResumeInPlace == true))
+                return;
+
+            try
+            {
+                var parentCandidate = await WithDbResultAsync(async queuedDb =>
+                    await queuedDb.AgentExecutions
+                        .AsNoTracking()
+                        .Where(execution => execution.ProjectId == projectId && execution.Id == parentExecutionId)
+                        .Select(execution => new
+                        {
+                            execution.Id,
+                            execution.Status,
+                            execution.WorkItemId,
+                            execution.ParentExecutionId,
+                            execution.StartedAtUtc,
+                        })
+                        .FirstOrDefaultAsync(CancellationToken.None));
+                if (parentCandidate is null)
+                    return;
+
+                if (string.Equals(parentCandidate.Status, "completed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(parentCandidate.Status, "running", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(parentCandidate.Status, "queued", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                var parentStartedAtUtc = parentCandidate.StartedAtUtc;
+                var newerEquivalentExecutionExists = await WithDbResultAsync(async queuedDb =>
+                    await queuedDb.AgentExecutions
+                        .AsNoTracking()
+                        .AnyAsync(execution =>
+                            execution.ProjectId == projectId &&
+                            execution.Id != parentCandidate.Id &&
+                            execution.WorkItemId == parentCandidate.WorkItemId &&
+                            execution.ParentExecutionId == parentCandidate.ParentExecutionId &&
+                            execution.StartedAtUtc.HasValue &&
+                            parentStartedAtUtc.HasValue &&
+                            execution.StartedAtUtc > parentStartedAtUtc.Value,
+                            CancellationToken.None));
+                if (newerEquivalentExecutionExists)
+                {
+                    await WithDbLockAsync(async queuedDb =>
+                        await WriteLogEntryAsync(
+                            queuedDb,
+                            projectId,
+                            "System",
+                            "info",
+                            $"Sub-flow retry completed, but parent execution {parentCandidate.Id} already has a newer retry/recovery run. Skipping duplicate upward propagation.",
+                            executionId: executionId));
+                    await PublishLogsUpdatedAsync();
+                    return;
+                }
+
+                var propagatedParentExecutionId = await RetryExecutionInternalAsync(
+                    projectId,
+                    parentCandidate.Id,
+                    userId,
+                    skipQuotaCharge: true,
+                    skipActiveExecutionCap: true,
+                    externalCancellation);
+                if (string.IsNullOrWhiteSpace(propagatedParentExecutionId))
+                {
+                    await WithDbLockAsync(async queuedDb =>
+                        await WriteLogEntryAsync(
+                            queuedDb,
+                            projectId,
+                            "System",
+                            "warn",
+                            $"Sub-flow retry completed, but Fleet could not restart parent execution {parentCandidate.Id}.",
+                            executionId: executionId));
+                    await PublishLogsUpdatedAsync();
+                    return;
+                }
+
+                await WithDbLockAsync(async queuedDb =>
+                    await WriteLogEntryAsync(
+                        queuedDb,
+                        projectId,
+                        "System",
+                        "success",
+                        $"Sub-flow retry completed; restarted parent execution {parentCandidate.Id} as {propagatedParentExecutionId}.",
+                        executionId: executionId));
+                await PublishLogsUpdatedAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception propagationEx)
+            {
+                logger.LogWarning(
+                    propagationEx,
+                    "Execution {ExecutionId}: failed to propagate successful sub-flow retry to parent execution {ParentExecutionId}",
+                    executionId,
+                    parentExecutionId);
+            }
         }
 
         async Task<Dictionary<string, Data.Entities.AgentExecution>> WaitForTerminalSubFlowExecutionsAsync(
@@ -2125,6 +2307,7 @@ public class AgentOrchestrationService(
             {
                 latestCycleReviewDecision = null;
                 currentWorkItemContext = workItemContext;
+                var restartForOrchestration = false;
                 if (pendingReviewDecision is not null)
                 {
                     var queuedRerunRoles = currentCyclePipeline.SelectMany(group => group).ToArray();
@@ -2298,26 +2481,34 @@ public class AgentOrchestrationService(
                         if (ShouldOrchestrateExistingSubFlows(workItem, directChildWorkItems, childWorkItems, executionDepth))
                         {
                             orchestrationExecution = true;
-                            await WithDbLockAsync(queuedDb => TransitionExecutionToOrchestrationModeAsync(
-                                queuedDb,
-                                executionId,
-                                directChildWorkItems,
-                                currentOutputsByRole));
-                            await WithDbLockAsync(async queuedDb =>
-                                await WriteLogEntryAsync(
+                            if (!IsOrchestrationPrelude(currentCyclePipeline))
+                            {
+                                currentCyclePipeline = OrchestrationPreludePipeline;
+                                currentCycleCarryForwardOutputs = currentOutputsByRole
+                                    .ToDictionary(entry => entry.Key, entry => entry.Value);
+                                pendingReviewDecision = null;
+                                restartForOrchestration = true;
+
+                                await WithDbLockAsync(queuedDb => TransitionExecutionToOrchestrationModeAsync(
                                     queuedDb,
-                                    projectId,
-                                    "System",
-                                    "info",
-                                    $"Planner delegated this run into {directChildWorkItems.Count} sub-flow(s).",
-                                    executionId: executionId));
-                            await PublishAgentsUpdatedAsync();
-                            await PublishLogsUpdatedAsync();
-                            await ExecuteSubFlowsAsync(workItem, directChildWorkItems);
-                            return;
+                                    executionId,
+                                    directChildWorkItems,
+                                    currentOutputsByRole));
+                                await WithDbLockAsync(async queuedDb =>
+                                    await WriteLogEntryAsync(
+                                        queuedDb,
+                                        projectId,
+                                        "System",
+                                        "info",
+                                        $"Planner delegated this run into {directChildWorkItems.Count} sub-flow(s). Contracts preflight will run before sub-flow execution starts.",
+                                        executionId: executionId));
+                                await PublishAgentsUpdatedAsync();
+                                await PublishLogsUpdatedAsync();
+                                break;
+                            }
                         }
 
-                        if (shouldCreatePullRequest && !draftPullRequestReady)
+                        if (!orchestrationExecution && shouldCreatePullRequest && !draftPullRequestReady)
                         {
                             (prUrl, prNumber) = await OpenPullRequestAsync(
                                 sandbox,
@@ -2336,6 +2527,9 @@ public class AgentOrchestrationService(
                         }
                     }
                 }
+
+                if (restartForOrchestration)
+                    continue;
 
                 if (latestCycleReviewDecision is null || !latestCycleReviewDecision.RequiresAutomaticLoop)
                     break;
@@ -2388,7 +2582,7 @@ public class AgentOrchestrationService(
                 string steeringBlock,
                 int groupCompletedBase)
             {
-                var maxAttempts = MaxAgentRetries + 1;
+                var maxAttempts = MaxPhaseAttempts;
                 var baseUserMessage = BuildPhaseMessage(role, currentWorkItemContext, priorOutputs, draftPullRequestReady);
                 if (!string.IsNullOrWhiteSpace(steeringBlock))
                     baseUserMessage += steeringBlock;
@@ -2398,23 +2592,37 @@ public class AgentOrchestrationService(
                 for (var attempt = 1; attempt <= maxAttempts; attempt++)
                 {
                     var isRetry = attempt > 1;
+                    var isAdaptiveRetry = attempt > MaxStandardPhaseAttempts;
                     var retryProgressFloorPercent = priorAttempts.LastOrDefault()?.EstimatedCompletionPercent ?? 0;
                     var lastLoggedPercent = retryProgressFloorPercent > 0
                         ? (int)Math.Floor(Math.Clamp(retryProgressFloorPercent, 0, 99.999))
                         : -1;
                     var lastLoggedSummary = string.Empty;
-                    var initialProgressSummary = isRetry
+                    var adaptiveRetryDirective = isAdaptiveRetry
+                        ? await BuildAdaptiveRetryDirectiveAsync(
+                            role,
+                            baseUserMessage,
+                            priorAttempts,
+                            externalCancellation)
+                        : null;
+                    var initialProgressSummary = isAdaptiveRetry
                         ? retryProgressFloorPercent > 0
-                            ? $"Retrying phase (attempt {attempt}/{maxAttempts}, resuming from {FormatProgressPercent(retryProgressFloorPercent)}%)"
-                            : $"Retrying phase (attempt {attempt}/{maxAttempts})"
-                        : $"Starting phase: {GetPhaseTaskDescription(role)}";
+                            ? $"Smart retrying phase (attempt {attempt}/{maxAttempts}, adaptive pass {attempt - MaxStandardPhaseAttempts}/{MaxSmartRetryAttempts}, resuming from {FormatProgressPercent(retryProgressFloorPercent)}%)"
+                            : $"Smart retrying phase (attempt {attempt}/{maxAttempts}, adaptive pass {attempt - MaxStandardPhaseAttempts}/{MaxSmartRetryAttempts})"
+                        : isRetry
+                            ? retryProgressFloorPercent > 0
+                                ? $"Retrying phase (attempt {attempt}/{maxAttempts}, resuming from {FormatProgressPercent(retryProgressFloorPercent)}%)"
+                                : $"Retrying phase (attempt {attempt}/{maxAttempts})"
+                            : $"Starting phase: {GetPhaseTaskDescription(role)}";
 
                     await WithDbLockAsync(async queuedDb =>
                     {
                         await SetAgentRunningAsync(queuedDb, executionId, role.ToString(),
-                            isRetry
-                                ? $"{GetPhaseTaskDescription(role)} (retry {attempt - 1}/{MaxAgentRetries})"
-                                : GetPhaseTaskDescription(role),
+                            isAdaptiveRetry
+                                ? $"{GetPhaseTaskDescription(role)} (smart retry {attempt - MaxStandardPhaseAttempts}/{MaxSmartRetryAttempts})"
+                                : isRetry
+                                    ? $"{GetPhaseTaskDescription(role)} (retry {attempt - 1}/{Math.Max(1, MaxStandardPhaseAttempts - 1)})"
+                                    : GetPhaseTaskDescription(role),
                             retryProgressFloorPercent / 100.0);
 
                         await WriteLogEntryAsync(
@@ -2424,17 +2632,33 @@ public class AgentOrchestrationService(
                             "info",
                             initialProgressSummary,
                             executionId: executionId);
+
+                        if (isAdaptiveRetry && adaptiveRetryDirective is not null)
+                        {
+                            await WriteLogEntryAsync(
+                                queuedDb,
+                                projectId,
+                                $"{role} Agent",
+                                "info",
+                                $"Smart retry strategy: {adaptiveRetryDirective.StrategySummary}",
+                                executionId: executionId);
+                        }
                     });
                     await PublishAgentsUpdatedAsync();
                     await PublishLogsUpdatedAsync();
 
-                    var userMessage = BuildRetryAwarePhaseMessage(baseUserMessage, role, priorAttempts);
+                    var userMessage = BuildRetryAwarePhaseMessage(
+                        baseUserMessage,
+                        role,
+                        priorAttempts,
+                        adaptiveRetryDirective);
                     logger.LogInformation(
-                        "Execution {ExecutionId}: starting phase {Role} attempt {Attempt}/{MaxAttempts}",
+                        "Execution {ExecutionId}: starting phase {Role} attempt {Attempt}/{MaxAttempts} ({RetryMode})",
                         executionId,
                         role,
                         attempt,
-                        maxAttempts);
+                        maxAttempts,
+                        isAdaptiveRetry ? "smart-retry" : (isRetry ? "retry" : "initial"));
 
                     PhaseProgressCallback onProgress = async (estimatedProgress, summary) =>
                     {
@@ -2582,7 +2806,9 @@ public class AgentOrchestrationService(
                         {
                             var successMsg = attempt == 1
                                 ? $"Phase completed ({result.ToolCallCount} tool calls)"
-                                : $"Phase completed after retry ({attempt}/{maxAttempts}, {result.ToolCallCount} tool calls)";
+                                : attempt > MaxStandardPhaseAttempts
+                                    ? $"Phase completed after smart retry ({attempt}/{maxAttempts}, {result.ToolCallCount} tool calls)"
+                                    : $"Phase completed after retry ({attempt}/{maxAttempts}, {result.ToolCallCount} tool calls)";
                             await WriteLogEntryAsync(
                                 queuedDb,
                                 projectId,
@@ -2599,7 +2825,7 @@ public class AgentOrchestrationService(
                                 projectId,
                                 $"{role} Agent",
                                 "error",
-                                $"Phase failed on attempt {attempt}/{maxAttempts}: {errorText}",
+                                $"{(attempt > MaxStandardPhaseAttempts ? "Phase failed on smart retry" : "Phase failed on attempt")} {attempt}/{maxAttempts}: {errorText}",
                                 executionId: executionId);
 
                             logger.LogWarning(
@@ -2715,6 +2941,7 @@ public class AgentOrchestrationService(
                         executionId: executionId));
                 await PublishLogsUpdatedAsync();
                 await PublishProjectsUpdatedAsync();
+                await TryPropagateSuccessfulRetryToParentAsync();
 
                 logger.LogInformation(
                     "Execution {ExecutionId}: sub-flow pipeline completed successfully without opening a pull request",
@@ -2990,22 +3217,107 @@ public class AgentOrchestrationService(
             .OrderBy(child => child.WorkItemNumber)
             .ToList();
 
+    internal static RetryStartOptions ResolveRetryStartOptions(
+        AgentExecution priorExecution,
+        bool skipQuotaCharge = false,
+        bool skipActiveExecutionCap = false)
+    {
+        var isSubFlowRetry = !string.IsNullOrWhiteSpace(priorExecution.ParentExecutionId);
+        return new RetryStartOptions(
+            ParentExecutionId: isSubFlowRetry ? priorExecution.ParentExecutionId : null,
+            SkipQuotaCharge: skipQuotaCharge || isSubFlowRetry,
+            SkipActiveExecutionCap: skipActiveExecutionCap || isSubFlowRetry);
+    }
+
+    internal static IReadOnlyList<string> BuildReusableSubFlowParentExecutionIds(
+        string executionId,
+        string? retrySourceExecutionId)
+    {
+        var ids = new List<string> { executionId };
+        if (!string.IsNullOrWhiteSpace(retrySourceExecutionId) &&
+            !ids.Contains(retrySourceExecutionId, StringComparer.OrdinalIgnoreCase))
+        {
+            ids.Add(retrySourceExecutionId);
+        }
+
+        return ids;
+    }
+
+    internal static bool ShouldPropagateSuccessfulRetryToParent(
+        string? parentExecutionId,
+        string? retrySourceStatus,
+        bool hasRetryPlan,
+        bool resumeInPlace)
+        => !string.IsNullOrWhiteSpace(parentExecutionId) &&
+           hasRetryPlan &&
+           !resumeInPlace &&
+           !string.Equals(retrySourceStatus, "completed", StringComparison.OrdinalIgnoreCase);
+
+    private static SubFlowStrictnessProfile ResolveSubFlowStrictnessProfile(int executionDepth)
+    {
+        var normalizedDepth = Math.Max(0, executionDepth);
+        return normalizedDepth switch
+        {
+            0 => new SubFlowStrictnessProfile(
+                MaxDirectChildren: MaxSubFlowChildrenPerExecution,
+                MinimumParentDifficulty: 3,
+                MinimumNestedParentDifficulty: 4,
+                MinimumModerateBranchDifficulty: 3,
+                MinimumHighValueBranchDifficulty: 3,
+                MinimumTotalDirectDifficulty: 6,
+                ComplexityThresholdSurcharge: 0,
+                MaxGeneratedBranchDepth: 3,
+                AllowNestedBranching: true),
+            1 => new SubFlowStrictnessProfile(
+                MaxDirectChildren: 4,
+                MinimumParentDifficulty: 4,
+                MinimumNestedParentDifficulty: 4,
+                MinimumModerateBranchDifficulty: 4,
+                MinimumHighValueBranchDifficulty: 4,
+                MinimumTotalDirectDifficulty: 7,
+                ComplexityThresholdSurcharge: 2,
+                MaxGeneratedBranchDepth: 2,
+                AllowNestedBranching: true),
+            2 => new SubFlowStrictnessProfile(
+                MaxDirectChildren: 3,
+                MinimumParentDifficulty: 5,
+                MinimumNestedParentDifficulty: 5,
+                MinimumModerateBranchDifficulty: 4,
+                MinimumHighValueBranchDifficulty: 4,
+                MinimumTotalDirectDifficulty: 8,
+                ComplexityThresholdSurcharge: 4,
+                MaxGeneratedBranchDepth: 1,
+                AllowNestedBranching: false),
+            _ => new SubFlowStrictnessProfile(
+                MaxDirectChildren: 2,
+                MinimumParentDifficulty: 5,
+                MinimumNestedParentDifficulty: 5,
+                MinimumModerateBranchDifficulty: 5,
+                MinimumHighValueBranchDifficulty: 5,
+                MinimumTotalDirectDifficulty: 9,
+                ComplexityThresholdSurcharge: 6,
+                MaxGeneratedBranchDepth: 1,
+                AllowNestedBranching: false),
+        };
+    }
+
     internal static bool ShouldOrchestrateExistingSubFlows(
         Models.WorkItemDto workItem,
         IReadOnlyCollection<Models.WorkItemDto> directChildWorkItems,
         IReadOnlyCollection<Models.WorkItemDto> descendants,
         int executionDepth)
     {
+        var strictness = ResolveSubFlowStrictnessProfile(executionDepth);
         if (executionDepth >= MaxSubFlowExecutionDepth)
             return false;
 
-        if (directChildWorkItems.Count < 2 || directChildWorkItems.Count > MaxSubFlowChildrenPerExecution)
+        if (directChildWorkItems.Count < 2 || directChildWorkItems.Count > strictness.MaxDirectChildren)
             return false;
 
-        if (workItem.Difficulty <= 2)
+        if (workItem.Difficulty < strictness.MinimumParentDifficulty)
             return false;
 
-        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty < strictness.MinimumNestedParentDifficulty)
             return false;
 
         var childLookup = BuildChildWorkItemLookup(descendants);
@@ -3047,20 +3359,26 @@ public class AgentOrchestrationService(
             return false;
 
         var hasNestedChildren = branchAnalyses.Any(branch => branch.DirectGrandchildren > 0);
+        if (hasNestedChildren && !strictness.AllowNestedBranching)
+            return false;
+
         var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.Child.Difficulty);
         var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
         var highValueParallelBranches = branchAnalyses.Count(branch =>
-            branch.Child.Difficulty >= 3 &&
+            branch.Child.Difficulty >= strictness.MinimumHighValueBranchDifficulty &&
             (branch.DirectGrandchildren > 0 || branch.LeafDescendants > 1));
         var moderateParallelBranches = !hasNestedChildren &&
-            workItem.Difficulty >= 4 &&
-            branchAnalyses.Count(branch => branch.Child.Difficulty >= 3) >= 2 &&
-            totalDirectDifficulty >= 6;
+            workItem.Difficulty >= strictness.MinimumParentDifficulty &&
+            branchAnalyses.Count(branch => branch.Child.Difficulty >= strictness.MinimumModerateBranchDifficulty) >= 2 &&
+            totalDirectDifficulty >= strictness.MinimumTotalDirectDifficulty;
 
-        if (!hasNestedChildren && workItem.Difficulty <= 3 && totalDirectDifficulty <= 5)
+        if (!hasNestedChildren &&
+            workItem.Difficulty < strictness.MinimumParentDifficulty + 1 &&
+            totalDirectDifficulty < strictness.MinimumTotalDirectDifficulty)
             return false;
 
-        if (!hasNestedChildren && branchAnalyses.All(branch => branch.Child.Difficulty <= 2))
+        if (!hasNestedChildren &&
+            branchAnalyses.All(branch => branch.Child.Difficulty < strictness.MinimumModerateBranchDifficulty))
             return false;
 
         if (highValueParallelBranches >= 2)
@@ -3069,7 +3387,7 @@ public class AgentOrchestrationService(
         if (moderateParallelBranches)
             return true;
 
-        var minimumComplexityThreshold = hasNestedChildren ? 8 : 10;
+        var minimumComplexityThreshold = (hasNestedChildren ? 8 : 10) + strictness.ComplexityThresholdSurcharge;
         if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
@@ -3081,16 +3399,17 @@ public class AgentOrchestrationService(
         GeneratedSubFlowPlan generatedPlan,
         int executionDepth = 0)
     {
+        var strictness = ResolveSubFlowStrictnessProfile(executionDepth);
         if (executionDepth >= MaxSubFlowExecutionDepth)
             return false;
 
-        if (generatedPlan.SubFlows.Count < 2 || generatedPlan.SubFlows.Count > MaxSubFlowChildrenPerExecution)
+        if (generatedPlan.SubFlows.Count < 2 || generatedPlan.SubFlows.Count > strictness.MaxDirectChildren)
             return false;
 
-        if (workItem.Difficulty <= 2)
+        if (workItem.Difficulty < strictness.MinimumParentDifficulty)
             return false;
 
-        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty <= 3)
+        if (workItem.ParentWorkItemNumber is not null && workItem.Difficulty < strictness.MinimumNestedParentDifficulty)
             return false;
 
         var flattenedSubFlows = FlattenGeneratedSubFlows(generatedPlan.SubFlows).ToArray();
@@ -3104,6 +3423,10 @@ public class AgentOrchestrationService(
             return false;
 
         if (CountGeneratedLeafSubFlows(generatedPlan.SubFlows) < 2)
+            return false;
+
+        var maxGeneratedBranchDepth = generatedPlan.SubFlows.Max(CountGeneratedBranchDepth);
+        if (maxGeneratedBranchDepth > strictness.MaxGeneratedBranchDepth)
             return false;
 
         var branchAnalyses = generatedPlan.SubFlows
@@ -3144,19 +3467,25 @@ public class AgentOrchestrationService(
             return false;
 
         var hasNestedDirectBranch = branchAnalyses.Any(branch => branch.DirectChildren > 0);
+        if (hasNestedDirectBranch && !strictness.AllowNestedBranching)
+            return false;
+
         var totalDirectDifficulty = branchAnalyses.Sum(branch => branch.SubFlow.Difficulty);
         var totalBranchComplexity = branchAnalyses.Sum(branch => branch.ComplexityScore);
         var highValueParallelBranches = branchAnalyses.Count(branch =>
-            branch.SubFlow.Difficulty >= 3 &&
+            branch.SubFlow.Difficulty >= strictness.MinimumHighValueBranchDifficulty &&
             (branch.DirectChildren > 0 || branch.LeafDescendants > 1));
         var moderateParallelBranches = !hasNestedDirectBranch &&
-            workItem.Difficulty >= 4 &&
-            branchAnalyses.Count(branch => branch.SubFlow.Difficulty >= 3) >= 2 &&
-            totalDirectDifficulty >= 6;
-        if (!hasNestedDirectBranch && workItem.Difficulty <= 3 && totalDirectDifficulty <= 5)
+            workItem.Difficulty >= strictness.MinimumParentDifficulty &&
+            branchAnalyses.Count(branch => branch.SubFlow.Difficulty >= strictness.MinimumModerateBranchDifficulty) >= 2 &&
+            totalDirectDifficulty >= strictness.MinimumTotalDirectDifficulty;
+        if (!hasNestedDirectBranch &&
+            workItem.Difficulty < strictness.MinimumParentDifficulty + 1 &&
+            totalDirectDifficulty < strictness.MinimumTotalDirectDifficulty)
             return false;
 
-        if (!hasNestedDirectBranch && branchAnalyses.All(branch => branch.SubFlow.Difficulty <= 2))
+        if (!hasNestedDirectBranch &&
+            branchAnalyses.All(branch => branch.SubFlow.Difficulty < strictness.MinimumModerateBranchDifficulty))
             return false;
 
         if (highValueParallelBranches >= 2)
@@ -3165,7 +3494,7 @@ public class AgentOrchestrationService(
         if (moderateParallelBranches)
             return true;
 
-        var minimumComplexityThreshold = hasNestedDirectBranch ? 8 : 6;
+        var minimumComplexityThreshold = (hasNestedDirectBranch ? 8 : 6) + strictness.ComplexityThresholdSurcharge;
         if (totalBranchComplexity < minimumComplexityThreshold)
             return false;
 
@@ -3391,7 +3720,7 @@ public class AgentOrchestrationService(
             return;
 
         var carryForwardOutputs = completedOutputs
-            .Where(entry => entry.Key is AgentRole.Manager or AgentRole.Planner)
+            .Where(entry => entry.Key is AgentRole.Manager or AgentRole.Planner or AgentRole.Contracts)
             .ToDictionary(entry => entry.Key, entry => entry.Value);
 
         execution.ExecutionMode = AgentExecutionModes.Orchestration;
@@ -3903,6 +4232,24 @@ public class AgentOrchestrationService(
             _ => FullPipeline,
         };
 
+    internal static AgentRole[][] EnsureContractsInOrchestrationPipeline(
+        AgentRole[][] pipeline,
+        string? executionMode)
+    {
+        if (!string.Equals(executionMode, AgentExecutionModes.Orchestration, StringComparison.OrdinalIgnoreCase) ||
+            pipeline.SelectMany(group => group).Contains(AgentRole.Contracts))
+        {
+            return pipeline;
+        }
+
+        return
+        [
+            [AgentRole.Manager],
+            [AgentRole.Planner],
+            [AgentRole.Contracts],
+        ];
+    }
+
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
     {
         var effectiveAssignedAgentCount = ResolveEffectiveAssignedAgentCount(assignmentMode, assignedAgentCount);
@@ -4129,43 +4476,224 @@ public class AgentOrchestrationService(
         }).ToList();
     }
 
-    private static string BuildRetryAwarePhaseMessage(
-        string baseUserMessage,
+    internal static string BuildAdaptiveRetryPlannerInput(
         AgentRole role,
+        string baseUserMessage,
         IReadOnlyList<PhaseResult> priorAttempts)
     {
-        if (priorAttempts.Count == 0)
-            return baseUserMessage;
-
-        var sb = new StringBuilder(baseUserMessage);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Role: {role}");
+        sb.AppendLine("Original phase prompt excerpt:");
+        sb.AppendLine(TrimRetryOutput(baseUserMessage, maxChars: 4_000));
         sb.AppendLine();
-        sb.AppendLine("## Retry Context");
-        sb.AppendLine($"You are retrying the {role} phase after one or more failed attempts.");
-        sb.AppendLine("Preserve existing repository progress and fix the failures below.");
-        sb.AppendLine();
+        sb.AppendLine("Failed attempts:");
 
         for (var i = 0; i < priorAttempts.Count; i++)
         {
             var attempt = priorAttempts[i];
-            sb.AppendLine($"### Failed Attempt {i + 1}");
-            sb.AppendLine($"- Error: {attempt.Error ?? "Unknown error"}");
-            if (attempt.EstimatedCompletionPercent > 0)
-            {
-                var retrySummary = string.IsNullOrWhiteSpace(attempt.LastProgressSummary)
-                    ? "No summary captured"
-                    : attempt.LastProgressSummary;
-                sb.AppendLine($"- Last estimated completion: {FormatProgressPercent(attempt.EstimatedCompletionPercent)}% ({retrySummary})");
-            }
+            sb.AppendLine($"Attempt {i + 1}:");
+            sb.AppendLine($"- Error: {NormalizeAgentFailureMessage(attempt.Error)}");
+            sb.AppendLine($"- Tool calls: {attempt.ToolCallCount}");
+            sb.AppendLine($"- Tokens: in={attempt.InputTokens}, out={attempt.OutputTokens}");
+            sb.AppendLine($"- Last progress: {FormatProgressPercent(attempt.EstimatedCompletionPercent)}%");
+            if (!string.IsNullOrWhiteSpace(attempt.LastProgressSummary))
+                sb.AppendLine($"- Progress summary: {attempt.LastProgressSummary.Trim()}");
             if (!string.IsNullOrWhiteSpace(attempt.Output))
             {
                 sb.AppendLine("- Output excerpt:");
-                sb.AppendLine(TrimRetryOutput(attempt.Output));
+                sb.AppendLine(TrimRetryOutput(attempt.Output, maxChars: 1_500));
             }
+
             sb.AppendLine();
         }
 
-        sb.AppendLine("Focus on resolving the failure and completing this phase.");
         return sb.ToString();
+    }
+
+    internal static AdaptiveRetryDirective BuildFallbackAdaptiveRetryDirective(
+        AgentRole role,
+        IReadOnlyList<PhaseResult> priorAttempts)
+    {
+        var summary = $"Change the {role} approach: validate the failure cause first, then continue in smaller verified steps.";
+        var sb = new StringBuilder();
+        sb.AppendLine("## Smart Retry Instructions");
+        sb.AppendLine("- Do not repeat the same sequence of actions that already failed.");
+        sb.AppendLine("- Preserve existing repository progress instead of restarting completed work.");
+        sb.AppendLine("- Start with the narrowest read-only verification that can confirm the root cause.");
+        sb.AppendLine("- Only rerun the failing tool/command after you have changed the plan or inputs enough to avoid the prior failure.");
+        if (priorAttempts.Count > 0)
+        {
+            sb.AppendLine("- Observed failures to address before proceeding:");
+            foreach (var attempt in priorAttempts.TakeLast(Math.Min(3, priorAttempts.Count)))
+            {
+                sb.AppendLine($"  - {NormalizeAgentFailureMessage(attempt.Error)}");
+            }
+        }
+
+        return new AdaptiveRetryDirective(summary, sb.ToString().Trim());
+    }
+
+    private async Task<AdaptiveRetryDirective> BuildAdaptiveRetryDirectiveAsync(
+        AgentRole role,
+        string baseUserMessage,
+        IReadOnlyList<PhaseResult> priorAttempts,
+        CancellationToken cancellationToken)
+    {
+        var fallback = BuildFallbackAdaptiveRetryDirective(role, priorAttempts);
+        if (priorAttempts.Count == 0)
+            return fallback;
+
+        const string systemPrompt = """
+            You are a recovery planner for an autonomous software agent.
+            You will receive the phase role, the original phase prompt excerpt, and metadata from several failed attempts.
+            Return ONLY raw JSON with this schema:
+            {
+              "strategySummary": "one concise sentence",
+              "promptAddendum": "markdown instructions to append to the next attempt"
+            }
+
+            Rules:
+            - The next attempt MUST materially change approach instead of simply retrying.
+            - Preserve repository progress that already exists.
+            - Prefer targeted validation, narrower reads/writes, and changing tool/order-of-operations when useful.
+            - Reference the observed failures and progress metadata.
+            - Do not ask for human help, approval, or more context.
+            - Keep the addendum concise but concrete.
+            """;
+
+        try
+        {
+            var model = modelCatalog.Get(ModelKeys.Fast);
+            var request = new LLMRequest(
+                systemPrompt,
+                [new LLMMessage
+                {
+                    Role = "user",
+                    Content = BuildAdaptiveRetryPlannerInput(role, baseUserMessage, priorAttempts),
+                }],
+                ModelOverride: model,
+                MaxTokens: 1024);
+            var response = await llmClient.CompleteAsync(request, cancellationToken);
+            return TryParseAdaptiveRetryDirective(response.Content) ?? fallback;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Adaptive retry planning failed for role {Role}; falling back to deterministic guidance", role);
+            return fallback;
+        }
+    }
+
+    private static AdaptiveRetryDirective? TryParseAdaptiveRetryDirective(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return null;
+
+        var trimmed = content.Trim();
+        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstNewline = trimmed.IndexOf('\n');
+            if (firstNewline >= 0)
+                trimmed = trimmed[(firstNewline + 1)..];
+            if (trimmed.EndsWith("```", StringComparison.Ordinal))
+                trimmed = trimmed[..^3];
+            trimmed = trimmed.Trim();
+        }
+
+        try
+        {
+            var contract = JsonSerializer.Deserialize<AdaptiveRetryDirectiveContract>(
+                trimmed,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (contract is null)
+                return null;
+
+            var strategySummary = string.IsNullOrWhiteSpace(contract.StrategySummary)
+                ? null
+                : contract.StrategySummary.Trim();
+            var promptAddendum = string.IsNullOrWhiteSpace(contract.PromptAddendum)
+                ? null
+                : contract.PromptAddendum.Trim();
+            if (strategySummary is null || promptAddendum is null)
+                return null;
+
+            return new AdaptiveRetryDirective(strategySummary, promptAddendum);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string BuildRetryAwarePhaseMessage(
+        string baseUserMessage,
+        AgentRole role,
+        IReadOnlyList<PhaseResult> priorAttempts,
+        AdaptiveRetryDirective? adaptiveRetryDirective = null)
+    {
+        if (priorAttempts.Count == 0 && adaptiveRetryDirective is null)
+            return baseUserMessage;
+
+        var sb = new StringBuilder(baseUserMessage);
+        sb.AppendLine();
+        if (priorAttempts.Count > 0)
+        {
+            sb.AppendLine("## Retry Context");
+            sb.AppendLine($"You are retrying the {role} phase after one or more failed attempts.");
+            sb.AppendLine("Preserve existing repository progress and fix the failures below.");
+            sb.AppendLine();
+
+            for (var i = 0; i < priorAttempts.Count; i++)
+            {
+                var attempt = priorAttempts[i];
+                sb.AppendLine($"### Failed Attempt {i + 1}");
+                sb.AppendLine($"- Error: {attempt.Error ?? "Unknown error"}");
+                if (attempt.EstimatedCompletionPercent > 0)
+                {
+                    var retrySummary = string.IsNullOrWhiteSpace(attempt.LastProgressSummary)
+                        ? "No summary captured"
+                        : attempt.LastProgressSummary;
+                    sb.AppendLine($"- Last estimated completion: {FormatProgressPercent(attempt.EstimatedCompletionPercent)}% ({retrySummary})");
+                }
+                if (!string.IsNullOrWhiteSpace(attempt.Output))
+                {
+                    sb.AppendLine("- Output excerpt:");
+                    sb.AppendLine(TrimRetryOutput(attempt.Output));
+                }
+                sb.AppendLine();
+            }
+
+            if (adaptiveRetryDirective is not null)
+            {
+                sb.AppendLine("## Smart Retry Adjustment");
+                sb.AppendLine($"Strategy: {adaptiveRetryDirective.StrategySummary}");
+                sb.AppendLine(adaptiveRetryDirective.PromptAddendum);
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("Focus on resolving the failure and completing this phase.");
+            return sb.ToString();
+        }
+
+        if (adaptiveRetryDirective is not null)
+        {
+            sb.AppendLine("## Smart Retry Adjustment");
+            sb.AppendLine($"Strategy: {adaptiveRetryDirective.StrategySummary}");
+            sb.AppendLine(adaptiveRetryDirective.PromptAddendum);
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private sealed class AdaptiveRetryDirectiveContract
+    {
+        public string? StrategySummary { get; set; }
+
+        public string? PromptAddendum { get; set; }
     }
 
     internal static string BuildExecutionRetryContext(
