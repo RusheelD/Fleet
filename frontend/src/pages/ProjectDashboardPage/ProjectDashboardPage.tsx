@@ -20,29 +20,18 @@ import {
 } from '@fluentui/react-components'
 import {
     ChatRegular,
-    BoardRegular,
-    BotRegular,
     LinkRegular,
     OpenRegular,
 } from '@fluentui/react-icons'
-import { MemoryWorkspace, PageHeader, PlaybookWorkspace } from '../../components/shared'
+import { PageHeader } from '../../components/shared'
 import { MetricCard, ActivityItem, AgentStatusRow } from './'
 import {
     useProjectDashboardBySlug,
     useDeleteProject,
     useUpdateProject,
     useProjectMemories,
-    useCreateProjectMemory,
-    useUpdateProjectMemory,
-    useDeleteProjectMemory,
-    useSkillTemplates,
     useProjectSkills,
-    useCreateProjectSkill,
-    useUpdateProjectSkill,
-    useDeleteProjectSkill,
     resolveIcon,
-    type UpsertMemoryEntryRequest,
-    type UpsertPromptSkillRequest,
 } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile } from '../../hooks'
 import { appTokens, APP_MOBILE_MEDIA_QUERY } from '../../styles/appTokens'
@@ -208,20 +197,11 @@ export function ProjectDashboardPage() {
     const navigate = useNavigate()
     const { data: dashboard, isLoading } = useProjectDashboardBySlug(slug)
     const projectMemories = useProjectMemories(dashboard?.id, Boolean(dashboard?.id))
-    const createProjectMemory = useCreateProjectMemory(dashboard?.id)
-    const updateProjectMemory = useUpdateProjectMemory(dashboard?.id)
-    const deleteProjectMemory = useDeleteProjectMemory(dashboard?.id)
-    const skillTemplates = useSkillTemplates()
     const projectSkills = useProjectSkills(dashboard?.id, Boolean(dashboard?.id))
-    const createProjectSkill = useCreateProjectSkill(dashboard?.id)
-    const updateProjectSkill = useUpdateProjectSkill(dashboard?.id)
-    const deleteProjectSkill = useDeleteProjectSkill(dashboard?.id)
     const deleteProject = useDeleteProject()
     const updateProject = useUpdateProject()
     const [unlinkRepoOpen, setUnlinkRepoOpen] = useState(false)
     const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
-    const isMemorySaving = createProjectMemory.isPending || updateProjectMemory.isPending || deleteProjectMemory.isPending
-    const isPlaybookSaving = createProjectSkill.isPending || updateProjectSkill.isPending || deleteProjectSkill.isPending
     const projectMemoryCount = projectMemories.data?.length ?? 0
     const projectPlaybookCount = projectSkills.data?.length ?? 0
     const activeAgentCount = dashboard?.agents.filter((agent) => agent.status.toLowerCase() === 'running').length ?? 0
@@ -251,36 +231,6 @@ export function ProjectDashboardPage() {
         )
     }, [dashboard, deleteProject, navigate])
 
-    const handleCreateMemory = useCallback(
-        (request: UpsertMemoryEntryRequest) => createProjectMemory.mutateAsync(request),
-        [createProjectMemory],
-    )
-
-    const handleUpdateMemory = useCallback(
-        (id: number, request: UpsertMemoryEntryRequest) => updateProjectMemory.mutateAsync({ id, data: request }),
-        [updateProjectMemory],
-    )
-
-    const handleDeleteMemory = useCallback(
-        (id: number) => deleteProjectMemory.mutateAsync(id),
-        [deleteProjectMemory],
-    )
-
-    const handleCreatePlaybook = useCallback(
-        (request: UpsertPromptSkillRequest) => createProjectSkill.mutateAsync(request),
-        [createProjectSkill],
-    )
-
-    const handleUpdatePlaybook = useCallback(
-        (id: number, request: UpsertPromptSkillRequest) => updateProjectSkill.mutateAsync({ id, data: request }),
-        [updateProjectSkill],
-    )
-
-    const handleDeletePlaybook = useCallback(
-        (id: number) => deleteProjectSkill.mutateAsync(id),
-        [deleteProjectSkill],
-    )
-
     if (isLoading || !dashboard) {
         return (
             <div className={mergeClasses(styles.page, isMobile && styles.pageMobile)}>
@@ -303,20 +253,6 @@ export function ProjectDashboardPage() {
                             className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
                         >
                             Open Chat
-                        </Button>
-                        <Button
-                            icon={<BoardRegular />}
-                            onClick={() => navigate(`/projects/${slug}/work-items`)}
-                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
-                        >
-                            Work Items
-                        </Button>
-                        <Button
-                            icon={<BotRegular />}
-                            onClick={() => navigate(`/projects/${slug}/agents`)}
-                            className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
-                        >
-                            Agents
                         </Button>
                         {dashboard.repo ? (
                             <Button
@@ -434,33 +370,6 @@ export function ProjectDashboardPage() {
                     </div>
                 </Card>
             </div>
-
-            <MemoryWorkspace
-                title="Project Memory"
-                subtitle="Keep non-code context close to the work: deadlines, known gotchas, stakeholder notes, and reference links that matter across sessions."
-                memories={projectMemories.data}
-                isLoading={projectMemories.isLoading}
-                isSaving={isMemorySaving}
-                emptyMessage="No project memory has been saved yet."
-                createLabel="New Project Memory"
-                onCreate={handleCreateMemory}
-                onUpdate={handleUpdateMemory}
-                onDelete={handleDeleteMemory}
-            />
-
-            <PlaybookWorkspace
-                title="Project Playbooks"
-                subtitle="Create project-specific workflows Fleet should reuse for this team, such as rollout checklists, triage standards, or backlog shaping conventions."
-                templates={skillTemplates.data}
-                playbooks={projectSkills.data}
-                isLoading={skillTemplates.isLoading || projectSkills.isLoading}
-                isSaving={isPlaybookSaving}
-                emptyMessage="No project playbooks have been created yet."
-                createLabel="New Project Playbook"
-                onCreate={handleCreatePlaybook}
-                onUpdate={handleUpdatePlaybook}
-                onDelete={handleDeletePlaybook}
-            />
 
             <Dialog open={unlinkRepoOpen} onOpenChange={(_e, data) => setUnlinkRepoOpen(data.open)}>
                 <DialogSurface>

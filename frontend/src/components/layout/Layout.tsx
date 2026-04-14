@@ -456,6 +456,8 @@ export function Layout() {
             { icon: <HomeFilled />, label: 'Overview', path: `/projects/${slug}`, exact: true },
             { icon: <BoardRegular />, label: 'Work Items', path: `/projects/${slug}/work-items` },
             { icon: <BotRegular />, label: 'Agents', path: `/projects/${slug}/agents` },
+            { icon: <BookmarkRegular />, label: 'Memory', path: `/projects/${slug}/memory` },
+            { icon: <BotRegular />, label: 'Playbooks', path: `/projects/${slug}/playbooks` },
         ]
         : []
 
@@ -475,6 +477,10 @@ export function Layout() {
                 parts.push({ label: 'Work Items' })
             } else if (location.pathname.includes('/agents')) {
                 parts.push({ label: 'Agents' })
+            } else if (location.pathname.includes('/memory')) {
+                parts.push({ label: 'Memory' })
+            } else if (location.pathname.includes('/playbooks')) {
+                parts.push({ label: 'Playbooks' })
             } else {
                 parts.push({ label: 'Overview' })
             }

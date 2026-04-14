@@ -8,6 +8,8 @@ const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((module) => 
 const ProjectDashboardPage = lazy(() => import('./pages/ProjectDashboardPage').then((module) => ({ default: module.ProjectDashboardPage })))
 const WorkItemsPage = lazy(() => import('./pages/WorkItemsPage').then((module) => ({ default: module.WorkItemsPage })))
 const AgentMonitorPage = lazy(() => import('./pages/AgentMonitorPage').then((module) => ({ default: module.AgentMonitorPage })))
+const ProjectMemoryPage = lazy(() => import('./pages/ProjectMemoryPage').then((module) => ({ default: module.ProjectMemoryPage })))
+const ProjectPlaybooksPage = lazy(() => import('./pages/ProjectPlaybooksPage').then((module) => ({ default: module.ProjectPlaybooksPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const SubscriptionPage = lazy(() => import('./pages/SubscriptionPage').then((module) => ({ default: module.SubscriptionPage })))
 const SearchPage = lazy(() => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })))
@@ -66,6 +68,8 @@ function App() {
                 <Route index element={<ProjectDashboardPage />} />
                 <Route path="work-items" element={<WorkItemsPage />} />
                 <Route path="agents" element={<AgentMonitorPage />} />
+                <Route path="memory" element={<ProjectMemoryPage />} />
+                <Route path="playbooks" element={<ProjectPlaybooksPage />} />
               </Route>
             </Route>
 
