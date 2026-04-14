@@ -87,6 +87,7 @@ public class AgentOrchestrationService(
         string? ReusePullRequestTitle,
         double PriorProgressEstimate,
         IReadOnlyDictionary<AgentRole, string> CarryForwardOutputs,
+        IReadOnlyList<string> LineageExecutionIds,
         string RetryContextMarkdown,
         bool ResumeInPlace = false,
         bool ResumeFromRemoteBranch = true)
@@ -164,6 +165,9 @@ public class AgentOrchestrationService(
     private static readonly Regex WorkItemAttachmentReferenceRegex = new(
         @"/api/projects/[^/\s]+/work-items/\d+/attachments/(?<id>[A-Za-z0-9\-]+)/content",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex RetryContextSourceRegex = new(
+        @"^Retry context loaded from execution (?<id>[A-Za-z0-9]+)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static bool IsRecoverableInterruptedExecutionStatus(string? status)
         => string.Equals(status, "running", StringComparison.OrdinalIgnoreCase) ||
@@ -183,6 +187,10 @@ public class AgentOrchestrationService(
     internal sealed record AdaptiveRetryDirective(
         string StrategySummary,
         string PromptAddendum);
+
+    private sealed record RetryLineageContext(
+        IReadOnlyList<AgentExecution> Executions,
+        IReadOnlyList<AgentPhaseResult> OrderedPhaseResults);
 
     internal sealed record RetryStartOptions(
         string? ParentExecutionId,
@@ -663,6 +671,8 @@ public class AgentOrchestrationService(
             {
                 var retrySummary = $"Retry context loaded from execution {retryPlan.SourceExecutionId} " +
                                    $"(status: {retryPlan.SourceStatus ?? "unknown"}, prior progress: {FormatProgressPercent(retryPlan.PriorProgressEstimate * 100)}%)";
+                if (retryPlan.LineageExecutionIds.Count > 1)
+                    retrySummary += $" across {retryPlan.LineageExecutionIds.Count} chained attempts";
                 await WriteLogEntryAsync(
                     db,
                     projectId,
@@ -1030,6 +1040,7 @@ public class AgentOrchestrationService(
             ReusePullRequestTitle: persistedExecution.PullRequestTitle,
             PriorProgressEstimate: Math.Clamp(persistedExecution.Progress, 0, 1),
             CarryForwardOutputs: carryForwardOutputs,
+            LineageExecutionIds: [persistedExecution.Id],
             RetryContextMarkdown: BuildExecutionResumeContext(persistedExecution, priorPhaseResults),
             ResumeInPlace: true,
             ResumeFromRemoteBranch: resumeFromRemoteBranch);
@@ -1379,11 +1390,8 @@ public class AgentOrchestrationService(
         if (string.Equals(priorExecution.Status, "running", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var priorPhaseResults = await db.AgentPhaseResults
-            .AsNoTracking()
-            .Where(r => r.ExecutionId == priorExecution.Id)
-            .OrderBy(r => r.PhaseOrder)
-            .ToListAsync(cancellationToken);
+        var retryLineage = await ResolveRetryLineageContextAsync(priorExecution, cancellationToken);
+        var priorPhaseResults = retryLineage.OrderedPhaseResults;
         var carryForwardOutputs = BuildRetryCarryForwardOutputs(priorPhaseResults);
 
         var priorProgress = Math.Clamp(priorExecution.Progress, 0, 1);
@@ -1429,7 +1437,11 @@ public class AgentOrchestrationService(
             ReusePullRequestTitle: shouldReuseExistingPullRequest ? priorExecution.PullRequestTitle : null,
             PriorProgressEstimate: priorProgress,
             CarryForwardOutputs: carryForwardOutputs,
-            RetryContextMarkdown: BuildExecutionRetryContext(priorExecution, priorPhaseResults),
+            LineageExecutionIds: retryLineage.Executions
+                .Select(execution => execution.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            RetryContextMarkdown: BuildExecutionRetryContext(retryLineage.Executions, priorPhaseResults),
             ResumeFromRemoteBranch: resumeFromRemoteBranch);
 
         return await StartExecutionInternalAsync(
@@ -1442,6 +1454,125 @@ public class AgentOrchestrationService(
             skipQuotaCharge: retryStartOptions.SkipQuotaCharge,
             skipActiveExecutionCap: retryStartOptions.SkipActiveExecutionCap,
             cancellationToken);
+    }
+
+    private async Task<RetryLineageContext> ResolveRetryLineageContextAsync(
+        AgentExecution priorExecution,
+        CancellationToken cancellationToken)
+    {
+        var lineageExecutions = await ResolveRetryLineageExecutionsAsync(priorExecution, cancellationToken);
+        var lineageExecutionIds = lineageExecutions
+            .Select(execution => execution.Id)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (lineageExecutionIds.Length == 0)
+            return new RetryLineageContext([priorExecution], []);
+
+        var phaseResults = await db.AgentPhaseResults
+            .AsNoTracking()
+            .Where(result => lineageExecutionIds.Contains(result.ExecutionId))
+            .ToListAsync(cancellationToken);
+
+        return new RetryLineageContext(
+            lineageExecutions,
+            OrderPhaseResultsByRetryLineage(phaseResults, lineageExecutions));
+    }
+
+    private async Task<IReadOnlyList<AgentExecution>> ResolveRetryLineageExecutionsAsync(
+        AgentExecution priorExecution,
+        CancellationToken cancellationToken)
+    {
+        var lineageExecutions = new List<AgentExecution>();
+        var seenExecutionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AgentExecution? cursor = priorExecution;
+
+        while (cursor is not null && seenExecutionIds.Add(cursor.Id))
+        {
+            lineageExecutions.Add(cursor);
+
+            var sourceExecutionId = await ResolveRetrySourceExecutionIdAsync(
+                cursor.ProjectId,
+                cursor.Id,
+                cancellationToken);
+            if (string.IsNullOrWhiteSpace(sourceExecutionId))
+                break;
+
+            cursor = await db.AgentExecutions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    execution => execution.ProjectId == priorExecution.ProjectId && execution.Id == sourceExecutionId,
+                    cancellationToken);
+        }
+
+        lineageExecutions.Reverse();
+        if (lineageExecutions.Count > 1)
+            return lineageExecutions;
+
+        return await ResolveLegacyRetryLineageExecutionsAsync(priorExecution, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<AgentExecution>> ResolveLegacyRetryLineageExecutionsAsync(
+        AgentExecution priorExecution,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBranchName = priorExecution.BranchName?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedBranchName))
+            return [priorExecution];
+
+        var sourceIsSubFlow = !string.IsNullOrWhiteSpace(priorExecution.ParentExecutionId);
+        var candidates = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(execution =>
+                execution.ProjectId == priorExecution.ProjectId &&
+                execution.WorkItemId == priorExecution.WorkItemId &&
+                execution.BranchName == normalizedBranchName &&
+                (sourceIsSubFlow
+                    ? execution.ParentExecutionId != null && execution.ParentExecutionId != string.Empty
+                    : execution.ParentExecutionId == null || execution.ParentExecutionId == string.Empty))
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+            return [priorExecution];
+
+        var priorStartedAtUtc = priorExecution.StartedAtUtc;
+        var filteredCandidates = candidates
+            .Where(execution =>
+                execution.Id == priorExecution.Id ||
+                !priorStartedAtUtc.HasValue ||
+                !execution.StartedAtUtc.HasValue ||
+                execution.StartedAtUtc <= priorStartedAtUtc.Value)
+            .OrderBy(execution => execution.StartedAtUtc ?? DateTime.MinValue)
+            .ThenBy(execution => execution.StartedAt)
+            .ThenBy(execution => execution.Id)
+            .ToList();
+
+        if (!filteredCandidates.Any(execution => string.Equals(execution.Id, priorExecution.Id, StringComparison.OrdinalIgnoreCase)))
+            filteredCandidates.Add(priorExecution);
+
+        return filteredCandidates;
+    }
+
+    private async Task<string?> ResolveRetrySourceExecutionIdAsync(
+        string projectId,
+        string executionId,
+        CancellationToken cancellationToken)
+    {
+        var messages = await db.LogEntries
+            .AsNoTracking()
+            .Where(log => log.ProjectId == projectId && log.ExecutionId == executionId)
+            .OrderBy(log => log.Time)
+            .ThenBy(log => log.Id)
+            .Select(log => log.Message)
+            .ToListAsync(cancellationToken);
+
+        foreach (var message in messages)
+        {
+            var parsedExecutionId = TryParseRetrySourceExecutionIdFromLog(message);
+            if (!string.IsNullOrWhiteSpace(parsedExecutionId))
+                return parsedExecutionId;
+        }
+
+        return null;
     }
 
     public async Task<ExecutionDocumentationDto?> GetExecutionDocumentationAsync(
@@ -1632,7 +1763,7 @@ public class AgentOrchestrationService(
         {
             var reusableParentExecutionIds = BuildReusableSubFlowParentExecutionIds(
                 executionId,
-                retryPlan?.SourceExecutionId);
+                retryPlan?.LineageExecutionIds);
             var existingExecution = await WithDbResultAsync(async queuedDb =>
                 await queuedDb.AgentExecutions
                     .AsNoTracking()
@@ -3245,16 +3376,52 @@ public class AgentOrchestrationService(
 
     internal static IReadOnlyList<string> BuildReusableSubFlowParentExecutionIds(
         string executionId,
-        string? retrySourceExecutionId)
+        IReadOnlyList<string>? retryLineageExecutionIds)
     {
         var ids = new List<string> { executionId };
-        if (!string.IsNullOrWhiteSpace(retrySourceExecutionId) &&
-            !ids.Contains(retrySourceExecutionId, StringComparer.OrdinalIgnoreCase))
+        if (retryLineageExecutionIds is null)
+            return ids;
+
+        foreach (var lineageExecutionId in retryLineageExecutionIds)
         {
-            ids.Add(retrySourceExecutionId);
+            if (string.IsNullOrWhiteSpace(lineageExecutionId) ||
+                ids.Contains(lineageExecutionId, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            ids.Add(lineageExecutionId);
         }
 
         return ids;
+    }
+
+    internal static string? TryParseRetrySourceExecutionIdFromLog(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        var match = RetryContextSourceRegex.Match(message.Trim());
+        return match.Success ? match.Groups["id"].Value : null;
+    }
+
+    internal static IReadOnlyList<AgentPhaseResult> OrderPhaseResultsByRetryLineage(
+        IReadOnlyList<AgentPhaseResult> phaseResults,
+        IReadOnlyList<AgentExecution> lineageExecutions)
+    {
+        if (phaseResults.Count == 0)
+            return [];
+
+        var executionOrder = lineageExecutions
+            .Select((execution, index) => new { execution.Id, Index = index })
+            .ToDictionary(entry => entry.Id, entry => entry.Index, StringComparer.OrdinalIgnoreCase);
+
+        return phaseResults
+            .OrderBy(phase => executionOrder.TryGetValue(phase.ExecutionId, out var index) ? index : int.MaxValue)
+            .ThenBy(phase => phase.PhaseOrder)
+            .ThenBy(phase => phase.StartedAt)
+            .ThenBy(phase => phase.Id)
+            .ToList();
     }
 
     internal static bool ShouldPropagateSuccessfulRetryToParent(
@@ -4168,20 +4335,19 @@ public class AgentOrchestrationService(
     internal static IReadOnlyDictionary<AgentRole, string> BuildRetryCarryForwardOutputs(
         IReadOnlyList<AgentPhaseResult> priorPhaseResults)
     {
-        var carriedOutputs = new Dictionary<AgentRole, (int PhaseOrder, string Output)>();
+        var carriedOutputs = new Dictionary<AgentRole, (int Sequence, string Output)>();
+        var sequence = 0;
 
-        foreach (var phase in priorPhaseResults
-                     .Where(phase => phase.Success)
-                     .OrderBy(phase => phase.PhaseOrder))
+        foreach (var phase in priorPhaseResults.Where(phase => phase.Success))
         {
             if (!Enum.TryParse<AgentRole>(phase.Role, ignoreCase: true, out var role))
                 continue;
 
-            carriedOutputs[role] = (phase.PhaseOrder, PrepareCarryForwardOutput(phase.Output));
+            carriedOutputs[role] = (sequence++, PrepareCarryForwardOutput(phase.Output));
         }
 
         return carriedOutputs
-            .OrderBy(entry => entry.Value.PhaseOrder)
+            .OrderBy(entry => entry.Value.Sequence)
             .ToDictionary(entry => entry.Key, entry => entry.Value.Output);
     }
 
@@ -4726,49 +4892,81 @@ public class AgentOrchestrationService(
     }
 
     internal static string BuildExecutionRetryContext(
-        AgentExecution priorExecution,
+        IReadOnlyList<AgentExecution> priorExecutions,
         IReadOnlyList<AgentPhaseResult> priorPhaseResults)
     {
+        var priorExecution = priorExecutions.Count > 0
+            ? priorExecutions[^1]
+            : throw new ArgumentException("Retry context requires at least one prior execution.", nameof(priorExecutions));
+        var phaseResultsByExecutionId = priorPhaseResults
+            .GroupBy(phase => phase.ExecutionId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<AgentPhaseResult>)group.ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        var carryForwardOutputs = BuildRetryCarryForwardOutputs(priorPhaseResults);
         var sb = new StringBuilder();
-        sb.AppendLine("## Previous Execution Context");
-        sb.AppendLine($"- Previous execution id: {priorExecution.Id}");
-        sb.AppendLine($"- Previous status: {priorExecution.Status}");
-        sb.AppendLine($"- Last recorded completion: {FormatProgressPercent(Math.Clamp(priorExecution.Progress, 0, 1) * 100)}%");
+        sb.AppendLine("## Retry Lineage Context");
+        sb.AppendLine($"- Latest source execution id: {priorExecution.Id}");
+        sb.AppendLine($"- Prior attempts in lineage: {priorExecutions.Count}");
+        sb.AppendLine($"- Latest source status: {priorExecution.Status}");
+        sb.AppendLine($"- Latest recorded completion: {FormatProgressPercent(Math.Clamp(priorExecution.Progress, 0, 1) * 100)}%");
         if (!string.IsNullOrWhiteSpace(priorExecution.BranchName))
             sb.AppendLine($"- Reused branch: {priorExecution.BranchName}");
         if (!string.IsNullOrWhiteSpace(priorExecution.PullRequestUrl))
             sb.AppendLine($"- Reused PR: {priorExecution.PullRequestUrl}");
+        if (priorExecutions.Count > 1)
+            sb.AppendLine($"- Retry chain: {string.Join(" -> ", priorExecutions.Select(execution => execution.Id))}");
         sb.AppendLine();
 
-        if (priorPhaseResults.Count > 0)
+        sb.AppendLine("### Attempt summaries");
+        foreach (var execution in priorExecutions.Select((value, index) => new { Execution = value, Attempt = index + 1 }))
         {
-            sb.AppendLine("### Prior phase outcomes");
-            foreach (var phase in priorPhaseResults.OrderBy(p => p.PhaseOrder))
+            sb.Append($"- Attempt {execution.Attempt}: execution {execution.Execution.Id}, status={execution.Execution.Status}, completion={FormatProgressPercent(Math.Clamp(execution.Execution.Progress, 0, 1) * 100)}%");
+            if (!string.IsNullOrWhiteSpace(execution.Execution.CurrentPhase))
+                sb.Append($", last phase={execution.Execution.CurrentPhase}");
+            sb.AppendLine();
+
+            if (!phaseResultsByExecutionId.TryGetValue(execution.Execution.Id, out var phases) || phases.Count == 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  - No recorded phase outputs.");
+                continue;
+            }
+
+            foreach (var phase in phases)
             {
                 var status = phase.Success ? "completed" : "failed";
-                sb.Append($"- {phase.Role}: {status}, tool calls={phase.ToolCallCount}");
+                sb.Append($"  - {phase.Role}: {status}, tool calls={phase.ToolCallCount}");
                 if (!phase.Success && !string.IsNullOrWhiteSpace(phase.Error))
                 {
                     sb.Append($", error={NormalizeAgentFailureMessage(phase.Error)}");
                 }
 
                 sb.AppendLine();
-                if (phase.Success && !string.IsNullOrWhiteSpace(phase.Output))
-                {
-                    sb.AppendLine("  Carried output excerpt:");
-                    sb.AppendLine(IndentBlock(PrepareCarryForwardOutput(phase.Output), "  "));
-                }
+            }
+        }
+
+        sb.AppendLine();
+        if (carryForwardOutputs.Count > 0)
+        {
+            sb.AppendLine("### Aggregated carried-forward outputs");
+            foreach (var carryForwardOutput in carryForwardOutputs)
+            {
+                sb.AppendLine($"- {carryForwardOutput.Key}:");
+                sb.AppendLine(IndentBlock(carryForwardOutput.Value, "  "));
             }
         }
         else
         {
-            sb.AppendLine("### Prior phase outcomes");
-            sb.AppendLine("- No prior phase outputs were recorded.");
+            sb.AppendLine("### Aggregated carried-forward outputs");
+            sb.AppendLine("- No successful outputs were available to carry forward.");
         }
 
         sb.AppendLine();
         sb.AppendLine("Continue from the current repository state on the reused branch.");
-        sb.AppendLine("Do not restart completed work; focus on remaining failures and unfinished parts.");
+        sb.AppendLine("Preserve all previously committed or merged work across the entire retry lineage.");
+        sb.AppendLine("Do not restart completed work; focus only on the remaining failures and unfinished parts.");
         return sb.ToString();
     }
 

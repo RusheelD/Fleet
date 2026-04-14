@@ -260,11 +260,79 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
-    public void BuildReusableSubFlowParentExecutionIds_IncludesRetrySourceExecution()
+    public void BuildReusableSubFlowParentExecutionIds_IncludesEntireRetryLineage()
     {
-        var ids = AgentOrchestrationService.BuildReusableSubFlowParentExecutionIds("current-parent", "failed-parent");
+        var ids = AgentOrchestrationService.BuildReusableSubFlowParentExecutionIds(
+            "current-parent",
+            ["failed-parent", "initial-parent", "failed-parent"]);
 
-        CollectionAssert.AreEqual(new[] { "current-parent", "failed-parent" }, ids.ToArray());
+        CollectionAssert.AreEqual(new[] { "current-parent", "failed-parent", "initial-parent" }, ids.ToArray());
+    }
+
+    [TestMethod]
+    public void TryParseRetrySourceExecutionIdFromLog_ReturnsExecutionId()
+    {
+        var executionId = AgentOrchestrationService.TryParseRetrySourceExecutionIdFromLog(
+            "Retry context loaded from execution abc123def456 (status: failed, prior progress: 42%) across 3 chained attempts");
+
+        Assert.AreEqual("abc123def456", executionId);
+    }
+
+    [TestMethod]
+    public void OrderPhaseResultsByRetryLineage_UsesExecutionOrderBeforePhaseOrder()
+    {
+        var oldestExecution = new AgentExecution { Id = "attempt-a" };
+        var latestExecution = new AgentExecution { Id = "attempt-b" };
+        var ordered = AgentOrchestrationService.OrderPhaseResultsByRetryLineage(
+            [
+                new AgentPhaseResult { ExecutionId = "attempt-b", Role = "Planner", Success = true, Output = "latest planner", PhaseOrder = 0 },
+                new AgentPhaseResult { ExecutionId = "attempt-a", Role = "Manager", Success = true, Output = "initial manager", PhaseOrder = 0 },
+                new AgentPhaseResult { ExecutionId = "attempt-a", Role = "Planner", Success = true, Output = "initial planner", PhaseOrder = 1 },
+            ],
+            [oldestExecution, latestExecution]);
+
+        CollectionAssert.AreEqual(
+            new[] { "attempt-a", "attempt-a", "attempt-b" },
+            ordered.Select(phase => phase.ExecutionId).ToArray());
+    }
+
+    [TestMethod]
+    public void BuildRetryCarryForwardOutputs_PreservesEarlierSuccessesAcrossRetryLineage()
+    {
+        var orderedPhaseResults = AgentOrchestrationService.OrderPhaseResultsByRetryLineage(
+            [
+                new AgentPhaseResult { ExecutionId = "attempt-a", Role = "Manager", Success = true, Output = "initial manager", PhaseOrder = 0 },
+                new AgentPhaseResult { ExecutionId = "attempt-a", Role = "Planner", Success = true, Output = "initial planner", PhaseOrder = 1 },
+                new AgentPhaseResult { ExecutionId = "attempt-b", Role = "Planner", Success = false, Error = "planner failed later", PhaseOrder = 0 },
+                new AgentPhaseResult { ExecutionId = "attempt-b", Role = "Backend", Success = true, Output = "latest backend", PhaseOrder = 1 },
+            ],
+            [new AgentExecution { Id = "attempt-a" }, new AgentExecution { Id = "attempt-b" }]);
+
+        var carryForwardOutputs = AgentOrchestrationService.BuildRetryCarryForwardOutputs(orderedPhaseResults);
+
+        Assert.AreEqual("initial manager", carryForwardOutputs[AgentRole.Manager]);
+        Assert.AreEqual("initial planner", carryForwardOutputs[AgentRole.Planner]);
+        Assert.AreEqual("latest backend", carryForwardOutputs[AgentRole.Backend]);
+    }
+
+    [TestMethod]
+    public void BuildExecutionRetryContext_IncludesFullRetryLineageSummary()
+    {
+        var retryContext = AgentOrchestrationService.BuildExecutionRetryContext(
+            [
+                new AgentExecution { Id = "attempt-a", Status = "failed", Progress = 0.35, CurrentPhase = "Planner" },
+                new AgentExecution { Id = "attempt-b", Status = "failed", Progress = 0.65, BranchName = "fleet/42-work", PullRequestUrl = "https://example.test/pr/42" },
+            ],
+            AgentOrchestrationService.OrderPhaseResultsByRetryLineage(
+                [
+                    new AgentPhaseResult { ExecutionId = "attempt-a", Role = "Manager", Success = true, Output = "initial manager", PhaseOrder = 0 },
+                    new AgentPhaseResult { ExecutionId = "attempt-b", Role = "Backend", Success = true, Output = "latest backend", PhaseOrder = 1 },
+                ],
+                [new AgentExecution { Id = "attempt-a" }, new AgentExecution { Id = "attempt-b" }]));
+
+        StringAssert.Contains(retryContext, "Prior attempts in lineage: 2");
+        StringAssert.Contains(retryContext, "Retry chain: attempt-a -> attempt-b");
+        StringAssert.Contains(retryContext, "Preserve all previously committed or merged work across the entire retry lineage.");
     }
 
     [TestMethod]
