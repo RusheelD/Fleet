@@ -77,6 +77,36 @@ public class ChatService(
     private static readonly TimeSpan GenerationHeartbeatInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan GenerationStaleAfter = TimeSpan.FromSeconds(20);
 
+    internal sealed record DeferredGenerateWorkItemsRequest(
+        string ProjectId,
+        string SessionId,
+        int UserId,
+        string RequestKey,
+        bool ChargedWorkItemRun,
+        IReadOnlyList<ChatAttachmentDto> CurrentMessageAttachments);
+
+    internal static Task RunBackgroundMemoryExtractionDetachedAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        int userId,
+        string? projectId,
+        IReadOnlyList<LLMMessage> snapshot)
+        => RunBackgroundMemoryExtractionDetachedCoreAsync(
+            serviceScopeFactory,
+            userId,
+            projectId,
+            snapshot);
+
+    internal static Task RunDeferredGenerateWorkItemsDetachedAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        ILogger<ChatService> logger,
+        DeferredGenerateWorkItemsRequest request,
+        CancellationTokenSource sessionCts)
+        => RunDeferredGenerateWorkItemsDetachedCoreAsync(
+            serviceScopeFactory,
+            logger,
+            request,
+            sessionCts);
+
     public async Task<ChatDataDto> GetChatDataAsync(string projectId)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>
@@ -696,20 +726,13 @@ public class ChatService(
         var snapshot = llmMessages.ToList();
         var factory = _serviceScopeFactory;
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var scope = factory.CreateScope();
-                var extractor = scope.ServiceProvider.GetService<IMemoryExtractor>();
-                if (extractor is not null)
-                    await extractor.ExtractAndSaveAsync(userId, projectId, snapshot, CancellationToken.None);
-            }
-            catch
-            {
-                // Non-critical — swallow all errors
-            }
-        });
+        _ = Task.Run(
+            () => RunBackgroundMemoryExtractionDetachedAsync(
+                factory,
+                userId,
+                projectId,
+                snapshot),
+            CancellationToken.None);
     }
 
     private async Task<SendMessageResponseDto> StartDeferredGenerateWorkItemsAsync(
@@ -751,15 +774,19 @@ public class ChatService(
                 projectId.SanitizeForLogging());
 
             var backgroundSessionCts = sessionCts!;
+            var deferredRequest = new DeferredGenerateWorkItemsRequest(
+                projectId,
+                sessionId,
+                userId,
+                requestKey,
+                chargedWorkItemRun,
+                messageAttachments);
             _ = Task.Run(
-                () => RunGenerateWorkItemsInBackgroundAsync(
-                    projectId,
-                    sessionId,
-                    userId,
-                    requestKey,
-                    backgroundSessionCts,
-                    chargedWorkItemRun,
-                    messageAttachments),
+                () => RunDeferredGenerateWorkItemsDetachedAsync(
+                    _serviceScopeFactory!,
+                    logger,
+                    deferredRequest,
+                    backgroundSessionCts),
                 CancellationToken.None);
 
             return new SendMessageResponseDto(sessionId, null, [], null, true);
@@ -787,60 +814,6 @@ public class ChatService(
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
 
             return new SendMessageResponseDto(sessionId, errorMessage, [], ex.Message);
-        }
-    }
-
-    private async Task RunGenerateWorkItemsInBackgroundAsync(
-        string projectId,
-        string sessionId,
-        int userId,
-        string requestKey,
-        CancellationTokenSource sessionCts,
-        bool chargedWorkItemRun,
-        IReadOnlyList<ChatAttachmentDto> currentMessageAttachments)
-    {
-        if (_serviceScopeFactory is null)
-        {
-            ReleaseInFlightRequest(requestKey, sessionCts);
-            return;
-        }
-
-        try
-        {
-            logger.LogInformation(
-                "Starting deferred work-item generation background execution for session {SessionId} in project {ProjectId}",
-                sessionId.SanitizeForLogging(),
-                projectId.SanitizeForLogging());
-            await using var scope = _serviceScopeFactory.CreateAsyncScope();
-            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
-            await scopedChatService.ExecutePersistedGenerateWorkItemsAsync(
-                projectId,
-                sessionId,
-                userId,
-                requestKey,
-                sessionCts,
-                chargedWorkItemRun,
-                currentMessageAttachments);
-        }
-        catch (OperationCanceledException)
-        {
-            // Cancellation was already handled by the scoped execution path.
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(
-                ex,
-                "Deferred work-item generation failed for session {SessionId}",
-                sessionId.SanitizeForLogging());
-
-            await TryHandleDeferredGenerationFailureAsync(
-                projectId,
-                sessionId,
-                userId,
-                requestKey,
-                sessionCts,
-                chargedWorkItemRun,
-                ex);
         }
     }
 
@@ -1148,43 +1121,6 @@ public class ChatService(
         }
     }
 
-    private async Task TryHandleDeferredGenerationFailureAsync(
-        string projectId,
-        string sessionId,
-        int userId,
-        string requestKey,
-        CancellationTokenSource sessionCts,
-        bool chargedWorkItemRun,
-        Exception exception)
-    {
-        try
-        {
-            if (_serviceScopeFactory is null)
-                return;
-
-            await using var scope = _serviceScopeFactory.CreateAsyncScope();
-            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
-            await scopedChatService.HandleDeferredGenerationFailureAsync(
-                projectId,
-                sessionId,
-                userId,
-                userId.ToString(),
-                chargedWorkItemRun,
-                exception);
-        }
-        catch (Exception cleanupEx)
-        {
-            logger.LogWarning(
-                cleanupEx,
-                "Failed to clean up deferred work-item generation failure for session {SessionId}",
-                sessionId.SanitizeForLogging());
-        }
-        finally
-        {
-            ReleaseInFlightRequest(requestKey, sessionCts);
-        }
-    }
-
     private async Task<IReadOnlyList<ChatAttachmentDto>> PersistUserMessageAsync(string projectId, string sessionId, string content)
     {
         var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
@@ -1363,6 +1299,100 @@ public class ChatService(
             return true;
 
         return !DateTimeOffset.TryParse(session.GenerationUpdatedAtUtc, out var updatedAtUtc) || updatedAtUtc.UtcDateTime < cutoffUtc;
+    }
+
+    private static async Task RunBackgroundMemoryExtractionDetachedCoreAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        int userId,
+        string? projectId,
+        IReadOnlyList<LLMMessage> snapshot)
+    {
+        try
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var extractor = scope.ServiceProvider.GetService<IMemoryExtractor>();
+            if (extractor is not null)
+                await extractor.ExtractAndSaveAsync(userId, projectId, snapshot, CancellationToken.None);
+        }
+        catch
+        {
+            // Non-critical — swallow all errors.
+        }
+    }
+
+    private static async Task RunDeferredGenerateWorkItemsDetachedCoreAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        ILogger<ChatService> logger,
+        DeferredGenerateWorkItemsRequest request,
+        CancellationTokenSource sessionCts)
+    {
+        try
+        {
+            logger.LogInformation(
+                "Starting deferred work-item generation background execution for session {SessionId} in project {ProjectId}",
+                request.SessionId.SanitizeForLogging(),
+                request.ProjectId.SanitizeForLogging());
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
+            await scopedChatService.ExecutePersistedGenerateWorkItemsAsync(
+                request.ProjectId,
+                request.SessionId,
+                request.UserId,
+                request.RequestKey,
+                sessionCts,
+                request.ChargedWorkItemRun,
+                request.CurrentMessageAttachments);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation was already handled by the scoped execution path.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Deferred work-item generation failed for session {SessionId}",
+                request.SessionId.SanitizeForLogging());
+
+            await TryHandleDeferredGenerationFailureDetachedCoreAsync(
+                serviceScopeFactory,
+                logger,
+                request,
+                sessionCts,
+                ex);
+        }
+    }
+
+    private static async Task TryHandleDeferredGenerationFailureDetachedCoreAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        ILogger<ChatService> logger,
+        DeferredGenerateWorkItemsRequest request,
+        CancellationTokenSource sessionCts,
+        Exception exception)
+    {
+        try
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var scopedChatService = scope.ServiceProvider.GetRequiredService<ChatService>();
+            await scopedChatService.HandleDeferredGenerationFailureAsync(
+                request.ProjectId,
+                request.SessionId,
+                request.UserId,
+                request.UserId.ToString(),
+                request.ChargedWorkItemRun,
+                exception);
+        }
+        catch (Exception cleanupEx)
+        {
+            logger.LogWarning(
+                cleanupEx,
+                "Failed to clean up deferred work-item generation failure for session {SessionId}",
+                request.SessionId.SanitizeForLogging());
+        }
+        finally
+        {
+            ReleaseInFlightRequest(request.RequestKey, sessionCts);
+        }
     }
 
     private async Task UpdateGenerationProgressAsync(
