@@ -171,6 +171,73 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void BuildFetchRemoteBranchArgumentList_UsesRequestedDepthWhenProvided()
+    {
+        var result = RepoSandbox.BuildFetchRemoteBranchArgumentList("fleet/42-child-flow", depth: 50);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "fetch",
+                "--depth",
+                "50",
+                "origin",
+                "+refs/heads/fleet/42-child-flow:refs/remotes/origin/fleet/42-child-flow",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildFetchRemoteBranchArgumentList_OmitsDepthForFullHistoryFetches()
+    {
+        var result = RepoSandbox.BuildFetchRemoteBranchArgumentList("fleet/42-child-flow");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "fetch",
+                "origin",
+                "+refs/heads/fleet/42-child-flow:refs/remotes/origin/fleet/42-child-flow",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildMergeBaseArgumentList_TargetsRemoteTrackingBranch()
+    {
+        var result = RepoSandbox.BuildMergeBaseArgumentList("fleet/42-child-flow");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "merge-base",
+                "HEAD",
+                "refs/remotes/origin/fleet/42-child-flow",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void LooksLikeUnrelatedHistoriesMergeFailure_DetectsGitError()
+    {
+        Assert.IsTrue(RepoSandbox.LooksLikeUnrelatedHistoriesMergeFailure(
+            "fatal: refusing to merge unrelated histories"));
+        Assert.IsFalse(RepoSandbox.LooksLikeUnrelatedHistoriesMergeFailure(
+            "fatal: merge conflict in src/App.tsx"));
+    }
+
+    [TestMethod]
+    public void IsAlreadyCompleteHistoryFetchMessage_DetectsBenignUnshallowFailures()
+    {
+        Assert.IsTrue(RepoSandbox.IsAlreadyCompleteHistoryFetchMessage(
+            "fatal: --unshallow on a complete repository does not make sense"));
+        Assert.IsTrue(RepoSandbox.IsAlreadyCompleteHistoryFetchMessage(
+            "fatal: repository is not a shallow repository"));
+        Assert.IsFalse(RepoSandbox.IsAlreadyCompleteHistoryFetchMessage(
+            "fatal: could not read Username for 'https://github.com'"));
+    }
+
+    [TestMethod]
     public void DetectGlobalToolchainMutation_BlocksGlobalNpmInstall()
     {
         var result = RepoSandbox.DetectGlobalToolchainMutation("npm", "install -g typescript");

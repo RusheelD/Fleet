@@ -430,6 +430,20 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void DescribeSubFlowTerminalFailure_IncludesExecutionIdAndPhaseWhenPresent()
+    {
+        var message = AgentOrchestrationService.DescribeSubFlowTerminalFailure(
+            workItemNumber: 4,
+            executionId: "4d41af8de63e",
+            status: "failed",
+            currentPhase: "Merging sub-flow #10 from branch 'fleet/10-pass-and-play-2-player'");
+
+        Assert.AreEqual(
+            "Sub-flow #4 (execution 4d41af8de63e) ended in status 'failed' during 'Merging sub-flow #10 from branch 'fleet/10-pass-and-play-2-player''.",
+            message);
+    }
+
+    [TestMethod]
     public void BuildFallbackAdaptiveRetryDirective_UsesObservedFailures()
     {
         var attempts = new List<PhaseResult>

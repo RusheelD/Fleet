@@ -32,6 +32,9 @@ public class RepoSandbox : IRepoSandbox
     /// <summary>Max file size to read (1 MB).</summary>
     private const int MaxFileReadSize = 1_048_576;
 
+    /// <summary>Default shallow history depth for branch setup and lightweight fetches.</summary>
+    private const int DefaultGitHistoryDepth = 50;
+
     /// <summary>Binary file extensions to skip during search.</summary>
     private static readonly HashSet<string> BinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -89,7 +92,7 @@ public class RepoSandbox : IRepoSandbox
         // `x-access-token` username pattern is not appropriate here.
         var cloneUrl = BuildAuthenticatedCloneUrl(repoFullName, accessToken);
         var result = await RunGitAsync(
-            ["clone", "--depth", "50", cloneUrl, _repoRoot],
+            ["clone", "--depth", DefaultGitHistoryDepth.ToString(), cloneUrl, _repoRoot],
             workingDir: _sandboxRoot,
             cancellationToken: cancellationToken);
         if (result.ExitCode != 0)
@@ -108,9 +111,10 @@ public class RepoSandbox : IRepoSandbox
                     "The branch was not found on origin, so retry cannot resume from it.");
             }
 
-            result = await RunGitAsync(
-                ["fetch", "--depth", "1", "origin", $"+refs/heads/{branchName}:refs/remotes/origin/{branchName}"],
-                cancellationToken: cancellationToken);
+            result = await FetchRemoteBranchAsync(
+                branchName,
+                cancellationToken,
+                depth: DefaultGitHistoryDepth);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git fetch of existing branch '{branchName}' failed: {result.Stderr}");
@@ -132,9 +136,10 @@ public class RepoSandbox : IRepoSandbox
                 throw new InvalidOperationException(
                     $"Target/base branch '{baseBranch}' was not found on origin.");
 
-            result = await RunGitAsync(
-                ["fetch", "--depth", "1", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}"],
-                cancellationToken: cancellationToken);
+            result = await FetchRemoteBranchAsync(
+                baseBranch,
+                cancellationToken,
+                depth: DefaultGitHistoryDepth);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git fetch of base branch '{baseBranch}' failed: {result.Stderr}");
@@ -473,19 +478,29 @@ public class RepoSandbox : IRepoSandbox
         if (string.IsNullOrWhiteSpace(sourceBranchName))
             throw new ArgumentException("Source branch name is required.", nameof(sourceBranchName));
 
-        await _writeLock.WaitAsync(cancellationToken);
+            await _writeLock.WaitAsync(cancellationToken);
         try
         {
             await UpdateOriginRemoteAsync(accessToken, cancellationToken);
 
-            var normalizedSourceBranch = sourceBranchName.Trim();
-            var result = await RunGitAsync(
-                ["fetch", "--depth", "50", "origin", $"+refs/heads/{normalizedSourceBranch}:refs/remotes/origin/{normalizedSourceBranch}"],
-                cancellationToken: cancellationToken);
+            var normalizedSourceBranch = NormalizeBranchName(sourceBranchName, nameof(sourceBranchName));
+            var result = await FetchRemoteBranchAsync(
+                normalizedSourceBranch,
+                cancellationToken,
+                depth: DefaultGitHistoryDepth);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException(
                     $"Git fetch of merge source branch '{normalizedSourceBranch}' failed: {result.Stderr}");
+            }
+
+            var hasCommonMergeBase = await EnsureCommonMergeBaseAsync(normalizedSourceBranch, cancellationToken);
+            if (!hasCommonMergeBase)
+            {
+                throw new InvalidOperationException(
+                    $"Git merge of branch '{normalizedSourceBranch}' into '{_branchName}' failed: " +
+                    "Fleet could not determine a common merge base even after fetching full history. " +
+                    "This sub-flow branch no longer matches the current parent-flow lineage and should be rerun from the active parent context.");
             }
 
             result = await RunGitAsync(
@@ -495,6 +510,35 @@ public class RepoSandbox : IRepoSandbox
             if (result.ExitCode != 0)
             {
                 await AbortMergeIfNeededAsync(cancellationToken);
+
+                if (LooksLikeUnrelatedHistoriesMergeFailure(result.Stderr))
+                {
+                    await EnsureFullMergeHistoryAsync(normalizedSourceBranch, cancellationToken);
+                    hasCommonMergeBase = await HasCommonMergeBaseAsync(normalizedSourceBranch, cancellationToken);
+                    if (!hasCommonMergeBase)
+                    {
+                        throw new InvalidOperationException(
+                            $"Git merge of branch '{normalizedSourceBranch}' into '{_branchName}' failed: " +
+                            "Fleet still could not determine a common merge base after fetching full history. " +
+                            "This sub-flow branch no longer matches the current parent-flow lineage and should be rerun from the active parent context.");
+                    }
+
+                    result = await RunGitAsync(
+                        BuildMergeBranchArgumentList(normalizedSourceBranch),
+                        BuildCommitEnvironment(authorName, authorEmail),
+                        cancellationToken: cancellationToken);
+                    if (result.ExitCode == 0)
+                    {
+                        _logger.LogInformation(
+                            "Merged branch {SourceBranch} into {TargetBranch} after deepening git history",
+                            normalizedSourceBranch,
+                            _branchName);
+                        return;
+                    }
+
+                    await AbortMergeIfNeededAsync(cancellationToken);
+                }
+
                 throw new InvalidOperationException(
                     $"Git merge of branch '{normalizedSourceBranch}' into '{_branchName}' failed: {result.Stderr}");
             }
@@ -933,10 +977,7 @@ public class RepoSandbox : IRepoSandbox
 
     internal static IReadOnlyList<string> BuildMergeBranchArgumentList(string sourceBranchName)
     {
-        if (string.IsNullOrWhiteSpace(sourceBranchName))
-            throw new ArgumentException("Source branch name is required.", nameof(sourceBranchName));
-
-        var normalizedSourceBranch = sourceBranchName.Trim();
+        var normalizedSourceBranch = NormalizeBranchName(sourceBranchName, nameof(sourceBranchName));
         return
         [
             "merge",
@@ -944,8 +985,56 @@ public class RepoSandbox : IRepoSandbox
             "--no-edit",
             "-X",
             "theirs",
-            $"refs/remotes/origin/{normalizedSourceBranch}",
+            BuildRemoteTrackingBranchRef(normalizedSourceBranch),
         ];
+    }
+
+    internal static IReadOnlyList<string> BuildFetchRemoteBranchArgumentList(string branchName, int? depth = null)
+    {
+        var normalizedBranch = NormalizeBranchName(branchName, nameof(branchName));
+        var remoteRef = BuildRemoteTrackingBranchRef(normalizedBranch);
+
+        var arguments = new List<string> { "fetch" };
+        if (depth is > 0)
+        {
+            arguments.Add("--depth");
+            arguments.Add(depth.Value.ToString());
+        }
+
+        arguments.Add("origin");
+        arguments.Add($"+refs/heads/{normalizedBranch}:{remoteRef}");
+        return arguments;
+    }
+
+    internal static IReadOnlyList<string> BuildMergeBaseArgumentList(string sourceBranchName)
+    {
+        var normalizedSourceBranch = NormalizeBranchName(sourceBranchName, nameof(sourceBranchName));
+        return
+        [
+            "merge-base",
+            "HEAD",
+            BuildRemoteTrackingBranchRef(normalizedSourceBranch),
+        ];
+    }
+
+    internal static bool LooksLikeUnrelatedHistoriesMergeFailure(string? stderr)
+        => !string.IsNullOrWhiteSpace(stderr) &&
+           stderr.Contains("refusing to merge unrelated histories", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsAlreadyCompleteHistoryFetchMessage(string? stderr)
+        => !string.IsNullOrWhiteSpace(stderr) &&
+           (stderr.Contains("does not make sense", StringComparison.OrdinalIgnoreCase) ||
+            stderr.Contains("not a shallow repository", StringComparison.OrdinalIgnoreCase));
+
+    internal static string BuildRemoteTrackingBranchRef(string branchName)
+        => $"refs/remotes/origin/{NormalizeBranchName(branchName, nameof(branchName))}";
+
+    internal static string NormalizeBranchName(string branchName, string argumentName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            throw new ArgumentException("Branch name is required.", argumentName);
+
+        return branchName.Trim();
     }
 
     internal static string BuildAuthenticatedCloneUrl(
@@ -1264,5 +1353,95 @@ public class RepoSandbox : IRepoSandbox
         {
             _logger.LogDebug(ex, "Failed to abort an in-progress merge cleanly");
         }
+    }
+
+    private async Task<CommandResult> FetchRemoteBranchAsync(
+        string branchName,
+        CancellationToken cancellationToken,
+        int? depth = null)
+        => await RunGitAsync(
+            BuildFetchRemoteBranchArgumentList(branchName, depth),
+            cancellationToken: cancellationToken);
+
+    private async Task<bool> EnsureCommonMergeBaseAsync(string sourceBranchName, CancellationToken cancellationToken)
+    {
+        if (await HasCommonMergeBaseAsync(sourceBranchName, cancellationToken))
+            return true;
+
+        _logger.LogWarning(
+            "Git merge between {TargetBranch} and {SourceBranch} has no merge base in the current sandbox history; fetching deeper history before retrying",
+            _branchName,
+            sourceBranchName);
+
+        await EnsureFullMergeHistoryAsync(sourceBranchName, cancellationToken);
+        return await HasCommonMergeBaseAsync(sourceBranchName, cancellationToken);
+    }
+
+    private async Task EnsureFullMergeHistoryAsync(string sourceBranchName, CancellationToken cancellationToken)
+    {
+        if (await IsShallowRepositoryAsync(cancellationToken))
+        {
+            var unshallowResult = await RunGitAsync(
+                ["fetch", "--unshallow", "origin"],
+                cancellationToken: cancellationToken);
+
+            if (unshallowResult.ExitCode != 0 && !IsAlreadyCompleteHistoryFetchMessage(unshallowResult.Stderr))
+            {
+                _logger.LogWarning(
+                    "Git unshallow fetch failed while preparing to merge {SourceBranch} into {TargetBranch}: {Error}",
+                    sourceBranchName,
+                    _branchName,
+                    unshallowResult.Stderr);
+            }
+        }
+
+        var sourceFetchResult = await FetchRemoteBranchAsync(sourceBranchName, cancellationToken, depth: null);
+        if (sourceFetchResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Git fetch of merge source branch '{sourceBranchName}' failed while deepening history: {sourceFetchResult.Stderr}");
+        }
+
+        if (!string.Equals(sourceBranchName, _branchName, StringComparison.OrdinalIgnoreCase) &&
+            await RemoteTrackingBranchExistsAsync(_branchName, cancellationToken))
+        {
+            var targetFetchResult = await FetchRemoteBranchAsync(_branchName, cancellationToken, depth: null);
+            if (targetFetchResult.ExitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Git fetch of target branch history '{TargetBranch}' failed while preparing merge from {SourceBranch}: {Error}",
+                    _branchName,
+                    sourceBranchName,
+                    targetFetchResult.Stderr);
+            }
+        }
+    }
+
+    private async Task<bool> HasCommonMergeBaseAsync(string sourceBranchName, CancellationToken cancellationToken)
+    {
+        var mergeBaseResult = await RunGitAsync(
+            BuildMergeBaseArgumentList(sourceBranchName),
+            cancellationToken: cancellationToken);
+
+        return mergeBaseResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(mergeBaseResult.Stdout);
+    }
+
+    private async Task<bool> IsShallowRepositoryAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(
+            ["rev-parse", "--is-shallow-repository"],
+            cancellationToken: cancellationToken);
+
+        return result.ExitCode == 0 &&
+               string.Equals(result.Stdout.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> RemoteTrackingBranchExistsAsync(string branchName, CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(
+            ["show-ref", "--verify", "--quiet", BuildRemoteTrackingBranchRef(branchName)],
+            cancellationToken: cancellationToken);
+
+        return result.ExitCode == 0;
     }
 }

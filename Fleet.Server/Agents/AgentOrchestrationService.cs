@@ -2190,7 +2190,11 @@ public class AgentOrchestrationService(
                 if (blockingExecution.Execution is not null)
                 {
                     throw new InvalidOperationException(
-                        $"Sub-flow #{blockingExecution.WorkItem.WorkItemNumber} ended in status '{blockingExecution.Execution.Status}'.");
+                        DescribeSubFlowTerminalFailure(
+                            blockingExecution.WorkItem.WorkItemNumber,
+                            blockingExecution.Execution.Id,
+                            blockingExecution.Execution.Status,
+                            blockingExecution.Execution.CurrentPhase));
                 }
 
                 accessToken = await ResolveRequiredRepoAccessTokenAsync(
@@ -3576,6 +3580,21 @@ public class AgentOrchestrationService(
         }
 
         return latestCandidate;
+    }
+
+    internal static string DescribeSubFlowTerminalFailure(
+        int workItemNumber,
+        string executionId,
+        string? status,
+        string? currentPhase)
+    {
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "unknown" : status.Trim();
+        var normalizedExecutionId = string.IsNullOrWhiteSpace(executionId) ? "unknown" : executionId.Trim();
+        var normalizedPhase = string.IsNullOrWhiteSpace(currentPhase) ? null : currentPhase.Trim();
+
+        return normalizedPhase is null
+            ? $"Sub-flow #{workItemNumber} (execution {normalizedExecutionId}) ended in status '{normalizedStatus}'."
+            : $"Sub-flow #{workItemNumber} (execution {normalizedExecutionId}) ended in status '{normalizedStatus}' during '{normalizedPhase}'.";
     }
 
     private static SubFlowStrictnessProfile ResolveSubFlowStrictnessProfile(int executionDepth)
