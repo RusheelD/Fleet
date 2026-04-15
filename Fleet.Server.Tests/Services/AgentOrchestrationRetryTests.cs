@@ -356,6 +356,61 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void SelectSuccessfulRetryPropagationTargetParentExecution_UsesLatestFailedEquivalentParent()
+    {
+        var originalParent = new AgentExecution
+        {
+            Id = "parent-a",
+            WorkItemId = 42,
+            ParentExecutionId = null,
+            Status = "failed",
+            StartedAtUtc = new DateTime(2026, 4, 15, 8, 0, 0, DateTimeKind.Utc),
+        };
+        var latestFailedParent = new AgentExecution
+        {
+            Id = "parent-b",
+            WorkItemId = 42,
+            ParentExecutionId = null,
+            Status = "failed",
+            StartedAtUtc = new DateTime(2026, 4, 15, 9, 0, 0, DateTimeKind.Utc),
+        };
+
+        var selected = AgentOrchestrationService.SelectSuccessfulRetryPropagationTargetParentExecution(
+            originalParent,
+            [latestFailedParent]);
+
+        Assert.IsNotNull(selected);
+        Assert.AreEqual("parent-b", selected.Id);
+    }
+
+    [TestMethod]
+    public void SelectSuccessfulRetryPropagationTargetParentExecution_ReturnsNull_WhenLatestEquivalentParentAlreadyCompleted()
+    {
+        var originalParent = new AgentExecution
+        {
+            Id = "parent-a",
+            WorkItemId = 42,
+            ParentExecutionId = null,
+            Status = "failed",
+            StartedAtUtc = new DateTime(2026, 4, 15, 8, 0, 0, DateTimeKind.Utc),
+        };
+        var latestCompletedParent = new AgentExecution
+        {
+            Id = "parent-b",
+            WorkItemId = 42,
+            ParentExecutionId = null,
+            Status = "completed",
+            StartedAtUtc = new DateTime(2026, 4, 15, 9, 0, 0, DateTimeKind.Utc),
+        };
+
+        var selected = AgentOrchestrationService.SelectSuccessfulRetryPropagationTargetParentExecution(
+            originalParent,
+            [latestCompletedParent]);
+
+        Assert.IsNull(selected);
+    }
+
+    [TestMethod]
     public void BuildFallbackAdaptiveRetryDirective_UsesObservedFailures()
     {
         var attempts = new List<PhaseResult>

@@ -1866,43 +1866,29 @@ public class AgentOrchestrationService(
 
             try
             {
-                var parentCandidate = await WithDbResultAsync(async queuedDb =>
+                var directParentCandidate = await WithDbResultAsync(async queuedDb =>
                     await queuedDb.AgentExecutions
                         .AsNoTracking()
                         .Where(execution => execution.ProjectId == projectId && execution.Id == parentExecutionId)
-                        .Select(execution => new
-                        {
-                            execution.Id,
-                            execution.Status,
-                            execution.WorkItemId,
-                            execution.ParentExecutionId,
-                            execution.StartedAtUtc,
-                        })
                         .FirstOrDefaultAsync(CancellationToken.None));
-                if (parentCandidate is null)
+                if (directParentCandidate is null)
                     return;
 
-                if (string.Equals(parentCandidate.Status, "completed", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(parentCandidate.Status, "running", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(parentCandidate.Status, "queued", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-
-                var parentStartedAtUtc = parentCandidate.StartedAtUtc;
-                var newerEquivalentExecutionExists = await WithDbResultAsync(async queuedDb =>
+                var equivalentParentExecutions = await WithDbResultAsync(async queuedDb =>
                     await queuedDb.AgentExecutions
                         .AsNoTracking()
-                        .AnyAsync(execution =>
+                        .Where(execution =>
                             execution.ProjectId == projectId &&
-                            execution.Id != parentCandidate.Id &&
-                            execution.WorkItemId == parentCandidate.WorkItemId &&
-                            execution.ParentExecutionId == parentCandidate.ParentExecutionId &&
-                            execution.StartedAtUtc.HasValue &&
-                            parentStartedAtUtc.HasValue &&
-                            execution.StartedAtUtc > parentStartedAtUtc.Value,
-                            CancellationToken.None));
-                if (newerEquivalentExecutionExists)
+                            execution.WorkItemId == directParentCandidate.WorkItemId &&
+                            (string.IsNullOrWhiteSpace(directParentCandidate.ParentExecutionId)
+                                ? execution.ParentExecutionId == null || execution.ParentExecutionId == string.Empty
+                                : execution.ParentExecutionId == directParentCandidate.ParentExecutionId))
+                        .ToListAsync(CancellationToken.None));
+
+                var parentCandidate = SelectSuccessfulRetryPropagationTargetParentExecution(
+                    directParentCandidate,
+                    equivalentParentExecutions);
+                if (parentCandidate is null)
                 {
                     await WithDbLockAsync(async queuedDb =>
                         await WriteLogEntryAsync(
@@ -1910,7 +1896,7 @@ public class AgentOrchestrationService(
                             projectId,
                             "System",
                             "info",
-                            $"Sub-flow retry completed, but parent execution {parentCandidate.Id} already has a newer retry/recovery run. Skipping duplicate upward propagation.",
+                            $"Sub-flow retry completed, but parent execution {directParentCandidate.Id} already has a newer active or completed retry/recovery run. Skipping duplicate upward propagation.",
                             executionId: executionId));
                     await PublishLogsUpdatedAsync();
                     return;
@@ -1943,7 +1929,9 @@ public class AgentOrchestrationService(
                         projectId,
                         "System",
                         "success",
-                        $"Sub-flow retry completed; restarted parent execution {parentCandidate.Id} as {propagatedParentExecutionId}.",
+                        parentCandidate.Id.Equals(directParentCandidate.Id, StringComparison.OrdinalIgnoreCase)
+                            ? $"Sub-flow retry completed; restarted parent execution {parentCandidate.Id} as {propagatedParentExecutionId}."
+                            : $"Sub-flow retry completed; restarted latest parent retry lineage execution {parentCandidate.Id} (original parent {directParentCandidate.Id}) as {propagatedParentExecutionId}.",
                         executionId: executionId));
                 await PublishLogsUpdatedAsync();
             }
@@ -3433,6 +3421,36 @@ public class AgentOrchestrationService(
            hasRetryPlan &&
            !resumeInPlace &&
            !string.Equals(retrySourceStatus, "completed", StringComparison.OrdinalIgnoreCase);
+
+    internal static AgentExecution? SelectSuccessfulRetryPropagationTargetParentExecution(
+        AgentExecution directParentExecution,
+        IReadOnlyCollection<AgentExecution> equivalentExecutions)
+    {
+        var candidates = equivalentExecutions
+            .Append(directParentExecution)
+            .Where(execution => execution.WorkItemId == directParentExecution.WorkItemId)
+            .GroupBy(execution => execution.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(execution => execution.StartedAtUtc ?? DateTime.MinValue)
+                .ThenByDescending(execution => execution.CompletedAtUtc ?? DateTime.MinValue)
+                .First())
+            .OrderByDescending(execution => execution.StartedAtUtc ?? DateTime.MinValue)
+            .ThenByDescending(execution => execution.CompletedAtUtc ?? DateTime.MinValue)
+            .ThenByDescending(execution => execution.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var latestCandidate = candidates.FirstOrDefault();
+        if (latestCandidate is null)
+            return directParentExecution;
+
+        if (string.Equals(latestCandidate.Status, "completed", StringComparison.OrdinalIgnoreCase) ||
+            IsRecoverableInterruptedExecutionStatus(latestCandidate.Status))
+        {
+            return null;
+        }
+
+        return latestCandidate;
+    }
 
     private static SubFlowStrictnessProfile ResolveSubFlowStrictnessProfile(int executionDepth)
     {
