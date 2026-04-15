@@ -393,6 +393,8 @@ builder.Services.AddSingleton<IAgentPromptLoader, AgentPromptLoader>();
 builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();
 builder.Services.AddScoped<IRepoSandbox, RepoSandbox>();
 builder.Services.AddScoped<IAgentOrchestrationService, AgentOrchestrationService>();
+builder.Services.AddScoped<IAgentExecutionPipelineRunner>(sp =>
+    (IAgentExecutionPipelineRunner)sp.GetRequiredService<IAgentOrchestrationService>());
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();

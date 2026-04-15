@@ -37,7 +37,7 @@ public class AgentOrchestrationService(
     IModelCatalog modelCatalog,
     INotificationService notificationService,
     IServerEventPublisher eventPublisher,
-    IUsageLedgerService? usageLedgerService = null) : IAgentOrchestrationService
+    IUsageLedgerService? usageLedgerService = null) : IAgentOrchestrationService, IAgentExecutionPipelineRunner
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private const int MaxStandardPhaseAttempts = 3;
@@ -101,6 +101,104 @@ public class AgentOrchestrationService(
             !string.IsNullOrWhiteSpace(ReusePullRequestUrl) &&
             ReusePullRequestNumber is > 0;
     }
+
+    internal static async Task RunPipelineDetachedAsync(
+        IServiceScopeFactory serviceScopeFactory,
+        ExecutionPipelineLaunchRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using var backgroundScope = serviceScopeFactory.CreateAsyncScope();
+        var runner = backgroundScope.ServiceProvider.GetRequiredService<IAgentExecutionPipelineRunner>();
+        await runner.RunExecutionPipelineAsync(request, cancellationToken);
+    }
+
+    async Task IAgentExecutionPipelineRunner.RunExecutionPipelineAsync(
+        ExecutionPipelineLaunchRequest request,
+        CancellationToken cancellationToken)
+        => await RunPipelineAsync(
+            request.ExecutionId,
+            request.ProjectId,
+            request.WorkItem,
+            request.ChildWorkItems,
+            request.RepoFullName,
+            request.BranchName,
+            request.CommitAuthorName,
+            request.CommitAuthorEmail,
+            request.UserId,
+            request.SelectedModelKey,
+            request.Pipeline,
+            request.MaxConcurrentAgentsPerTask,
+            request.PullRequestTargetBranch,
+            BuildRetryExecutionPlan(request),
+            request.ExistingPullRequestNumber,
+            request.BillableExecution,
+            request.ParentExecutionId,
+            cancellationToken);
+
+    private static RetryExecutionPlan? BuildRetryExecutionPlan(ExecutionPipelineLaunchRequest request)
+        => string.IsNullOrWhiteSpace(request.RetrySourceExecutionId)
+            ? null
+            : new RetryExecutionPlan(
+                request.RetrySourceExecutionId!,
+                request.RetrySourceStatus,
+                request.RetryReuseBranchName,
+                request.RetryReusePullRequestUrl,
+                request.RetryReusePullRequestNumber,
+                request.RetryReusePullRequestTitle,
+                request.RetryPriorProgressEstimate,
+                request.RetryCarryForwardOutputs ?? new Dictionary<AgentRole, string>(),
+                request.RetryLineageExecutionIds ?? [],
+                request.RetryContextMarkdown ?? string.Empty,
+                request.RetryResumeInPlace,
+                request.RetryResumeFromRemoteBranch);
+
+    private static ExecutionPipelineLaunchRequest BuildExecutionPipelineLaunchRequest(
+        string executionId,
+        string projectId,
+        Models.WorkItemDto workItem,
+        List<Models.WorkItemDto> childWorkItems,
+        string repoFullName,
+        string branchName,
+        string commitAuthorName,
+        string commitAuthorEmail,
+        int userId,
+        string selectedModelKey,
+        AgentRole[][] pipeline,
+        int maxConcurrentAgentsPerTask,
+        string pullRequestTargetBranch,
+        RetryExecutionPlan? retryPlan,
+        int existingPullRequestNumber,
+        bool billableExecution,
+        string? parentExecutionId)
+        => new(
+            executionId,
+            projectId,
+            workItem,
+            childWorkItems,
+            repoFullName,
+            branchName,
+            commitAuthorName,
+            commitAuthorEmail,
+            userId,
+            selectedModelKey,
+            pipeline,
+            maxConcurrentAgentsPerTask,
+            pullRequestTargetBranch,
+            existingPullRequestNumber,
+            billableExecution,
+            parentExecutionId,
+            retryPlan?.SourceExecutionId,
+            retryPlan?.SourceStatus,
+            retryPlan?.ReuseBranchName,
+            retryPlan?.ReusePullRequestUrl,
+            retryPlan?.ReusePullRequestNumber,
+            retryPlan?.ReusePullRequestTitle,
+            retryPlan?.PriorProgressEstimate ?? 0,
+            retryPlan?.CarryForwardOutputs,
+            retryPlan?.LineageExecutionIds,
+            retryPlan?.RetryContextMarkdown,
+            retryPlan?.ResumeInPlace ?? false,
+            retryPlan?.ResumeFromRemoteBranch ?? true);
 
     /// <summary>
     /// The ordered pipeline phases. Implementation phases run sequentially within their group.
@@ -728,11 +826,27 @@ public class AgentOrchestrationService(
             var cts = new CancellationTokenSource();
             ActiveExecutions[executionId] = (cts, "cancelled");
             SteeringNotes.TryAdd(executionId, new ConcurrentQueue<string>());
-            _ = Task.Run(() => RunPipelineAsync(
-                executionId, projectId, workItem, childWorkItems, repoFullName,
-                branchName, commitAuthorName, commitAuthorEmail,
-                userId, selectedModelKey, pipeline, ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
-                pullRequestTargetBranch, retryPlan, reusePullRequestNumber, !skipQuotaCharge, parentExecutionId, cts.Token), CancellationToken.None);
+            var launchRequest = BuildExecutionPipelineLaunchRequest(
+                executionId,
+                projectId,
+                workItem,
+                childWorkItems,
+                repoFullName,
+                branchName,
+                commitAuthorName,
+                commitAuthorEmail,
+                userId,
+                selectedModelKey,
+                pipeline,
+                ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
+                pullRequestTargetBranch,
+                retryPlan,
+                reusePullRequestNumber,
+                !skipQuotaCharge,
+                parentExecutionId);
+            _ = Task.Run(
+                () => RunPipelineDetachedAsync(serviceScopeFactory, launchRequest, cts.Token),
+                CancellationToken.None);
 
             return executionId;
         }
@@ -1163,7 +1277,7 @@ public class AgentOrchestrationService(
                 project.CommitAuthorEmail);
 
             SteeringNotes.TryAdd(executionId, new ConcurrentQueue<string>());
-            _ = Task.Run(() => RunPipelineAsync(
+            var launchRequest = BuildExecutionPipelineLaunchRequest(
                 executionId,
                 projectId,
                 workItem,
@@ -1183,8 +1297,10 @@ public class AgentOrchestrationService(
                 retryPlan,
                 retryPlan.ReusePullRequestNumber ?? 0,
                 string.IsNullOrWhiteSpace(persistedExecution.ParentExecutionId),
-                persistedExecution.ParentExecutionId,
-                cts.Token), CancellationToken.None);
+                persistedExecution.ParentExecutionId);
+            _ = Task.Run(
+                () => RunPipelineDetachedAsync(serviceScopeFactory, launchRequest, cts.Token),
+                CancellationToken.None);
 
             return true;
         }
