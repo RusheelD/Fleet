@@ -28,6 +28,12 @@ import {
 } from './userProxy'
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
 import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
+import {
+  findExecutionInCollection,
+  patchExecutionCollection,
+  removeExecutionCollection,
+  upsertExecutionCollectionWithFallback,
+} from '../models/executionTree'
 
 const FIVE_MINUTES_IN_MILLISECONDS = 1000 * 60 * 5
 const WORK_ITEMS_POLL_MS = 15000
@@ -329,15 +335,12 @@ export function useResumeExecution(projectId: string | undefined) {
         { queryKey: ['executions'] },
         (current) => {
           if (!Array.isArray(current)) return current
-          return current.map((execution) =>
-            execution.id === executionId
-              ? {
-                ...execution,
-                status: 'running',
-                currentPhase: 'Resuming paused execution',
-              }
-              : execution,
-          )
+          const updated = patchExecutionCollection(current, executionId, {
+            status: 'running',
+            currentPhase: 'Resuming paused execution',
+          })
+
+          return updated.found ? updated.executions : current
         },
       )
 
@@ -602,8 +605,8 @@ export function useRetryExecution(projectId: string | undefined) {
       const nowIso = new Date().toISOString()
       const optimisticId = `retry-pending-${executionId}-${Date.now()}`
       const sourceExecution = previousExecutions
-        .flatMap(([, executions]) => executions ?? [])
-        .find((execution) => execution.id === executionId)
+        .map(([, executions]) => Array.isArray(executions) ? findExecutionInCollection(executions, executionId) : undefined)
+        .find((execution): execution is AgentExecution => Boolean(execution))
 
       const optimisticAgents: AgentInfo[] = sourceExecution
         ? sourceExecution.agents.map((agent, index) => ({
@@ -629,7 +632,7 @@ export function useRetryExecution(projectId: string | undefined) {
         currentPhase: 'Retry queued',
         reviewLoopCount: 0,
         lastReviewRecommendation: null,
-        parentExecutionId: null,
+        parentExecutionId: sourceExecution?.parentExecutionId ?? null,
         subFlows: [],
       }
 
@@ -637,8 +640,8 @@ export function useRetryExecution(projectId: string | undefined) {
         { queryKey: ['executions'] },
         (current) => {
           if (!Array.isArray(current)) return current
-          if (current.some((execution) => execution.id === optimisticId)) return current
-          return [optimisticExecution, ...current]
+          if (findExecutionInCollection(current, optimisticId)) return current
+          return upsertExecutionCollectionWithFallback(current, optimisticExecution).executions
         },
       )
 
@@ -672,16 +675,13 @@ export function useRetryExecution(projectId: string | undefined) {
           { queryKey: ['executions'] },
           (current) => {
             if (!Array.isArray(current)) return current
-            return current.map((execution) =>
-              execution.id === context.optimisticId
-                ? {
-                  ...execution,
-                  id: result.executionId,
-                  status: 'running',
-                  currentPhase: 'Initializing retry',
-                }
-                : execution,
-            )
+            const updated = patchExecutionCollection(current, context.optimisticId, {
+              id: result.executionId,
+              status: 'running',
+              currentPhase: 'Initializing retry',
+            })
+
+            return updated.found ? updated.executions : current
           },
         )
 
@@ -739,7 +739,7 @@ export function useDeleteExecution(projectId: string | undefined) {
         { queryKey: ['executions'] },
         (current) => {
           if (!Array.isArray(current)) return current
-          return current.filter((execution) => execution.id !== executionId)
+          return removeExecutionCollection(current, executionId).executions
         },
       )
 

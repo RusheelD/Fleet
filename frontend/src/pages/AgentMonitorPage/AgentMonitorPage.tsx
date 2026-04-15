@@ -35,9 +35,12 @@ import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnectio
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
+import { executionTreeHasAnyStatus, findExecutionInCollection, flattenExecutionCollection } from '../../models/executionTree'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
+const ACTIVE_EXECUTION_STATUSES = new Set(['running', 'queued'] as const)
+const PAUSED_EXECUTION_STATUSES = new Set(['paused'] as const)
 
 const useStyles = makeStyles({
     page: {
@@ -337,21 +340,36 @@ export function AgentMonitorPage() {
     const toasterId = useId('agent-monitor-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
-    const allExecutions = executions ?? []
-    const allLogs = logs ?? []
-
-    const running = allExecutions.filter((e) => e.status === 'running')
-    const paused = allExecutions.filter((e) => e.status === 'paused')
-    const completed = allExecutions.filter((e) => e.status === 'completed')
-    const failed = allExecutions.filter((e) => e.status === 'failed')
-    const cancelled = allExecutions.filter((e) => e.status === 'cancelled')
-    const activeAgentCount = running.reduce(
-        (acc, execution) => acc + execution.agents.filter((agent) => agent.status === 'running').length,
-        0,
+    const allExecutions = useMemo(() => executions ?? [], [executions])
+    const allLogs = useMemo(() => logs ?? [], [logs])
+    const flatExecutions = useMemo(() => flattenExecutionCollection(allExecutions), [allExecutions])
+    const active = useMemo(
+        () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
+        [allExecutions],
+    )
+    const paused = useMemo(
+        () => allExecutions.filter((execution) =>
+            !executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES) &&
+            executionTreeHasAnyStatus(execution, PAUSED_EXECUTION_STATUSES)),
+        [allExecutions],
+    )
+    const completed = useMemo(() => allExecutions.filter((e) => e.status === 'completed'), [allExecutions])
+    const failed = useMemo(() => allExecutions.filter((e) => e.status === 'failed'), [allExecutions])
+    const cancelled = useMemo(() => allExecutions.filter((e) => e.status === 'cancelled'), [allExecutions])
+    const running = useMemo(
+        () => flatExecutions.filter((execution) => execution.status === 'running'),
+        [flatExecutions],
+    )
+    const activeAgentCount = useMemo(
+        () => flatExecutions.reduce(
+            (acc, execution) => acc + execution.agents.filter((agent) => agent.status === 'running').length,
+            0,
+        ),
+        [flatExecutions],
     )
 
     const filteredByTab =
-        tab === 'active' ? running :
+        tab === 'active' ? active :
             tab === 'paused' ? paused :
             tab === 'completed' ? completed :
                 tab === 'failed' ? failed :
@@ -534,6 +552,7 @@ export function AgentMonitorPage() {
     const handleRetry = (executionId: string) => {
         retryExecution.mutate(executionId, {
             onSuccess: (result) => {
+                setTab('active')
                 dispatchToast(
                     <Toast><ToastTitle>Execution retried (new ID: {result.executionId})</ToastTitle></Toast>,
                     { intent: 'success' },
@@ -588,7 +607,7 @@ export function AgentMonitorPage() {
     }
 
     const handleClearRunLogs = (executionId: string) => {
-        const execution = allExecutions.find((item) => item.id === executionId)
+        const execution = findExecutionInCollection(allExecutions, executionId)
         const description = execution ? `run for #${execution.workItemId}` : 'this run'
         if (!window.confirm(`Clear the logs for ${description}?`)) {
             return
@@ -611,7 +630,7 @@ export function AgentMonitorPage() {
     }
 
     const handleDelete = (executionId: string) => {
-        const execution = allExecutions.find((item) => item.id === executionId)
+        const execution = findExecutionInCollection(allExecutions, executionId)
         const description = execution
             ? `Delete the ${execution.status} run for #${execution.workItemId}? This also removes its logs.`
             : 'Delete this run and its logs?'
@@ -774,7 +793,7 @@ export function AgentMonitorPage() {
                 className={mergeClasses(styles.tabListSpacing, isDense && styles.tabListSpacingCompact)}
                 size={isDense ? 'small' : 'medium'}
             >
-                <Tab className={styles.monitorTab} value="active" icon={<PlayRegular />}>Active ({running.length})</Tab>
+                <Tab className={styles.monitorTab} value="active" icon={<PlayRegular />}>Active ({active.length})</Tab>
                 <Tab className={styles.monitorTab} value="paused" icon={<PauseRegular />}>Paused ({paused.length})</Tab>
                 <Tab className={styles.monitorTab} value="completed" icon={<CheckmarkCircleRegular />}>Completed ({completed.length})</Tab>
                 <Tab className={styles.monitorTab} value="failed" icon={<ErrorCircleRegular />}>Failed ({failed.length})</Tab>

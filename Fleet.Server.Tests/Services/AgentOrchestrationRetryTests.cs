@@ -243,6 +243,25 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void ResolveRetryStartOptions_ReparentsReusableSubFlowRetryToCurrentParent()
+    {
+        var priorExecution = new AgentExecution
+        {
+            Id = "child-execution",
+            ParentExecutionId = "failed-parent-execution",
+            Status = "failed",
+        };
+
+        var options = AgentOrchestrationService.ResolveRetryStartOptions(
+            priorExecution,
+            parentExecutionIdOverride: "running-parent-execution");
+
+        Assert.AreEqual("running-parent-execution", options.ParentExecutionId);
+        Assert.IsTrue(options.SkipQuotaCharge);
+        Assert.IsTrue(options.SkipActiveExecutionCap);
+    }
+
+    [TestMethod]
     public void ResolveRetryStartOptions_LeavesTopLevelRetriesTopLevelAndBillable()
     {
         var priorExecution = new AgentExecution

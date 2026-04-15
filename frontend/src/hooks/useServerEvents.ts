@@ -3,6 +3,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, fetchWithAuth } from '../proxies/proxy'
 import { useAuth } from './useAuthHook'
 import { normalizeLogEntry, type AgentExecution, type ChatData, type ChatSessionActivity, type ChatSessionData, type LogEntry } from '../models'
+import {
+  normalizeExecutionTree,
+  patchExecutionCollection,
+  removeExecutionCollection,
+  upsertExecutionCollectionWithFallback,
+} from '../models/executionTree'
 import { normalizeChatSessionActivities, normalizeChatSessionActivity } from '../models/chat'
 import {
   buildServerEventConnectionDetail,
@@ -69,146 +75,6 @@ const KNOWN_EXECUTION_STATUSES = new Set<AgentExecution['status']>([
   'cancelled',
   'paused',
 ])
-
-function normalizeExecutionTree(execution: AgentExecution): AgentExecution {
-  return {
-    ...execution,
-    subFlows: (execution.subFlows ?? []).map(normalizeExecutionTree),
-  }
-}
-
-function mergeExecutionSnapshot(existing: AgentExecution, incoming: AgentExecution): AgentExecution {
-  const incomingChildren = incoming.subFlows ?? []
-  const mergedChildren = incomingChildren.length > 0 ? incomingChildren : existing.subFlows ?? incomingChildren
-
-  return {
-    ...incoming,
-    branchName: incoming.branchName ?? existing.branchName,
-    pullRequestUrl: incoming.pullRequestUrl ?? existing.pullRequestUrl,
-    currentPhase: incoming.currentPhase ?? existing.currentPhase,
-    reviewLoopCount: incoming.reviewLoopCount && incoming.reviewLoopCount > 0
-      ? incoming.reviewLoopCount
-      : existing.reviewLoopCount,
-    lastReviewRecommendation: incoming.lastReviewRecommendation ?? existing.lastReviewRecommendation,
-    subFlows: mergedChildren,
-  }
-}
-
-function upsertExecutionCollection(
-  current: AgentExecution[],
-  incoming: AgentExecution,
-): { executions: AgentExecution[]; found: boolean } {
-  let found = false
-
-  const executions = current.map((execution) => {
-    if (execution.id === incoming.id) {
-      found = true
-      return mergeExecutionSnapshot(execution, incoming)
-    }
-
-    if (incoming.parentExecutionId && execution.id === incoming.parentExecutionId) {
-      found = true
-      const existingChildren = execution.subFlows ?? []
-      const existingChildIndex = existingChildren.findIndex((child) => child.id === incoming.id)
-      const nextChildren = existingChildIndex >= 0
-        ? existingChildren.map((child, index) => (
-          index === existingChildIndex ? mergeExecutionSnapshot(child, incoming) : child
-        ))
-        : [incoming, ...existingChildren]
-
-      return {
-        ...execution,
-        subFlows: nextChildren,
-      }
-    }
-
-    if ((execution.subFlows?.length ?? 0) > 0) {
-      const nested = upsertExecutionCollection(execution.subFlows ?? [], incoming)
-      if (nested.found) {
-        found = true
-        return {
-          ...execution,
-          subFlows: nested.executions,
-        }
-      }
-    }
-
-    return execution
-  })
-
-  return { executions, found }
-}
-
-function removeExecutionCollection(
-  current: AgentExecution[],
-  executionId: string,
-): { executions: AgentExecution[]; removed: boolean } {
-  let removed = false
-
-  const executions = current
-    .filter((execution) => {
-      if (execution.id === executionId) {
-        removed = true
-        return false
-      }
-
-      return true
-    })
-    .map((execution) => {
-      if ((execution.subFlows?.length ?? 0) === 0) {
-        return execution
-      }
-
-      const nested = removeExecutionCollection(execution.subFlows ?? [], executionId)
-      if (!nested.removed) {
-        return execution
-      }
-
-      removed = true
-      return {
-        ...execution,
-        subFlows: nested.executions,
-      }
-    })
-
-  return { executions, removed }
-}
-
-function patchExecutionCollection(
-  current: AgentExecution[],
-  executionId: string,
-  patch: Partial<AgentExecution>,
-): { executions: AgentExecution[]; found: boolean } {
-  let found = false
-
-  const executions = current.map((execution) => {
-    if (execution.id === executionId) {
-      found = true
-      return {
-        ...execution,
-        ...patch,
-        subFlows: execution.subFlows,
-      }
-    }
-
-    if ((execution.subFlows?.length ?? 0) === 0) {
-      return execution
-    }
-
-    const nested = patchExecutionCollection(execution.subFlows ?? [], executionId, patch)
-    if (!nested.found) {
-      return execution
-    }
-
-    found = true
-    return {
-      ...execution,
-      subFlows: nested.executions,
-    }
-  })
-
-  return { executions, found }
-}
 
 function queryKeyMatchesProject(queryKey: readonly unknown[], projectId?: string | null): boolean {
   if (!projectId) {
@@ -561,14 +427,9 @@ export function useServerEvents(projectId?: string) {
             continue
           }
 
-          const updated = upsertExecutionCollection(snapshot, incomingExecution)
-          if (updated.found) {
+          const updated = upsertExecutionCollectionWithFallback(snapshot, incomingExecution)
+          if (updated.found || updated.insertedAsFallback) {
             queryClient.setQueryData(queryKey, updated.executions)
-            continue
-          }
-
-          if (!incomingExecution.parentExecutionId) {
-            queryClient.setQueryData(queryKey, [incomingExecution, ...snapshot])
           }
         }
 

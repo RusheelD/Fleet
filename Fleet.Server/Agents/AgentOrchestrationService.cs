@@ -1486,6 +1486,7 @@ public class AgentOrchestrationService(
             userId,
             skipQuotaCharge: false,
             skipActiveExecutionCap: false,
+            parentExecutionIdOverride: null,
             cancellationToken);
 
     private async Task<string?> RetryExecutionInternalAsync(
@@ -1494,6 +1495,7 @@ public class AgentOrchestrationService(
         int userId,
         bool skipQuotaCharge,
         bool skipActiveExecutionCap,
+        string? parentExecutionIdOverride,
         CancellationToken cancellationToken)
     {
         var priorExecution = await db.AgentExecutions
@@ -1539,6 +1541,7 @@ public class AgentOrchestrationService(
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
         var retryStartOptions = ResolveRetryStartOptions(
             priorExecution,
+            parentExecutionIdOverride,
             skipQuotaCharge,
             skipActiveExecutionCap);
 
@@ -1951,6 +1954,7 @@ public class AgentOrchestrationService(
                     userId,
                     skipQuotaCharge: true,
                     skipActiveExecutionCap: true,
+                    parentExecutionIdOverride: executionId,
                     externalCancellation);
                 if (!string.IsNullOrWhiteSpace(retriedExecutionId))
                 {
@@ -2024,6 +2028,7 @@ public class AgentOrchestrationService(
                     userId,
                     skipQuotaCharge: true,
                     skipActiveExecutionCap: true,
+                    parentExecutionIdOverride: null,
                     externalCancellation);
                 if (string.IsNullOrWhiteSpace(propagatedParentExecutionId))
                 {
@@ -3468,12 +3473,17 @@ public class AgentOrchestrationService(
 
     internal static RetryStartOptions ResolveRetryStartOptions(
         AgentExecution priorExecution,
+        string? parentExecutionIdOverride = null,
         bool skipQuotaCharge = false,
         bool skipActiveExecutionCap = false)
     {
-        var isSubFlowRetry = !string.IsNullOrWhiteSpace(priorExecution.ParentExecutionId);
+        var effectiveParentExecutionId = !string.IsNullOrWhiteSpace(parentExecutionIdOverride)
+            ? parentExecutionIdOverride
+            : priorExecution.ParentExecutionId;
+        var isSubFlowRetry = !string.IsNullOrWhiteSpace(effectiveParentExecutionId);
+
         return new RetryStartOptions(
-            ParentExecutionId: isSubFlowRetry ? priorExecution.ParentExecutionId : null,
+            ParentExecutionId: isSubFlowRetry ? effectiveParentExecutionId : null,
             SkipQuotaCharge: skipQuotaCharge || isSubFlowRetry,
             SkipActiveExecutionCap: skipActiveExecutionCap || isSubFlowRetry);
     }
