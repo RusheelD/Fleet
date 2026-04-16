@@ -89,19 +89,21 @@ describe('executionTree helpers', () => {
     expect(nested.executions[0].subFlows?.[0].id).toBe('child-retry')
   })
 
-  it('sorts sub-flows by work item number when normalizing the tree', () => {
+  it('sorts sub-flows by status bucket and then work item number when normalizing the tree', () => {
     const normalized = normalizeExecutionTree(createExecution({
       id: 'parent-flow',
       executionMode: 'orchestration',
       subFlows: [
-        createExecution({ id: 'sub-5', workItemId: 5, workItemTitle: 'Five' }),
-        createExecution({ id: 'sub-3', workItemId: 3, workItemTitle: 'Three' }),
-        createExecution({ id: 'sub-4', workItemId: 4, workItemTitle: 'Four' }),
-        createExecution({ id: 'sub-2', workItemId: 2, workItemTitle: 'Two' }),
+        createExecution({ id: 'sub-5', workItemId: 5, workItemTitle: 'Five', status: 'queued' }),
+        createExecution({ id: 'sub-3', workItemId: 3, workItemTitle: 'Three', status: 'running' }),
+        createExecution({ id: 'sub-4', workItemId: 4, workItemTitle: 'Four', status: 'failed' }),
+        createExecution({ id: 'sub-2', workItemId: 2, workItemTitle: 'Two', status: 'completed' }),
+        createExecution({ id: 'sub-6', workItemId: 6, workItemTitle: 'Six', status: 'queued' }),
+        createExecution({ id: 'sub-1', workItemId: 1, workItemTitle: 'One', status: 'completed' }),
       ],
     }))
 
-    expect(normalized.subFlows?.map((execution) => execution.workItemId)).toEqual([2, 3, 4, 5])
+    expect(normalized.subFlows?.map((execution) => execution.workItemId)).toEqual([1, 2, 3, 5, 6, 4])
   })
 
   it('treats descendant live retries as active tree members', () => {

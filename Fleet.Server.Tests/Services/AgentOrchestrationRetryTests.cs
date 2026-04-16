@@ -1,13 +1,40 @@
 using Fleet.Server.Agents;
+using Fleet.Server.Connections;
+using Fleet.Server.Copilot;
 using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
+using Fleet.Server.LLM;
+using Fleet.Server.Notifications;
+using Fleet.Server.Realtime;
+using Fleet.Server.Subscriptions;
+using Fleet.Server.WorkItems;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Moq;
 
 namespace Fleet.Server.Tests.Services;
 
 [TestClass]
 public class AgentOrchestrationRetryTests
 {
+    private static AgentOrchestrationService CreateService(FleetDbContext db)
+        => new(
+            db,
+            Mock.Of<IAgentTaskRepository>(),
+            Mock.Of<IConnectionService>(),
+            Mock.Of<IWorkItemRepository>(),
+            Mock.Of<IServiceScopeFactory>(),
+            Mock.Of<ILLMClient>(),
+            Mock.Of<IHttpClientFactory>(),
+            Mock.Of<ILogger<AgentOrchestrationService>>(),
+            Mock.Of<IModelCatalog>(),
+            Mock.Of<INotificationService>(),
+            Mock.Of<IServerEventPublisher>(),
+            new AgentCallCapacityManager(Options.Create(new LLMOptions { MaxConcurrentAgentCalls = 8 })),
+            Mock.Of<IUsageLedgerService>());
+
     [TestMethod]
     public void BuildRetryCarryForwardOutputs_UsesLatestSuccessfulOutputsForKnownRoles()
     {
@@ -219,13 +246,20 @@ public class AgentOrchestrationRetryTests
                 db,
                 "exec-1",
                 Array.Empty<Fleet.Server.Models.WorkItemDto>(),
+                new[]
+                {
+                    new[] { AgentRole.Manager },
+                    new[] { AgentRole.Planner },
+                    new[] { AgentRole.Contracts },
+                    new[] { AgentRole.Review, AgentRole.Documentation },
+                },
                 new Dictionary<AgentRole, string>(),
             })!;
         await task;
 
         var execution = await db.AgentExecutions.SingleAsync(e => e.Id == "exec-1");
         CollectionAssert.AreEqual(
-            new[] { "completed", "completed", "completed" },
+            new[] { "completed", "completed", "completed", "idle", "idle" },
             execution.Agents.Select(agent => agent.Status).ToArray());
     }
 
@@ -307,6 +341,21 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void BuildOrchestrationPipelineFromFollowingRoles_PreservesFollowUpStagesAfterContracts()
+    {
+        var pipeline = AgentOrchestrationService.BuildOrchestrationPipelineFromFollowingRoles(
+            [AgentRole.Review, AgentRole.Documentation],
+            "auto",
+            null);
+
+        Assert.AreEqual(4, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review, AgentRole.Documentation }, pipeline[3]);
+    }
+
+    [TestMethod]
     public void ResolveMaxConcurrentAgentsPerTask_ClampsTierLimitToAssignedAgentCount()
     {
         Assert.AreEqual(2, AgentOrchestrationService.ResolveMaxConcurrentAgentsPerTask(4, "manual", 2));
@@ -364,16 +413,37 @@ public class AgentOrchestrationRetryTests
         [
             [AgentRole.Manager],
             [AgentRole.Planner],
+            [AgentRole.Review],
         ];
 
         var normalized = AgentOrchestrationService.EnsureContractsInOrchestrationPipeline(
             legacyPipeline,
             AgentExecutionModes.Orchestration);
 
-        Assert.AreEqual(3, normalized.Length);
+        Assert.AreEqual(4, normalized.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, normalized[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, normalized[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, normalized[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, normalized[3]);
+    }
+
+    [TestMethod]
+    public void HasOrchestrationFollowUpStages_DetectsRolesAfterContracts()
+    {
+        Assert.IsTrue(AgentOrchestrationService.HasOrchestrationFollowUpStages(
+            [
+                [AgentRole.Manager],
+                [AgentRole.Planner],
+                [AgentRole.Contracts],
+                [AgentRole.Review, AgentRole.Documentation],
+            ]));
+
+        Assert.IsFalse(AgentOrchestrationService.HasOrchestrationFollowUpStages(
+            [
+                [AgentRole.Manager],
+                [AgentRole.Planner],
+                [AgentRole.Contracts],
+            ]));
     }
 
     [TestMethod]
@@ -438,6 +508,108 @@ public class AgentOrchestrationRetryTests
         Assert.AreEqual("running-parent-execution", options.ParentExecutionId);
         Assert.IsTrue(options.SkipQuotaCharge);
         Assert.IsTrue(options.SkipActiveExecutionCap);
+    }
+
+    [TestMethod]
+    public void ShouldReuseRetryBranch_ReturnsFalse_WhenReusableSubFlowRetryMovesToANewParent()
+    {
+        var priorExecution = new AgentExecution
+        {
+            Id = "child-execution",
+            ParentExecutionId = "failed-parent-execution",
+            BranchName = "fleet/7-sub-flow",
+            Status = "failed",
+        };
+
+        Assert.IsFalse(AgentOrchestrationService.ShouldReuseRetryBranch(
+            priorExecution,
+            nextParentExecutionId: "running-parent-execution"));
+    }
+
+    [TestMethod]
+    public void ShouldReuseRetryBranch_ReturnsTrue_ForSameParentOrTopLevelRetries()
+    {
+        var subFlowExecution = new AgentExecution
+        {
+            Id = "child-execution",
+            ParentExecutionId = "parent-execution",
+            BranchName = "fleet/7-sub-flow",
+            Status = "failed",
+        };
+        var topLevelExecution = new AgentExecution
+        {
+            Id = "top-level-execution",
+            BranchName = "fleet/42-top-level",
+            Status = "failed",
+        };
+
+        Assert.IsTrue(AgentOrchestrationService.ShouldReuseRetryBranch(
+            subFlowExecution,
+            nextParentExecutionId: "parent-execution"));
+        Assert.IsTrue(AgentOrchestrationService.ShouldReuseRetryBranch(
+            topLevelExecution,
+            nextParentExecutionId: null));
+    }
+
+    [TestMethod]
+    public void ResolveRequestedOrInheritedTargetBranch_PrefersRequestedBranchAndOtherwiseUsesParentBranch()
+    {
+        Assert.AreEqual(
+            "fleet/child-copy",
+            AgentOrchestrationService.ResolveRequestedOrInheritedTargetBranch(
+                " fleet/child-copy ",
+                "fleet/parent"));
+        Assert.AreEqual(
+            "fleet/parent-copy",
+            AgentOrchestrationService.ResolveRequestedOrInheritedTargetBranch(
+                null,
+                " fleet/parent-copy "));
+        Assert.IsNull(AgentOrchestrationService.ResolveRequestedOrInheritedTargetBranch(null, "   "));
+    }
+
+    [TestMethod]
+    public void BuildExecutionBranchesToCleanup_IncludesParentAndDescendantSubFlowBranches()
+    {
+        var branches = AgentOrchestrationService.BuildExecutionBranchesToCleanup(
+            " fleet/1-parent ",
+            ["fleet/5-child-copy", "fleet/6-child", "fleet/5-child-copy", null, "   "]);
+
+        CollectionAssert.AreEqual(
+            new[] { "fleet/5-child-copy", "fleet/6-child", "fleet/1-parent" },
+            branches);
+    }
+
+    [TestMethod]
+    public async Task ResolveExecutionTargetBranchAsync_InheritsCopiedParentBranchForSubFlows()
+    {
+        var options = new DbContextOptionsBuilder<FleetDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var db = new FleetDbContext(options);
+        db.AgentExecutions.Add(new AgentExecution
+        {
+            Id = "parent-copy-execution",
+            WorkItemId = 1,
+            WorkItemTitle = "Parent",
+            Status = "running",
+            StartedAt = "2026-04-16T00:00:00Z",
+            BranchName = "fleet/1-dots-boxes-web-game-copy",
+            UserId = "7",
+            ProjectId = "proj-1",
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var method = typeof(AgentOrchestrationService).GetMethod(
+            "ResolveExecutionTargetBranchAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        var branchTask = (Task<string?>)method.Invoke(
+            service,
+            ["proj-1", null, "parent-copy-execution", CancellationToken.None])!;
+        var resolvedBranch = await branchTask;
+
+        Assert.AreEqual("fleet/1-dots-boxes-web-game-copy", resolvedBranch);
     }
 
     [TestMethod]
@@ -1351,7 +1523,8 @@ public class AgentOrchestrationRetryTests
             executionDepth: 0);
 
         Assert.AreEqual(PlannerSubFlowMode.UseExistingSubFlows, guidance.SuggestedCurrentExecutionShape.SubFlowMode);
-        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray());
+        CollectionAssert.Contains(guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray(), AgentRole.Contracts);
+        CollectionAssert.Contains(guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray(), AgentRole.Review);
     }
 
     [TestMethod]
@@ -1396,6 +1569,37 @@ public class AgentOrchestrationRetryTests
         Assert.AreEqual(PlannerSubFlowMode.Direct, resolved.SubFlowMode);
         Assert.IsTrue(resolved.FollowingAgents.Count >= 1);
         Assert.IsFalse(resolved.FollowingAgents.SequenceEqual(new[] { AgentRole.Contracts }));
+    }
+
+    [TestMethod]
+    public void ResolvePlannerExecutionShape_PreservesPostSubFlowFollowUpRoles()
+    {
+        var parent = CreateWorkItem(221, "Platform sync overhaul", 5, childNumbers: [222, 223]);
+        var childA = CreateWorkItem(222, "Desktop sync engine", 5, parent: 221, childNumbers: [224]);
+        var childB = CreateWorkItem(223, "Mobile sync shell", 4, parent: 221);
+        var grandchild = CreateWorkItem(224, "Conflict resolution core", 4, parent: 222);
+        var deterministicGuidance = AgentOrchestrationService.BuildPlannerDeterministicGuidance(
+            parent,
+            new[] { childA, childB },
+            new[] { childA, childB, grandchild },
+            executionDepth: 0);
+        var plannerShape = new PlannerExecutionShape(
+            EffectiveDifficulty: 5,
+            DifficultyReason: "Existing child branches still need parent-level review and docs after merge.",
+            SubFlowMode: PlannerSubFlowMode.UseExistingSubFlows,
+            SubFlowReason: "Use the existing branches.",
+            FollowingAgents: new[] { AgentRole.Contracts, AgentRole.Review, AgentRole.Documentation },
+            FollowingAgentCount: 3);
+
+        var resolved = AgentOrchestrationService.ResolvePlannerExecutionShape(
+            plannerShape,
+            deterministicGuidance,
+            hasExistingDirectChildren: true);
+
+        Assert.AreEqual(PlannerSubFlowMode.UseExistingSubFlows, resolved.SubFlowMode);
+        CollectionAssert.AreEqual(
+            new[] { AgentRole.Contracts, AgentRole.Review, AgentRole.Documentation },
+            resolved.FollowingAgents.ToArray());
     }
 
     [TestMethod]

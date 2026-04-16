@@ -669,10 +669,15 @@ public class AgentOrchestrationService(
                 cancellationToken);
 
             var repoFullName = project.Repo;
+            var effectiveTargetBranch = await ResolveExecutionTargetBranchAsync(
+                projectId,
+                targetBranch,
+                parentExecutionId,
+                cancellationToken);
             var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
                 accessToken,
                 repoFullName,
-                targetBranch,
+                effectiveTargetBranch,
                 cancellationToken);
 
             // 6. Use AI to determine which agents are needed for this work item.
@@ -1147,10 +1152,15 @@ public class AgentOrchestrationService(
 
         var repoFullName = project.Repo;
         var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId.Value, repoFullName, cancellationToken);
+        var inheritedTargetBranch = await ResolveExecutionTargetBranchAsync(
+            projectId,
+            requestedBranch: null,
+            persistedExecution.ParentExecutionId,
+            cancellationToken);
         var pullRequestTargetBranch = await ResolvePullRequestTargetBranchAsync(
             accessToken,
             repoFullName,
-            requestedBranch: null,
+            inheritedTargetBranch,
             cancellationToken);
 
         var branchName = string.IsNullOrWhiteSpace(persistedExecution.BranchName)
@@ -1460,11 +1470,9 @@ public class AgentOrchestrationService(
                         executionUserId,
                         repoFullName,
                         cancellationToken);
-                    var branchesToCleanup = descendantBranches
-                        .Append(execution.BranchName)
-                        .Where(branch => !string.IsNullOrWhiteSpace(branch))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToArray();
+                    var branchesToCleanup = BuildExecutionBranchesToCleanup(
+                        execution.BranchName,
+                        descendantBranches);
 
                     foreach (var branch in branchesToCleanup)
                     {
@@ -1560,9 +1568,14 @@ public class AgentOrchestrationService(
         var carryForwardOutputs = BuildRetryCarryForwardOutputs(priorPhaseResults);
 
         var priorProgress = Math.Clamp(priorExecution.Progress, 0, 1);
-        var reuseBranchName = string.IsNullOrWhiteSpace(priorExecution.BranchName)
-            ? null
-            : priorExecution.BranchName.Trim();
+        var retryStartOptions = ResolveRetryStartOptions(
+            priorExecution,
+            parentExecutionIdOverride,
+            skipQuotaCharge,
+            skipActiveExecutionCap);
+        var reuseBranchName = ShouldReuseRetryBranch(priorExecution, retryStartOptions.ParentExecutionId)
+            ? priorExecution.BranchName!.Trim()
+            : null;
         var resumeFromRemoteBranch = false;
         if (!string.IsNullOrWhiteSpace(reuseBranchName))
         {
@@ -1585,12 +1598,8 @@ public class AgentOrchestrationService(
             }
         }
         var shouldReuseExistingPullRequest =
+            !string.IsNullOrWhiteSpace(reuseBranchName) &&
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
-        var retryStartOptions = ResolveRetryStartOptions(
-            priorExecution,
-            parentExecutionIdOverride,
-            skipQuotaCharge,
-            skipActiveExecutionCap);
 
         var retryPlan = new RetryExecutionPlan(
             SourceExecutionId: priorExecution.Id,
@@ -1949,7 +1958,7 @@ public class AgentOrchestrationService(
                     childWorkItem.WorkItemNumber,
                     userId,
                     executionId,
-                    pullRequestTargetBranch,
+                    sandbox?.BranchName ?? pullRequestTargetBranch,
                     externalCancellation);
             }
 
@@ -2058,7 +2067,7 @@ public class AgentOrchestrationService(
                 childWorkItem.WorkItemNumber,
                 userId,
                 executionId,
-                pullRequestTargetBranch,
+                sandbox?.BranchName ?? pullRequestTargetBranch,
                 externalCancellation);
         }
 
@@ -2200,12 +2209,34 @@ public class AgentOrchestrationService(
             }
         }
 
-        async Task ExecuteSubFlowsAsync(
+        async Task<(bool ExecutionCompleted, string FollowUpContextMarkdown)> ExecuteSubFlowsAsync(
             Models.WorkItemDto parentWorkItem,
-            IReadOnlyList<Models.WorkItemDto> directChildWorkItems)
+            IReadOnlyList<Models.WorkItemDto> directChildWorkItems,
+            bool continueWithFollowUpRoles)
         {
             if (sandbox is null)
                 throw new InvalidOperationException("Execution sandbox is not ready for sub-flow orchestration.");
+
+            async Task PublishParentBranchForSubFlowsAsync(string reason)
+            {
+                accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                    scopedConnectionService,
+                    userId,
+                    repoFullName,
+                    externalCancellation);
+                logger.LogInformation(
+                    "Execution {ExecutionId}: publishing parent branch {Branch} for sub-flow orchestration ({Reason})",
+                    executionId,
+                    sandbox.BranchName,
+                    reason);
+                await sandbox.CommitAndPushAsync(
+                    accessToken,
+                    $"fleet: checkpoint parent branch for sub-flows on #{parentWorkItem.WorkItemNumber}",
+                    commitAuthorName,
+                    commitAuthorEmail,
+                    externalCancellation);
+                await sandbox.PushBranchAsync(accessToken, externalCancellation);
+            }
 
             var orderedChildren = directChildWorkItems
                 .OrderBy(child => child.WorkItemNumber)
@@ -2216,6 +2247,8 @@ public class AgentOrchestrationService(
                 MaxParallelSubFlows);
             var completedSubFlows = 0;
             var mergedChildBranchesPendingCleanup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            await PublishParentBranchForSubFlowsAsync("preparing child executions");
 
             await WithDbLockAsync(async queuedDb =>
                 await WriteLogEntryAsync(
@@ -2353,6 +2386,11 @@ public class AgentOrchestrationService(
                     completedSubFlows >= orderedChildren.Length
                         ? "Sub-flows completed"
                         : $"Completed {completedSubFlows}/{orderedChildren.Length} sub-flows");
+
+                if (completedSubFlows < orderedChildren.Length)
+                {
+                    await PublishParentBranchForSubFlowsAsync("publishing merged parent state for the next batch");
+                }
             }
 
             accessToken = await ResolveRequiredRepoAccessTokenAsync(
@@ -2424,7 +2462,30 @@ public class AgentOrchestrationService(
                     $"Execution completed for #{parentWorkItem.WorkItemNumber}",
                     $"{orderedChildren.Length} sub-flow(s) completed.",
                     executionId);
-                return;
+                return (true, string.Empty);
+            }
+
+            if (continueWithFollowUpRoles)
+            {
+                var mergedChildrenLabel = string.Join(", ", orderedChildren.Select(child => $"#{child.WorkItemNumber}"));
+                await WithDbLockAsync(async queuedDb =>
+                    await WriteLogEntryAsync(
+                        queuedDb,
+                        projectId,
+                        "System",
+                        "info",
+                        $"Sub-flow orchestration merged {orderedChildren.Length} child branch(es) into '{sandbox.BranchName}'. Continuing with parent follow-up phases on the merged branch.",
+                        executionId: executionId));
+                await PublishLogsUpdatedAsync();
+
+                return (
+                    false,
+                    $$"""
+                    ## Sub-flow Orchestration Completed
+                    - Merged child work items into the current parent branch: {{mergedChildrenLabel}}.
+                    - Continue from the merged parent branch state. Do not recreate or rerun those child implementations unless a new failure explicitly requires it.
+                    - Focus only on the remaining parent follow-up phases after sub-flow orchestration.
+                    """);
             }
 
             var (orchestrationPrUrl, orchestrationPrNumber) = await OpenPullRequestAsync(
@@ -2531,6 +2592,7 @@ public class AgentOrchestrationService(
                     $"Execution {executionId} completed successfully -- PR: {orchestrationPrUrl}",
                     executionId: executionId));
             await PublishLogsUpdatedAsync();
+            return (true, string.Empty);
         }
 
         try
@@ -2599,6 +2661,12 @@ public class AgentOrchestrationService(
                 workItemContext = $"{workItemContext}\n\n{retryPlan.RetryContextMarkdown}";
             }
 
+            var persistedExecutionMode = await scopedDb.AgentExecutions
+                .AsNoTracking()
+                .Where(agentExecution => agentExecution.Id == executionId)
+                .Select(agentExecution => agentExecution.ExecutionMode)
+                .FirstOrDefaultAsync(externalCancellation);
+
             var totalRoles = pipeline.SelectMany(g => g).Count();
             var phaseOrder = 0;
             var reviewLoopCount = 0;
@@ -2610,7 +2678,10 @@ public class AgentOrchestrationService(
                 ? new Dictionary<AgentRole, string>()
                 : retryPlan.CarryForwardOutputs.ToDictionary(entry => entry.Key, entry => entry.Value);
             var currentRawOutputsByRole = new Dictionary<AgentRole, string>();
-            var orchestrationExecution = IsOrchestrationPrelude(pipeline);
+            var orchestrationExecution = string.Equals(
+                persistedExecutionMode,
+                AgentExecutionModes.Orchestration,
+                StringComparison.OrdinalIgnoreCase);
 
             static string BuildSteeringBlock(IReadOnlyList<string> notes)
             {
@@ -2730,8 +2801,25 @@ public class AgentOrchestrationService(
                         .Where(slot => !carriedRoles.Contains(slot.Role))
                         .ToArray();
 
+                    var isOrchestrationBarrierGroup = orchestrationExecution &&
+                                                     rolesInGroup.Contains(AgentRole.Contracts);
                     if (pendingRoleEntries.Length == 0)
                     {
+                        if (isOrchestrationBarrierGroup)
+                        {
+                            var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
+                            var orchestrationResult = await ExecuteSubFlowsAsync(
+                                workItem,
+                                directChildWorkItems,
+                                HasOrchestrationFollowUpStages(currentCyclePipeline));
+                            if (orchestrationResult.ExecutionCompleted)
+                                return;
+
+                            orchestrationExecution = false;
+                            if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
+                                currentWorkItemContext = $"{currentWorkItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
+                        }
+
                         continue;
                     }
 
@@ -2792,6 +2880,21 @@ public class AgentOrchestrationService(
                     carriedRoles = currentOutputsByRole.Keys.ToHashSet();
                     completedRoles = CountCarryForwardRoles(pipeline, currentOutputsByRole);
 
+                    if (isOrchestrationBarrierGroup)
+                    {
+                        var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
+                        var orchestrationResult = await ExecuteSubFlowsAsync(
+                            workItem,
+                            directChildWorkItems,
+                            HasOrchestrationFollowUpStages(currentCyclePipeline));
+                        if (orchestrationResult.ExecutionCompleted)
+                            return;
+
+                        orchestrationExecution = false;
+                        if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
+                            currentWorkItemContext = $"{currentWorkItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
+                    }
+
                     if (reviewLoopCount == 0 && rolesInGroup.Contains(AgentRole.Planner))
                     {
                         var directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
@@ -2811,8 +2914,8 @@ public class AgentOrchestrationService(
                                     plannerExecutionShape.FollowingAgents,
                                     workItem.AssignmentMode,
                                     workItem.AssignedAgentCount)
-                                : BuildPipelineFromFollowingRoles(
-                                    deterministicPlannerGuidance.SuggestedDirectExecutionRoles,
+                                : BuildOrchestrationPipelineFromFollowingRoles(
+                                    plannerExecutionShape.FollowingAgents,
                                     workItem.AssignmentMode,
                                     workItem.AssignedAgentCount);
 
@@ -2847,7 +2950,7 @@ public class AgentOrchestrationService(
                                         childWorkItems.AddRange(createdSubFlows);
                                         directChildWorkItems = GetDirectActionableChildren(workItem, childWorkItems);
                                         orchestrationExecution = true;
-                                        pipeline = OrchestrationPreludePipeline;
+                                        pipeline = plannerDirectPipeline;
                                         totalRoles = pipeline.SelectMany(group => group).Count();
                                         currentCyclePipeline = pipeline;
                                         currentCycleCarryForwardOutputs = currentOutputsByRole
@@ -2862,6 +2965,7 @@ public class AgentOrchestrationService(
                                             queuedDb,
                                             executionId,
                                             directChildWorkItems,
+                                            pipeline,
                                             currentOutputsByRole));
                                         await WithDbLockAsync(async queuedDb =>
                                             await WriteLogEntryAsync(
@@ -2898,9 +3002,9 @@ public class AgentOrchestrationService(
                                          plannerExecutionShape.EffectiveDifficulty))
                             {
                                 orchestrationExecution = true;
-                                if (!IsOrchestrationPrelude(currentCyclePipeline))
+                                if (!PipelinesEqual(currentCyclePipeline, plannerDirectPipeline))
                                 {
-                                    pipeline = OrchestrationPreludePipeline;
+                                    pipeline = plannerDirectPipeline;
                                     totalRoles = pipeline.SelectMany(group => group).Count();
                                     currentCyclePipeline = pipeline;
                                     currentCycleCarryForwardOutputs = currentOutputsByRole
@@ -2912,6 +3016,7 @@ public class AgentOrchestrationService(
                                         queuedDb,
                                         executionId,
                                         directChildWorkItems,
+                                        pipeline,
                                         currentOutputsByRole));
                                     await WithDbLockAsync(async queuedDb =>
                                         await WriteLogEntryAsync(
@@ -2919,7 +3024,7 @@ public class AgentOrchestrationService(
                                             projectId,
                                             "System",
                                             "info",
-                                            $"Planner delegated this run into {directChildWorkItems.Count} existing sub-flow(s). Contracts preflight will run before sub-flow execution starts.",
+                                            $"Planner delegated this run into {directChildWorkItems.Count} existing sub-flow(s). Contracts will run before sub-flow execution, and any remaining parent follow-up phases will resume after the child branches merge back.",
                                             executionId: executionId));
                                     await PublishAgentsUpdatedAsync();
                                     await PublishLogsUpdatedAsync();
@@ -3450,6 +3555,7 @@ public class AgentOrchestrationService(
                             queuedDb,
                             executionId,
                             directChildWorkItems,
+                            pipeline,
                             currentCycleCarryForwardOutputs));
                     await WithDbLockAsync(async queuedDb =>
                         await WriteLogEntryAsync(
@@ -3461,8 +3567,16 @@ public class AgentOrchestrationService(
                             executionId: executionId));
                     await PublishAgentsUpdatedAsync();
                     await PublishLogsUpdatedAsync();
-                    await ExecuteSubFlowsAsync(workItem, directChildWorkItems);
-                    return;
+                    var orchestrationResult = await ExecuteSubFlowsAsync(
+                        workItem,
+                        directChildWorkItems,
+                        HasOrchestrationFollowUpStages(pipeline));
+                    if (orchestrationResult.ExecutionCompleted)
+                        return;
+
+                    orchestrationExecution = false;
+                    if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
+                        workItemContext = $"{workItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
                 }
             }
 
@@ -3782,6 +3896,18 @@ public class AgentOrchestrationService(
         return true;
     }
 
+    internal static bool HasOrchestrationFollowUpStages(AgentRole[][] pipeline)
+    {
+        var contractsGroupIndex = Array.FindIndex(pipeline, group => group.Contains(AgentRole.Contracts));
+        if (contractsGroupIndex < 0)
+            return false;
+
+        return pipeline
+            .Skip(contractsGroupIndex + 1)
+            .SelectMany(group => group)
+            .Any(role => role is not AgentRole.Manager and not AgentRole.Planner and not AgentRole.Contracts);
+    }
+
     private static bool PipelinesEqual(AgentRole[][] left, AgentRole[][] right)
     {
         if (ReferenceEquals(left, right))
@@ -3823,6 +3949,44 @@ public class AgentOrchestrationService(
             SkipQuotaCharge: skipQuotaCharge || isSubFlowRetry,
             SkipActiveExecutionCap: skipActiveExecutionCap || isSubFlowRetry);
     }
+
+    internal static bool ShouldReuseRetryBranch(AgentExecution priorExecution, string? nextParentExecutionId)
+    {
+        if (string.IsNullOrWhiteSpace(priorExecution.BranchName))
+            return false;
+
+        var normalizedCurrentParentExecutionId = priorExecution.ParentExecutionId?.Trim();
+        var normalizedNextParentExecutionId = nextParentExecutionId?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedNextParentExecutionId) &&
+            !string.Equals(
+                normalizedCurrentParentExecutionId,
+                normalizedNextParentExecutionId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal static string? ResolveRequestedOrInheritedTargetBranch(string? requestedBranch, string? parentBranchName)
+    {
+        var normalizedRequestedBranch = requestedBranch?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedRequestedBranch))
+            return normalizedRequestedBranch;
+
+        var normalizedParentBranch = parentBranchName?.Trim();
+        return string.IsNullOrWhiteSpace(normalizedParentBranch) ? null : normalizedParentBranch;
+    }
+
+    internal static string[] BuildExecutionBranchesToCleanup(string? executionBranchName, IEnumerable<string?> descendantBranchNames)
+        => descendantBranchNames
+            .Append(executionBranchName)
+            .Select(branch => branch?.Trim())
+            .Where(branch => !string.IsNullOrWhiteSpace(branch))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToArray();
 
     internal static IReadOnlyList<string> BuildReusableSubFlowParentExecutionIds(
         string executionId,
@@ -4398,14 +4562,10 @@ public class AgentOrchestrationService(
         };
         var currentFollowingRoles = subFlowMode == PlannerSubFlowMode.Direct
             ? directRoles
-            : BuildPipelineFromFollowingRoles(
-                    [AgentRole.Contracts],
-                    workItem.AssignmentMode,
-                    workItem.AssignedAgentCount)
-                .SelectMany(group => group)
-                .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
-                .Distinct()
-                .ToArray();
+            : BuildDeterministicOrchestrationFollowingRoles(
+                directRoles,
+                workItem.AssignmentMode,
+                workItem.AssignedAgentCount);
 
         return new PlannerDeterministicGuidance(
             new PlannerExecutionShape(
@@ -4458,7 +4618,12 @@ public class AgentOrchestrationService(
             .ToArray();
         var followingRoles = normalizedMode == PlannerSubFlowMode.Direct
             ? directExecutionRoles
-            : BuildPipelineFromFollowingRoles([AgentRole.Contracts], "auto", null)
+            : BuildOrchestrationPipelineFromFollowingRoles(
+                    NormalizeOrchestrationFollowingRoles(
+                        plannerShape.FollowingAgents,
+                        fallback.FollowingAgents),
+                    "auto",
+                    null)
                 .SelectMany(group => group)
                 .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
                 .ToArray();
@@ -4505,6 +4670,39 @@ public class AgentOrchestrationService(
         return roles;
     }
 
+    private static IReadOnlyList<AgentRole> NormalizeOrchestrationFollowingRoles(
+        IReadOnlyList<AgentRole> plannerFollowingRoles,
+        IReadOnlyList<AgentRole> fallbackOrchestrationFollowingRoles)
+    {
+        var roles = NormalizePlannerFollowingRoles(plannerFollowingRoles, fallbackOrchestrationFollowingRoles)
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
+            .ToList();
+
+        if (!roles.Contains(AgentRole.Contracts))
+            roles.Insert(0, AgentRole.Contracts);
+
+        return roles;
+    }
+
+    internal static IReadOnlyList<AgentRole> BuildDeterministicOrchestrationFollowingRoles(
+        IReadOnlyList<AgentRole> directExecutionRoles,
+        string? assignmentMode,
+        int? assignedAgentCount)
+    {
+        var orchestrationRoles = directExecutionRoles
+            .Where(role => role is AgentRole.Testing or AgentRole.Consolidation or AgentRole.Review or AgentRole.Documentation)
+            .ToList();
+        orchestrationRoles.Insert(0, AgentRole.Contracts);
+
+        return BuildOrchestrationPipelineFromFollowingRoles(
+                orchestrationRoles,
+                assignmentMode,
+                assignedAgentCount)
+            .SelectMany(group => group)
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
+            .ToArray();
+    }
+
     private static string FormatPlannerSubFlowMode(PlannerSubFlowMode mode)
         => mode switch
         {
@@ -4524,6 +4722,7 @@ public class AgentOrchestrationService(
         sb.AppendLine($"- Direct-run rationale: {guidance.DirectExecutionReason}");
         sb.AppendLine($"- Suggested sub-flow mode: {FormatPlannerSubFlowMode(guidance.SuggestedCurrentExecutionShape.SubFlowMode)}.");
         sb.AppendLine($"- Sub-flow rationale: {guidance.SuggestedCurrentExecutionShape.SubFlowReason}");
+        sb.AppendLine($"- Suggested sub-flow follow-up agents (Contracts runs before child flows; the rest resume after merge): {(guidance.SuggestedCurrentExecutionShape.FollowingAgents.Count == 0 ? "none" : string.Join(", ", guidance.SuggestedCurrentExecutionShape.FollowingAgents))}.");
         sb.AppendLine($"- Existing direct child work items already in scope: {guidance.ExistingDirectChildCount}.");
         sb.AppendLine($"- Current execution depth: {guidance.ExecutionDepth}.");
         sb.AppendLine($"- Max direct sub-flows allowed at this depth: {guidance.MaxDirectSubFlows}.");
@@ -4961,6 +5160,7 @@ public class AgentOrchestrationService(
         FleetDbContext scopedDb,
         string executionId,
         IReadOnlyList<Models.WorkItemDto> directChildWorkItems,
+        AgentRole[][] orchestrationPipeline,
         IReadOnlyDictionary<AgentRole, string> completedOutputs)
     {
         var execution = await scopedDb.AgentExecutions.FindAsync(executionId);
@@ -4988,7 +5188,7 @@ public class AgentOrchestrationService(
             ? "Orchestrating sub-flows"
             : $"Orchestrating {directChildWorkItems.Count} sub-flow(s)";
         execution.Progress = Math.Max(0.2, Math.Min(execution.Progress, 0.95));
-        execution.Agents = BuildAgentInfoList(OrchestrationPreludePipeline, carryForwardOutputs);
+        execution.Agents = BuildAgentInfoList(orchestrationPipeline, carryForwardOutputs);
         await scopedDb.SaveChangesAsync();
     }
 
@@ -5558,6 +5758,22 @@ public class AgentOrchestrationService(
         return ApplyAssignedAgentLimit(arranged, assignmentMode, assignedAgentCount);
     }
 
+    internal static AgentRole[][] BuildOrchestrationPipelineFromFollowingRoles(
+        IReadOnlyCollection<AgentRole> followingRoles,
+        string? assignmentMode,
+        int? assignedAgentCount)
+    {
+        var requestedRoles = followingRoles
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
+            .ToList();
+        if (!requestedRoles.Contains(AgentRole.Contracts))
+            requestedRoles.Insert(0, AgentRole.Contracts);
+
+        var arranged = ArrangePipeline(requestedRoles);
+        arranged = ApplyAssignedAgentLimit(arranged, assignmentMode, assignedAgentCount);
+        return EnsureContractsInOrchestrationPipeline(arranged, AgentExecutionModes.Orchestration);
+    }
+
     internal static AgentRole[][] EnsureContractsInOrchestrationPipeline(
         AgentRole[][] pipeline,
         string? executionMode)
@@ -5568,12 +5784,13 @@ public class AgentOrchestrationService(
             return pipeline;
         }
 
-        return
-        [
-            [AgentRole.Manager],
-            [AgentRole.Planner],
-            [AgentRole.Contracts],
-        ];
+        var requestedRoles = pipeline
+            .SelectMany(group => group)
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
+            .ToList();
+        requestedRoles.Insert(0, AgentRole.Contracts);
+
+        return ArrangePipeline(requestedRoles);
     }
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
@@ -7181,6 +7398,28 @@ public class AgentOrchestrationService(
             prResponse.IsSuccessStatusCode,
             prResponse.StatusCode,
             prResponseBody);
+    }
+
+    private async Task<string?> ResolveExecutionTargetBranchAsync(
+        string projectId,
+        string? requestedBranch,
+        string? parentExecutionId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRequestedBranch = requestedBranch?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedRequestedBranch))
+            return normalizedRequestedBranch;
+
+        if (string.IsNullOrWhiteSpace(parentExecutionId))
+            return null;
+
+        var parentBranchName = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(execution => execution.ProjectId == projectId && execution.Id == parentExecutionId)
+            .Select(execution => execution.BranchName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return ResolveRequestedOrInheritedTargetBranch(null, parentBranchName);
     }
 
     private async Task<string> ResolvePullRequestTargetBranchAsync(

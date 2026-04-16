@@ -37,6 +37,7 @@ import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
 import { FleetRocketLogo } from '../../components/shared'
 import { useState } from 'react'
+import { getNextSubFlowExpansionState, isSubFlowExpandedByDefault } from './subFlowExpansion'
 
 type ExecutionStepStatus = AgentInfo['status'] | 'paused' | 'queued'
 type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
@@ -55,6 +56,36 @@ const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
     'Resolved (AI)',
     'Closed',
 ])
+
+function getSubFlowDisplayPriority(status: ExecutionStepStatus): number {
+    switch (status) {
+        case 'completed':
+            return 0
+        case 'running':
+            return 1
+        case 'queued':
+        case 'paused':
+            return 2
+        case 'failed':
+        case 'cancelled':
+            return 3
+        default:
+            return 2
+    }
+}
+
+function comparePlannedSubFlowSteps(left: PlannedSubFlowStep, right: PlannedSubFlowStep): number {
+    const statusPriorityDifference = getSubFlowDisplayPriority(left.status) - getSubFlowDisplayPriority(right.status)
+    if (statusPriorityDifference !== 0) {
+        return statusPriorityDifference
+    }
+
+    if (left.workItemNumber !== right.workItemNumber) {
+        return left.workItemNumber - right.workItemNumber
+    }
+
+    return left.title.localeCompare(right.title)
+}
 
 const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'subtle'> = {
     running: 'warning',
@@ -791,7 +822,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                     : Math.max(0, Math.min(subFlow.progress ?? 0, 1)),
             }))
 
-        return [...steps, ...orphanLiveSteps].sort((left, right) => left.workItemNumber - right.workItemNumber)
+        return [...steps, ...orphanLiveSteps].sort(comparePlannedSubFlowSteps)
     })()
     const displayedSubFlowCount = execution.executionMode === 'orchestration'
         ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
@@ -806,17 +837,12 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
         reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating ? `Review: ${lastReviewRecommendation}` : null,
     ].filter((value): value is string => Boolean(value))
 
-    const toggleSubFlowExpansion = (subFlowId: string) => {
+    const toggleSubFlowExpansion = (subFlow: AgentExecution) => {
         setExpandedSubFlowIds((current) => ({
             ...current,
-            [subFlowId]: !current[subFlowId],
+            [subFlow.id]: getNextSubFlowExpansionState(current[subFlow.id], subFlow),
         }))
     }
-
-    const isSubFlowExpandedByDefault = (subFlow: AgentExecution) =>
-        subFlow.status === 'running' ||
-        subFlow.status === 'paused' ||
-        subFlow.status === 'failed'
 
     const renderSubFlowSummaryCard = (subFlow: AgentExecution) => {
         const isExpanded = expandedSubFlowIds[subFlow.id] ?? isSubFlowExpandedByDefault(subFlow)
@@ -850,7 +876,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                         appearance="subtle"
                         size="small"
                         icon={isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-                        onClick={() => toggleSubFlowExpansion(subFlow.id)}
+                        onClick={() => toggleSubFlowExpansion(subFlow)}
                     >
                         {isExpanded ? 'Hide' : 'Show'}
                     </Button>

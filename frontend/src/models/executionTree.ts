@@ -1,6 +1,28 @@
 import type { AgentExecution } from './agent'
 
+function getSubFlowStatusPriority(status: AgentExecution['status']): number {
+  switch (status) {
+    case 'completed':
+      return 0
+    case 'running':
+      return 1
+    case 'queued':
+    case 'paused':
+      return 2
+    case 'failed':
+    case 'cancelled':
+      return 3
+    default:
+      return 2
+  }
+}
+
 function compareSubFlowExecutions(left: AgentExecution, right: AgentExecution): number {
+  const statusPriorityDifference = getSubFlowStatusPriority(left.status) - getSubFlowStatusPriority(right.status)
+  if (statusPriorityDifference !== 0) {
+    return statusPriorityDifference
+  }
+
   if (left.workItemId !== right.workItemId) {
     return left.workItemId - right.workItemId
   }

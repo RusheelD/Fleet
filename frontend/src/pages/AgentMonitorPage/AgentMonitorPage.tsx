@@ -24,15 +24,16 @@ import {
     DismissCircleRegular,
     SearchRegular,
     ArrowClockwiseRegular,
+    BotRegular,
 } from '@fluentui/react-icons'
 import { FleetRocketLogo, PageHeader } from '../../components/shared'
-import { ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
+import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import { executionTreeHasAnyStatus, findExecutionInCollection } from '../../models/executionTree'
+import { executionTreeHasAnyStatus, findExecutionInCollection, flattenExecutionCollection } from '../../models/executionTree'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
@@ -82,6 +83,33 @@ const useStyles = makeStyles({
     },
     toolbarButtonMobile: {
         flex: '1 1 120px',
+    },
+    summaryRow: {
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: appTokens.space.xl,
+        flexWrap: 'wrap',
+    },
+    summaryRowCompact: {
+        gap: '0.5rem',
+        marginBottom: '0.75rem',
+    },
+    summaryRowMobile: {
+        gap: '0.5rem',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    },
+    summaryIconWarning: {
+        color: appTokens.color.warning,
+    },
+    summaryIconSuccess: {
+        color: appTokens.color.success,
+    },
+    summaryIconDanger: {
+        color: appTokens.color.danger,
+    },
+    summaryIconBrand: {
+        color: appTokens.color.brand,
     },
     tabListSpacing: {
         marginBottom: appTokens.space.lg,
@@ -270,6 +298,7 @@ export function AgentMonitorPage() {
 
     const allExecutions = useMemo(() => executions ?? [], [executions])
     const allLogs = useMemo(() => logs ?? [], [logs])
+    const flattenedExecutions = useMemo(() => flattenExecutionCollection(allExecutions), [allExecutions])
     const active = useMemo(
         () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
         [allExecutions],
@@ -283,6 +312,13 @@ export function AgentMonitorPage() {
     const completed = useMemo(() => allExecutions.filter((e) => e.status === 'completed'), [allExecutions])
     const failed = useMemo(() => allExecutions.filter((e) => e.status === 'failed'), [allExecutions])
     const cancelled = useMemo(() => allExecutions.filter((e) => e.status === 'cancelled'), [allExecutions])
+    const activeAgentCount = useMemo(
+        () => flattenedExecutions.reduce(
+            (count, execution) => count + execution.agents.filter((agent) => agent.status === 'running').length,
+            0,
+        ),
+        [flattenedExecutions],
+    )
 
     const filteredByTab =
         tab === 'active' ? active :
@@ -616,6 +652,56 @@ export function AgentMonitorPage() {
                     </div>
                 }
             />
+            <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact, isMobile && styles.summaryRowMobile)}>
+                <SummaryCard
+                    icon={<PlayRegular />}
+                    iconClassName={styles.summaryIconWarning}
+                    value={active.length}
+                    label="Active Flows"
+                    onClick={() => setTab('active')}
+                    isActive={tab === 'active'}
+                />
+                <SummaryCard
+                    icon={<PauseRegular />}
+                    iconClassName={styles.summaryIconBrand}
+                    value={paused.length}
+                    label="Paused"
+                    onClick={() => setTab('paused')}
+                    isActive={tab === 'paused'}
+                />
+                <SummaryCard
+                    icon={<CheckmarkCircleRegular />}
+                    iconClassName={styles.summaryIconSuccess}
+                    value={completed.length}
+                    label="Completed"
+                    onClick={() => setTab('completed')}
+                    isActive={tab === 'completed'}
+                />
+                <SummaryCard
+                    icon={<ErrorCircleRegular />}
+                    iconClassName={styles.summaryIconDanger}
+                    value={failed.length}
+                    label="Failed"
+                    onClick={() => setTab('failed')}
+                    isActive={tab === 'failed'}
+                />
+                <SummaryCard
+                    icon={<DismissCircleRegular />}
+                    iconClassName={styles.summaryIconDanger}
+                    value={cancelled.length}
+                    label="Cancelled"
+                    onClick={() => setTab('cancelled')}
+                    isActive={tab === 'cancelled'}
+                />
+                <SummaryCard
+                    icon={<BotRegular />}
+                    iconClassName={styles.summaryIconBrand}
+                    value={activeAgentCount}
+                    label="Active Agents"
+                    onClick={() => setTab('active')}
+                    isActive={tab === 'active'}
+                />
+            </div>
             <TabList
                 selectedValue={tab}
                 onTabSelect={(_e, data) => setTab(data.value as string)}
