@@ -1,7 +1,11 @@
+FROM node:20-bookworm-slim AS node-runtime
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS final
 WORKDIR /app
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
     apt-get update; \
@@ -9,27 +13,22 @@ RUN set -eux; \
         git \
         ca-certificates \
         openssh-client \
-        curl \
-        gnupg \
         python3 \
         python3-pip \
         python3-venv \
         openjdk-21-jdk-headless; \
     rm -rf /var/lib/apt/lists/*
 
-RUN set -eux; \
-    mkdir -p /etc/apt/keyrings; \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends nodejs; \
-    rm -rf /var/lib/apt/lists/*
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node-runtime /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 RUN set -eux; \
     ln -sf /usr/bin/python3 /usr/local/bin/python; \
     ln -sf /usr/bin/pip3 /usr/local/bin/pip; \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     java_bin="$(readlink -f "$(command -v javac)")"; \
     java_home="$(dirname "$(dirname "$java_bin")")"; \
     mkdir -p /usr/lib/jvm; \
@@ -38,19 +37,36 @@ RUN set -eux; \
 ENV FLEET_SHARED_NODE_TOOL_ROOT=/opt/fleet-node-tools \
     FLEET_SHARED_NODE_MODULES_PATH=/opt/fleet-node-tools/node_modules \
     FLEET_SHARED_NODE_BIN_PATH=/opt/fleet-node-tools/node_modules/.bin \
-    FLEET_SHARED_PYTHON_SITE_PACKAGES=/opt/fleet-python-tools
+    FLEET_SHARED_PYTHON_SITE_PACKAGES=/opt/fleet-python-tools \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_PROGRESS=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
 RUN set -eux; \
     mkdir -p "$FLEET_SHARED_NODE_TOOL_ROOT" "$FLEET_SHARED_PYTHON_SITE_PACKAGES"; \
-    npm install --prefix "$FLEET_SHARED_NODE_TOOL_ROOT" \
-        vitest \
-        jsdom \
-        happy-dom \
-        @vitest/coverage-v8 \
-        @testing-library/dom \
-        @testing-library/jest-dom \
-        @testing-library/react; \
-    python3 -m pip install --no-cache-dir --target "$FLEET_SHARED_PYTHON_SITE_PACKAGES" \
+    printf '%s\n' \
+        '{' \
+        '  "name": "fleet-shared-node-tools",' \
+        '  "private": true,' \
+        '  "dependencies": {' \
+        '    "@testing-library/dom": "10.4.1",' \
+        '    "@testing-library/jest-dom": "6.9.1",' \
+        '    "@testing-library/react": "16.3.2",' \
+        '    "@vitest/coverage-v8": "4.1.4",' \
+        '    "happy-dom": "20.9.0",' \
+        '    "jsdom": "29.0.2",' \
+        '    "react": "19.2.1",' \
+        '    "react-dom": "19.2.1",' \
+        '    "vitest": "4.1.4"' \
+        '  }' \
+        '}' \
+        > "$FLEET_SHARED_NODE_TOOL_ROOT/package.json"; \
+    cd "$FLEET_SHARED_NODE_TOOL_ROOT"; \
+    npm install --omit=dev; \
+    python3 -m pip install --target "$FLEET_SHARED_PYTHON_SITE_PACKAGES" \
         pytest \
         pytest-asyncio \
         pytest-cov \
