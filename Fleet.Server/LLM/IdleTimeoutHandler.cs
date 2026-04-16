@@ -16,7 +16,7 @@ public static class IdleTimeoutHandler
     /// <summary>Default idle timeout between chunks (90 seconds).</summary>
     public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(90);
     /// <summary>Default max wait for response headers / first byte.</summary>
-    public static readonly TimeSpan DefaultResponseHeadersTimeout = TimeSpan.FromSeconds(75);
+    public static readonly TimeSpan DefaultResponseHeadersTimeout = TimeSpan.FromSeconds(180);
 
     /// <summary>
     /// Sends an HTTP request and reads the full response body with idle-timeout
@@ -30,9 +30,7 @@ public static class IdleTimeoutHandler
         TimeSpan? idleTimeout = null)
     {
         var timeout = idleTimeout ?? DefaultIdleTimeout;
-        var responseHeadersTimeout = timeout < DefaultResponseHeadersTimeout
-            ? timeout
-            : DefaultResponseHeadersTimeout;
+        var responseHeadersTimeout = GetResponseHeadersTimeout(idleTimeout);
 
         try
         {
@@ -54,6 +52,19 @@ public static class IdleTimeoutHandler
             using var retryRequest = await CloneRequestAsync(request, cancellationToken);
             return await ReadWithBufferedFallbackAsync(httpClient, retryRequest, timeout, cancellationToken);
         }
+    }
+
+    internal static TimeSpan GetResponseHeadersTimeout(TimeSpan? idleTimeout = null)
+    {
+        if (!idleTimeout.HasValue)
+        {
+            return DefaultResponseHeadersTimeout;
+        }
+
+        var timeout = idleTimeout.Value;
+        return timeout < DefaultResponseHeadersTimeout
+            ? timeout
+            : DefaultResponseHeadersTimeout;
     }
 
     private static async Task<(HttpStatusCode StatusCode, string Body)> ReadWithStreamingIdleDetectionAsync(

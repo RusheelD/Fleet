@@ -1,5 +1,33 @@
 import type { AgentExecution } from './agent'
 
+function compareSubFlowExecutions(left: AgentExecution, right: AgentExecution): number {
+  if (left.workItemId !== right.workItemId) {
+    return left.workItemId - right.workItemId
+  }
+
+  const leftStartedAt = Date.parse(left.startedAt)
+  const rightStartedAt = Date.parse(right.startedAt)
+  if (!Number.isNaN(leftStartedAt) && !Number.isNaN(rightStartedAt) && leftStartedAt !== rightStartedAt) {
+    return leftStartedAt - rightStartedAt
+  }
+
+  const titleComparison = left.workItemTitle.localeCompare(right.workItemTitle)
+  if (titleComparison !== 0) {
+    return titleComparison
+  }
+
+  return left.id.localeCompare(right.id)
+}
+
+function sortSubFlowExecutions(executions: AgentExecution[]): AgentExecution[] {
+  return [...executions]
+    .map((execution) => ({
+      ...execution,
+      subFlows: sortSubFlowExecutions(execution.subFlows ?? []),
+    }))
+    .sort(compareSubFlowExecutions)
+}
+
 function collectExecutionIds(execution: AgentExecution, ids: Set<string>) {
   ids.add(execution.id)
 
@@ -23,6 +51,7 @@ function pruneNestedDuplicates(executions: AgentExecution[]): AgentExecution[] {
       ...execution,
       subFlows: pruneNestedDuplicates(execution.subFlows ?? []),
     }))
+    .sort(compareSubFlowExecutions)
 }
 
 function hasExecutionStatus(
@@ -39,7 +68,7 @@ function hasExecutionStatus(
 export function normalizeExecutionTree(execution: AgentExecution): AgentExecution {
   return {
     ...execution,
-    subFlows: (execution.subFlows ?? []).map(normalizeExecutionTree),
+    subFlows: sortSubFlowExecutions((execution.subFlows ?? []).map(normalizeExecutionTree)),
   }
 }
 
@@ -92,7 +121,7 @@ export function mergeExecutionSnapshot(existing: AgentExecution, incoming: Agent
       ? incoming.reviewLoopCount
       : existing.reviewLoopCount,
     lastReviewRecommendation: incoming.lastReviewRecommendation ?? existing.lastReviewRecommendation,
-    subFlows: mergedChildren,
+    subFlows: sortSubFlowExecutions(mergedChildren),
   }
 }
 

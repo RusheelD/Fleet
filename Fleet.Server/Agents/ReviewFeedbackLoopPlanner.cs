@@ -195,7 +195,7 @@ internal static partial class ReviewFeedbackLoopPlanner
     public static ReviewExecutionSummary SummarizeExecutionReviews(IEnumerable<AgentPhaseResult> phaseResults)
     {
         var reviewResults = phaseResults
-            .Where(result => result.Success && string.Equals(result.Role, AgentRole.Review.ToString(), StringComparison.OrdinalIgnoreCase))
+            .Where(result => result.Success && AgentOrchestrationService.MatchesAgentRoleLabel(result.Role, AgentRole.Review))
             .OrderBy(result => result.PhaseOrder)
             .ToList();
 

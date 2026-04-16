@@ -8,6 +8,14 @@ namespace Fleet.Server.Tests.LLM;
 public class IdleTimeoutHandlerTests
 {
     [TestMethod]
+    public void GetResponseHeadersTimeout_UsesThreeMinuteDefaultWithoutStretchingShortCustomTimeouts()
+    {
+        Assert.AreEqual(TimeSpan.FromSeconds(180), IdleTimeoutHandler.GetResponseHeadersTimeout());
+        Assert.AreEqual(TimeSpan.FromMilliseconds(60), IdleTimeoutHandler.GetResponseHeadersTimeout(TimeSpan.FromMilliseconds(60)));
+        Assert.AreEqual(TimeSpan.FromSeconds(180), IdleTimeoutHandler.GetResponseHeadersTimeout(TimeSpan.FromSeconds(300)));
+    }
+
+    [TestMethod]
     public async Task SendWithIdleTimeoutAsync_WhenHeadersNeverArrive_FailsFastWithoutBufferedRetry()
     {
         var handler = new DelayedResponseHandler(TimeSpan.FromMilliseconds(250));

@@ -1,10 +1,8 @@
 import {
     makeStyles,
     Button,
-    Body1,
     Caption1,
     Spinner,
-    Divider,
     Link,
 } from '@fluentui/react-components'
 import { useAuth } from '../../hooks'
@@ -22,13 +20,8 @@ const useStyles = makeStyles({
         gap: appTokens.space.sm,
         alignItems: 'stretch',
     },
-    dividerRow: {
-        paddingTop: appTokens.space.xs,
-        paddingBottom: appTokens.space.xs,
-    },
     footer: {
-        textAlign: 'center',
-        paddingTop: appTokens.space.sm,
+        color: appTokens.color.textSecondary,
     },
     configError: {
         color: appTokens.color.danger,
@@ -78,13 +71,10 @@ export function SignUpPage() {
 
     return (
         <AuthShell
-            eyebrow="Start planning with clarity"
-            title="Create your Fleet account"
-            subtitle="Choose email or Google to start organizing work, memory, playbooks, and agent execution in one place."
             footer={(
-                <Body1 align="center" className={styles.footer}>
-                    Already have an account? <Link onClick={() => void navigate('/login')}>Log in</Link>
-                </Body1>
+                <Link className={styles.footer} onClick={() => void navigate('/login')}>
+                    Log in
+                </Link>
             )}
         >
             <div className={styles.actions}>
@@ -115,12 +105,6 @@ export function SignUpPage() {
                                 {authConfigError}
                             </Caption1>
                         )}
-                        <div className={styles.dividerRow}>
-                            <Divider />
-                        </div>
-                        <Body1 align="center">
-                            Start free, connect your repos later, and shape the workspace around how your team already works.
-                        </Body1>
                     </>
                 )}
             </div>

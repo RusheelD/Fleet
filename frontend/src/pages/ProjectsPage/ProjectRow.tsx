@@ -4,13 +4,7 @@ import {
     mergeClasses,
     Caption1,
     Text,
-    Badge,
 } from '@fluentui/react-components'
-import {
-    FolderRegular,
-    BotRegular,
-    ClockRegular,
-} from '@fluentui/react-icons'
 import { usePreferences } from '../../hooks'
 import type { ProjectData } from '../../models'
 import { appTokens } from '../../styles/appTokens'
@@ -69,9 +63,6 @@ const useStyles = makeStyles({
         lineHeight: appTokens.lineHeight.tight,
     },
     repoCell: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: appTokens.space.xs,
         minWidth: 0,
         color: appTokens.color.textTertiary,
     },
@@ -85,20 +76,10 @@ const useStyles = makeStyles({
         fontVariantNumeric: 'tabular-nums',
     },
     agentCell: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: appTokens.space.xs,
+        textAlign: 'center',
     },
     activityCell: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: appTokens.space.xs,
         color: appTokens.color.textMuted,
-    },
-    clockIcon: {
-        fontSize: appTokens.fontSize.iconXs,
-        flexShrink: 0,
     },
 })
 
@@ -121,24 +102,13 @@ export const ProjectRow = memo(function ProjectRow({ project, onClick }: Project
                 </Caption1>
             </div>
             <div className={styles.repoCell}>
-                <FolderRegular />
-                <Caption1 className={styles.repoText}>{project.repo}</Caption1>
+                <Caption1 className={styles.repoText}>{project.repo || 'No repo linked'}</Caption1>
             </div>
             <Text className={styles.statCell}>{project.workItems.total}</Text>
             <Text className={styles.statCell}>{project.workItems.active}</Text>
             <Text className={styles.statCell}>{project.workItems.resolved}</Text>
-            <div className={styles.agentCell}>
-                <BotRegular />
-                {project.agents.running > 0 ? (
-                    <Badge appearance="filled" color="success" size="tiny">
-                        {project.agents.running}
-                    </Badge>
-                ) : (
-                    <Caption1>0</Caption1>
-                )}
-            </div>
+            <Caption1 className={styles.agentCell}>{project.agents.running}</Caption1>
             <div className={styles.activityCell}>
-                <ClockRegular className={styles.clockIcon} />
                 <Caption1>{project.lastActivity}</Caption1>
             </div>
         </div>

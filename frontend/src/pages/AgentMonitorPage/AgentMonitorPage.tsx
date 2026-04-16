@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
 import {
-    Card,
     makeStyles,
     mergeClasses,
     Tab,
@@ -18,7 +17,6 @@ import {
     Caption1,
 } from '@fluentui/react-components'
 import {
-    BotRegular,
     PlayRegular,
     PauseRegular,
     CheckmarkCircleRegular,
@@ -28,14 +26,13 @@ import {
     ArrowClockwiseRegular,
 } from '@fluentui/react-icons'
 import { FleetRocketLogo, PageHeader } from '../../components/shared'
-import { InfoBadge } from '../../components/shared/InfoBadge'
-import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
+import { ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import { executionTreeHasAnyStatus, findExecutionInCollection, flattenExecutionCollection } from '../../models/executionTree'
+import { executionTreeHasAnyStatus, findExecutionInCollection } from '../../models/executionTree'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
@@ -85,33 +82,6 @@ const useStyles = makeStyles({
     },
     toolbarButtonMobile: {
         flex: '1 1 120px',
-    },
-    summaryRow: {
-        display: 'flex',
-        gap: '1rem',
-        marginBottom: appTokens.space.xl,
-        flexWrap: 'wrap',
-    },
-    summaryRowCompact: {
-        gap: '0.5rem',
-        marginBottom: '0.75rem',
-    },
-    summaryRowMobile: {
-        gap: '0.5rem',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    },
-    summaryIconWarning: {
-        color: appTokens.color.warning,
-    },
-    summaryIconSuccess: {
-        color: appTokens.color.success,
-    },
-    summaryIconDanger: {
-        color: appTokens.color.danger,
-    },
-    summaryIconBrand: {
-        color: appTokens.color.brand,
     },
     tabListSpacing: {
         marginBottom: appTokens.space.lg,
@@ -258,48 +228,6 @@ const useStyles = makeStyles({
     emptyExecutionStateDetail: {
         color: appTokens.color.textTertiary,
     },
-    statusStrip: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: appTokens.space.md,
-        flexWrap: 'wrap',
-        paddingTop: appTokens.space.md,
-        paddingRight: appTokens.space.lg,
-        paddingBottom: appTokens.space.md,
-        paddingLeft: appTokens.space.lg,
-        marginBottom: appTokens.space.md,
-        borderRadius: appTokens.radius.lg,
-        border: appTokens.border.subtle,
-        backgroundColor: appTokens.color.surface,
-        boxShadow: appTokens.shadow.card,
-    },
-    statusStripMobile: {
-        paddingTop: appTokens.space.sm,
-        paddingRight: appTokens.space.md,
-        paddingBottom: appTokens.space.sm,
-        paddingLeft: appTokens.space.md,
-    },
-    statusStripLive: {
-        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceAlt} 100%)`,
-    },
-    statusStripReconnecting: {
-        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.infoSurface} 100%)`,
-    },
-    statusStripConnecting: {
-        backgroundImage: `linear-gradient(145deg, ${appTokens.color.surface} 0%, ${appTokens.color.surfaceBrand} 120%)`,
-    },
-    statusStripMeta: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xxxs,
-        minWidth: 0,
-    },
-    statusStripPills: {
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: appTokens.space.xs,
-    },
 })
 
 export function AgentMonitorPage() {
@@ -342,7 +270,6 @@ export function AgentMonitorPage() {
 
     const allExecutions = useMemo(() => executions ?? [], [executions])
     const allLogs = useMemo(() => logs ?? [], [logs])
-    const flatExecutions = useMemo(() => flattenExecutionCollection(allExecutions), [allExecutions])
     const active = useMemo(
         () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
         [allExecutions],
@@ -356,17 +283,6 @@ export function AgentMonitorPage() {
     const completed = useMemo(() => allExecutions.filter((e) => e.status === 'completed'), [allExecutions])
     const failed = useMemo(() => allExecutions.filter((e) => e.status === 'failed'), [allExecutions])
     const cancelled = useMemo(() => allExecutions.filter((e) => e.status === 'cancelled'), [allExecutions])
-    const running = useMemo(
-        () => flatExecutions.filter((execution) => execution.status === 'running'),
-        [flatExecutions],
-    )
-    const activeAgentCount = useMemo(
-        () => flatExecutions.reduce(
-            (acc, execution) => acc + execution.agents.filter((agent) => agent.status === 'running').length,
-            0,
-        ),
-        [flatExecutions],
-    )
 
     const filteredByTab =
         tab === 'active' ? active :
@@ -417,17 +333,6 @@ export function AgentMonitorPage() {
 
         return `${filteredExecutions.length} run${filteredExecutions.length === 1 ? '' : 's'} in view`
     }, [currentTabLabel, filteredByTab.length, filteredExecutions.length, searchQuery])
-    const connectionStatusLabel = serverEventState === 'live'
-        ? 'Live event stream connected'
-        : serverEventState === 'reconnecting'
-            ? 'Live stream reconnecting'
-            : 'Connecting to live stream'
-    const connectionStatusDetail = serverEventState === 'live'
-        ? 'Runs, logs, and work-item updates should appear with minimal delay.'
-        : serverEventState === 'reconnecting'
-            ? 'Fleet is temporarily leaning on fallback polling while the stream reconnects.'
-            : 'Fleet is warming up the event stream before switching to live updates.'
-
     const emptyExecutionState = useMemo(() => {
         if (searchQuery.trim()) {
             return {
@@ -711,82 +616,6 @@ export function AgentMonitorPage() {
                     </div>
                 }
             />
-            <Card
-                className={mergeClasses(
-                    styles.statusStrip,
-                    isMobile && styles.statusStripMobile,
-                    serverEventState === 'live'
-                        ? styles.statusStripLive
-                        : serverEventState === 'reconnecting'
-                            ? styles.statusStripReconnecting
-                            : styles.statusStripConnecting,
-                )}
-            >
-                <div className={styles.statusStripMeta}>
-                    <Text weight="semibold">{connectionStatusLabel}</Text>
-                    <Caption1>{connectionStatusDetail}</Caption1>
-                </div>
-                <div className={styles.statusStripPills}>
-                    <InfoBadge appearance={serverEventState === 'live' ? 'filled' : 'tint'}>
-                        {serverEventState}
-                    </InfoBadge>
-                    <InfoBadge appearance="tint">{allExecutions.length} total runs</InfoBadge>
-                    <InfoBadge appearance="tint">{allLogs.length} log entries</InfoBadge>
-                    <InfoBadge appearance="tint">{workItems?.length ?? 0} executable items</InfoBadge>
-                </div>
-            </Card>
-
-            <div className={mergeClasses(styles.summaryRow, isDense && styles.summaryRowCompact, isMobile && styles.summaryRowMobile)}>
-                <SummaryCard
-                    icon={<PlayRegular />}
-                    iconClassName={styles.summaryIconWarning}
-                    value={running.length}
-                    label="Running"
-                    onClick={() => setTab('active')}
-                    isActive={tab === 'active'}
-                />
-                <SummaryCard
-                    icon={<PauseRegular />}
-                    iconClassName={styles.summaryIconBrand}
-                    value={paused.length}
-                    label="Paused"
-                    onClick={() => setTab('paused')}
-                    isActive={tab === 'paused'}
-                />
-                <SummaryCard
-                    icon={<CheckmarkCircleRegular />}
-                    iconClassName={styles.summaryIconSuccess}
-                    value={completed.length}
-                    label="Completed"
-                    onClick={() => setTab('completed')}
-                    isActive={tab === 'completed'}
-                />
-                <SummaryCard
-                    icon={<ErrorCircleRegular />}
-                    iconClassName={styles.summaryIconDanger}
-                    value={failed.length}
-                    label="Failed"
-                    onClick={() => setTab('failed')}
-                    isActive={tab === 'failed'}
-                />
-                <SummaryCard
-                    icon={<DismissCircleRegular />}
-                    iconClassName={styles.summaryIconDanger}
-                    value={cancelled.length}
-                    label="Cancelled"
-                    onClick={() => setTab('cancelled')}
-                    isActive={tab === 'cancelled'}
-                />
-                <SummaryCard
-                    icon={<BotRegular />}
-                    iconClassName={styles.summaryIconBrand}
-                    value={activeAgentCount}
-                    label="Active Agents"
-                    onClick={() => setTab('active')}
-                    isActive={tab === 'active'}
-                />
-            </div>
-
             <TabList
                 selectedValue={tab}
                 onTabSelect={(_e, data) => setTab(data.value as string)}
@@ -809,9 +638,6 @@ export function AgentMonitorPage() {
                                 <Text weight="semibold">{currentTabLabel}</Text>
                                 <Caption1 className={styles.executionPanelSubtitle}>{executionPanelSubtitle}</Caption1>
                             </div>
-                            <InfoBadge appearance="tint" size="small">
-                                {filteredExecutions.length} result{filteredExecutions.length === 1 ? '' : 's'}
-                            </InfoBadge>
                         </div>
                         <div className={mergeClasses(styles.executionList, isDense && styles.executionListCompact)}>
                             {filteredExecutions.length === 0 ? (

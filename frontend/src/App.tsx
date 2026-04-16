@@ -1,25 +1,26 @@
-import { Suspense, lazy } from 'react'
+import { Suspense } from 'react'
 import { Spinner, makeStyles } from '@fluentui/react-components'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout'
 import { ErrorBoundary, ProtectedRoute } from './components/shared'
+import { lazyWithRetry } from './utils/staleChunkRecovery'
 
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((module) => ({ default: module.ProjectsPage })))
-const ProjectDashboardPage = lazy(() => import('./pages/ProjectDashboardPage').then((module) => ({ default: module.ProjectDashboardPage })))
-const WorkItemsPage = lazy(() => import('./pages/WorkItemsPage').then((module) => ({ default: module.WorkItemsPage })))
-const AgentMonitorPage = lazy(() => import('./pages/AgentMonitorPage').then((module) => ({ default: module.AgentMonitorPage })))
-const ProjectMemoryPage = lazy(() => import('./pages/ProjectMemoryPage').then((module) => ({ default: module.ProjectMemoryPage })))
-const ProjectPlaybooksPage = lazy(() => import('./pages/ProjectPlaybooksPage').then((module) => ({ default: module.ProjectPlaybooksPage })))
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
-const SubscriptionPage = lazy(() => import('./pages/SubscriptionPage').then((module) => ({ default: module.SubscriptionPage })))
-const SearchPage = lazy(() => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })))
-const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then((module) => ({ default: module.NotificationsPage })))
-const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsPage })))
-const MemoryPage = lazy(() => import('./pages/MemoryPage').then((module) => ({ default: module.MemoryPage })))
-const PlaybooksPage = lazy(() => import('./pages/PlaybooksPage').then((module) => ({ default: module.PlaybooksPage })))
-const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
-const SignUpPage = lazy(() => import('./pages/SignUpPage').then((module) => ({ default: module.SignUpPage })))
-const GitHubCallbackPage = lazy(() => import('./pages/GitHubCallbackPage').then((module) => ({ default: module.GitHubCallbackPage })))
+const ProjectsPage = lazyWithRetry(() => import('./pages/ProjectsPage').then((module) => ({ default: module.ProjectsPage })))
+const ProjectDashboardPage = lazyWithRetry(() => import('./pages/ProjectDashboardPage').then((module) => ({ default: module.ProjectDashboardPage })))
+const WorkItemsPage = lazyWithRetry(() => import('./pages/WorkItemsPage').then((module) => ({ default: module.WorkItemsPage })))
+const AgentMonitorPage = lazyWithRetry(() => import('./pages/AgentMonitorPage').then((module) => ({ default: module.AgentMonitorPage })))
+const ProjectMemoryPage = lazyWithRetry(() => import('./pages/ProjectMemoryPage').then((module) => ({ default: module.ProjectMemoryPage })))
+const ProjectPlaybooksPage = lazyWithRetry(() => import('./pages/ProjectPlaybooksPage').then((module) => ({ default: module.ProjectPlaybooksPage })))
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const SubscriptionPage = lazyWithRetry(() => import('./pages/SubscriptionPage').then((module) => ({ default: module.SubscriptionPage })))
+const SearchPage = lazyWithRetry(() => import('./pages/SearchPage').then((module) => ({ default: module.SearchPage })))
+const NotificationsPage = lazyWithRetry(() => import('./pages/NotificationsPage').then((module) => ({ default: module.NotificationsPage })))
+const IntegrationsPage = lazyWithRetry(() => import('./pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsPage })))
+const MemoryPage = lazyWithRetry(() => import('./pages/MemoryPage').then((module) => ({ default: module.MemoryPage })))
+const PlaybooksPage = lazyWithRetry(() => import('./pages/PlaybooksPage').then((module) => ({ default: module.PlaybooksPage })))
+const LoginPage = lazyWithRetry(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
+const SignUpPage = lazyWithRetry(() => import('./pages/SignUpPage').then((module) => ({ default: module.SignUpPage })))
+const GitHubCallbackPage = lazyWithRetry(() => import('./pages/GitHubCallbackPage').then((module) => ({ default: module.GitHubCallbackPage })))
 
 const useStyles = makeStyles({
   loadingShell: {

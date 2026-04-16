@@ -8,7 +8,6 @@ import {
     Card,
     CardHeader,
     CardPreview,
-    Badge,
 } from '@fluentui/react-components'
 import {
     FolderRegular,
@@ -18,7 +17,6 @@ import {
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import type { ProjectData } from '../../models'
-import { InfoBadge } from '../../components/shared/InfoBadge'
 
 const useStyles = makeStyles({
     projectCard: {
@@ -77,25 +75,9 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-    statsRow: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        gap: '0.5rem',
-    },
-    stat: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.25rem',
-        paddingTop: appTokens.space.xxs,
-        paddingBottom: appTokens.space.xxs,
-    },
-    statValue: {
-        fontWeight: 700,
-        fontSize: '18px',
-    },
-    statLabel: {
-        fontSize: '12px',
-        color: appTokens.color.textMuted,
+    statsText: {
+        color: appTokens.color.textSecondary,
+        overflowWrap: 'anywhere',
     },
     activityRow: {
         display: 'flex',
@@ -148,33 +130,18 @@ export const ProjectCard = memo(function ProjectCard({ project, onClick }: Proje
                     <Text size={200} className={styles.repoText}>{project.repo || 'Repository not linked yet'}</Text>
                 </div>
 
-                <div className={styles.statsRow}>
-                    <div className={styles.stat}>
-                        <Text className={styles.statValue}>{project.workItems.total}</Text>
-                        <Text className={styles.statLabel}>items</Text>
-                    </div>
-                    <div className={styles.stat}>
-                        <Text className={styles.statValue}>{project.workItems.active}</Text>
-                        <Text className={styles.statLabel}>active</Text>
-                    </div>
-                    <div className={styles.stat}>
-                        <Text className={styles.statValue}>{project.workItems.resolved}</Text>
-                        <Text className={styles.statLabel}>resolved</Text>
-                    </div>
-                </div>
+                <Caption1 className={styles.statsText}>
+                    {project.workItems.total} items | {project.workItems.active} active | {project.workItems.resolved} resolved
+                </Caption1>
 
                 <div className={mergeClasses(styles.activityRow, isMobile && styles.activityRowMobile)}>
                     <div className={styles.agentBadge}>
                         <BotRegular />
-                        {project.agents.running > 0 ? (
-                            <Badge appearance="filled" color="success">
-                                {project.agents.running} agent{project.agents.running > 1 ? 's' : ''} running
-                            </Badge>
-                        ) : (
-                            <InfoBadge appearance="ghost">
-                                No agents active
-                            </InfoBadge>
-                        )}
+                        <Caption1>
+                            {project.agents.running > 0
+                                ? `${project.agents.running} agent${project.agents.running > 1 ? 's' : ''} running`
+                                : 'No agents active'}
+                        </Caption1>
                     </div>
                     <div className={styles.activityTime}>
                         <ClockRegular className={styles.clockIcon} />

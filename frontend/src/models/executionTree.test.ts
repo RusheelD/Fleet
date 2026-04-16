@@ -3,6 +3,7 @@ import type { AgentExecution } from './agent'
 import {
   executionTreeHasAnyStatus,
   findExecutionInCollection,
+  normalizeExecutionTree,
   upsertExecutionCollectionWithFallback,
 } from './executionTree'
 
@@ -86,6 +87,21 @@ describe('executionTree helpers', () => {
     expect(nested.executions[0].id).toBe('new-parent')
     expect(nested.executions[0].subFlows).toHaveLength(1)
     expect(nested.executions[0].subFlows?.[0].id).toBe('child-retry')
+  })
+
+  it('sorts sub-flows by work item number when normalizing the tree', () => {
+    const normalized = normalizeExecutionTree(createExecution({
+      id: 'parent-flow',
+      executionMode: 'orchestration',
+      subFlows: [
+        createExecution({ id: 'sub-5', workItemId: 5, workItemTitle: 'Five' }),
+        createExecution({ id: 'sub-3', workItemId: 3, workItemTitle: 'Three' }),
+        createExecution({ id: 'sub-4', workItemId: 4, workItemTitle: 'Four' }),
+        createExecution({ id: 'sub-2', workItemId: 2, workItemTitle: 'Two' }),
+      ],
+    }))
+
+    expect(normalized.subFlows?.map((execution) => execution.workItemId)).toEqual([2, 3, 4, 5])
   })
 
   it('treats descendant live retries as active tree members', () => {

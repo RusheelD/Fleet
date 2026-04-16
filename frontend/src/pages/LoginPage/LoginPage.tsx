@@ -1,10 +1,8 @@
 import {
     makeStyles,
     Button,
-    Body1,
     Caption1,
     Spinner,
-    Divider,
     Link,
 } from '@fluentui/react-components'
 import { useAuth } from '../../hooks'
@@ -22,13 +20,8 @@ const useStyles = makeStyles({
         gap: appTokens.space.sm,
         alignItems: 'stretch',
     },
-    dividerRow: {
-        paddingTop: appTokens.space.xs,
-        paddingBottom: appTokens.space.xs,
-    },
     footer: {
-        textAlign: 'center',
-        paddingTop: appTokens.space.sm,
+        color: appTokens.color.textSecondary,
     },
     configError: {
         color: appTokens.color.danger,
@@ -78,13 +71,10 @@ export function LoginPage() {
 
     return (
         <AuthShell
-            eyebrow="Return to your workspace"
-            title="Welcome back to Fleet"
-            subtitle="Sign in with email or Google to pick up your projects, runs, and planning context right where you left them."
             footer={(
-                <Body1 align="center" className={styles.footer}>
-                    Don&apos;t have an account? <Link onClick={() => void navigate('/signup')}>Sign up</Link>
-                </Body1>
+                <Link className={styles.footer} onClick={() => void navigate('/signup')}>
+                    Create account
+                </Link>
             )}
         >
             <div className={styles.actions}>
@@ -115,12 +105,6 @@ export function LoginPage() {
                                 {authConfigError}
                             </Caption1>
                         )}
-                        <div className={styles.dividerRow}>
-                            <Divider />
-                        </div>
-                        <Body1 align="center">
-                            Use the same provider you normally use with Fleet so your workspace connections and preferences stay intact.
-                        </Body1>
                     </>
                 )}
             </div>

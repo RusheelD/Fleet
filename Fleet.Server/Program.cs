@@ -390,6 +390,7 @@ builder.Services.AddSingleton<PromptBlockCache>();
 
 // Agent infrastructure
 builder.Services.AddSingleton<IAgentPromptLoader, AgentPromptLoader>();
+builder.Services.AddSingleton<AgentCallCapacityManager>();
 builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();
 builder.Services.AddScoped<IRepoSandbox, RepoSandbox>();
 builder.Services.AddScoped<IAgentOrchestrationService, AgentOrchestrationService>();

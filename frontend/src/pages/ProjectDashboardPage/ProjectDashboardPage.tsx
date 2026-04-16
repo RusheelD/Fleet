@@ -152,12 +152,8 @@ const useStyles = makeStyles({
     },
     projectOverview: {
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1.4fr) minmax(280px, 0.9fr)',
-        gap: appTokens.space.md,
+        gridTemplateColumns: '1fr',
         marginBottom: appTokens.space.xl,
-        '@media (max-width: 980px)': {
-            gridTemplateColumns: '1fr',
-        },
     },
     projectOverviewPrimary: {
         padding: appTokens.space.lg,
@@ -166,21 +162,9 @@ const useStyles = makeStyles({
         gap: appTokens.space.sm,
         backgroundColor: appTokens.color.surface,
     },
-    projectOverviewSignals: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-        gap: appTokens.space.md,
-    },
-    signalCard: {
-        padding: appTokens.space.md,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xxs,
-        backgroundColor: appTokens.color.pageBackground,
-    },
-    signalValue: {
-        fontSize: appTokens.fontSize.xl,
-        fontWeight: appTokens.fontWeight.bold,
+    projectOverviewMeta: {
+        color: appTokens.color.textSecondary,
+        overflowWrap: 'anywhere',
     },
     overviewCaption: {
         color: appTokens.color.textTertiary,
@@ -291,29 +275,10 @@ export function ProjectDashboardPage() {
                     <Text size={200} className={styles.overviewCaption}>
                         Use the project pages to shape work, monitor runs, and keep context close to the code.
                     </Text>
+                    <Caption1 className={styles.projectOverviewMeta}>
+                        {projectMemoryCount} memory note{projectMemoryCount === 1 ? '' : 's'} | {projectPlaybookCount} playbook{projectPlaybookCount === 1 ? '' : 's'} | {activeAgentCount} active agent{activeAgentCount === 1 ? '' : 's'} | {dashboard.activities.length} recent activit{dashboard.activities.length === 1 ? 'y' : 'ies'}
+                    </Caption1>
                 </Card>
-                <div className={styles.projectOverviewSignals}>
-                    <Card className={styles.signalCard}>
-                        <Caption1>Project memory</Caption1>
-                        <Text className={styles.signalValue}>{projectMemoryCount}</Text>
-                        <Caption1>Durable notes and references saved for this project.</Caption1>
-                    </Card>
-                    <Card className={styles.signalCard}>
-                        <Caption1>Playbooks</Caption1>
-                        <Text className={styles.signalValue}>{projectPlaybookCount}</Text>
-                        <Caption1>Reusable project-specific workflows available to Fleet.</Caption1>
-                    </Card>
-                    <Card className={styles.signalCard}>
-                        <Caption1>Active agents</Caption1>
-                        <Text className={styles.signalValue}>{activeAgentCount}</Text>
-                        <Caption1>Agents currently moving work forward in this project.</Caption1>
-                    </Card>
-                    <Card className={styles.signalCard}>
-                        <Caption1>Recent activity</Caption1>
-                        <Text className={styles.signalValue}>{dashboard.activities.length}</Text>
-                        <Caption1>Recent events surfaced on the dashboard right now.</Caption1>
-                    </Card>
-                </div>
             </div>
 
             {/* Metrics */}

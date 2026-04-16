@@ -6,7 +6,6 @@ import {
     Divider,
     Spinner,
     Text,
-    Caption1,
 } from '@fluentui/react-components'
 import { PageShell } from '../../components/shared'
 import { CurrentPlanBanner, UsageMeter, PlanCard } from './'
@@ -69,30 +68,6 @@ const useStyles = makeStyles({
     planSectionSubtextCompact: {
         marginTop: '0.125rem',
     },
-    summaryGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: appTokens.space.md,
-    },
-    summaryCard: {
-        padding: appTokens.space.md,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xs,
-        backgroundColor: appTokens.color.surface,
-        border: appTokens.border.subtle,
-        boxShadow: appTokens.shadow.card,
-    },
-    summaryLabel: {
-        color: appTokens.color.textTertiary,
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-    },
-    summaryValue: {
-        fontSize: appTokens.fontSize.xl,
-        fontWeight: appTokens.fontWeight.bold,
-        lineHeight: 1,
-    },
 })
 
 export function SubscriptionPage() {
@@ -121,24 +96,6 @@ export function SubscriptionPage() {
                 subtitle="Manage plan details, track usage, and understand what capacity is available right now."
                 maxWidth="large"
             >
-            <div className={styles.summaryGrid}>
-                <Card className={styles.summaryCard}>
-                    <Caption1 className={styles.summaryLabel}>Current plan</Caption1>
-                    <Text className={styles.summaryValue}>{subscription.currentPlan.name}</Text>
-                    <Caption1>{subscription.currentPlan.description}</Caption1>
-                </Card>
-                <Card className={styles.summaryCard}>
-                    <Caption1 className={styles.summaryLabel}>Usage meters</Caption1>
-                    <Text className={styles.summaryValue}>{subscription.usage.length}</Text>
-                    <Caption1>Tracked limits and burn for this billing period.</Caption1>
-                </Card>
-                <Card className={styles.summaryCard}>
-                    <Caption1 className={styles.summaryLabel}>Plan choices</Caption1>
-                    <Text className={styles.summaryValue}>{subscription.plans.length}</Text>
-                    <Caption1>Available upgrade paths and plan tiers in this version.</Caption1>
-                </Card>
-            </div>
-
             <CurrentPlanBanner currentPlan={subscription.currentPlan} />
 
             <Card className={mergeClasses(styles.usageSection, isDense && styles.usageSectionCompact)}>

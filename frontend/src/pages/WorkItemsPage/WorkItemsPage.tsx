@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from 'react'
 import {
-    Card,
     makeStyles,
     mergeClasses,
     Button,
@@ -19,7 +18,6 @@ import {
     Divider,
     Dropdown,
     Option,
-    Caption1,
 } from '@fluentui/react-components'
 import {
     SearchRegular,
@@ -306,31 +304,6 @@ const useStyles = makeStyles({
     },
     filterTriggerActive: {
         color: appTokens.color.brand,
-    },
-    summaryGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: appTokens.space.md,
-        marginBottom: appTokens.space.md,
-    },
-    summaryCard: {
-        padding: appTokens.space.md,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xs,
-        backgroundColor: appTokens.color.surface,
-        border: appTokens.border.subtle,
-        boxShadow: appTokens.shadow.card,
-    },
-    summaryLabel: {
-        color: appTokens.color.textTertiary,
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-    },
-    summaryValue: {
-        fontSize: appTokens.fontSize.xl,
-        lineHeight: 1,
-        fontWeight: appTokens.fontWeight.bold,
     },
 })
 
@@ -663,14 +636,6 @@ export function WorkItemsPage() {
         return all
     }, [workItems, searchQuery, filters])
     const totalWorkItemCount = workItems?.length ?? 0
-    const openWorkItemCount = useMemo(
-        () => (workItems ?? []).filter((item) => !['Resolved', 'Resolved (AI)', 'Closed'].includes(item.state)).length,
-        [workItems],
-    )
-    const aiOwnedWorkItemCount = useMemo(
-        () => (workItems ?? []).filter((item) => item.isAI).length,
-        [workItems],
-    )
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
     const selectedCount = selectedWorkItemNumbers.size
@@ -817,29 +782,6 @@ export function WorkItemsPage() {
                     }
                 />
 
-                <div className={styles.summaryGrid}>
-                    <Card className={styles.summaryCard}>
-                        <Caption1 className={styles.summaryLabel}>Visible work</Caption1>
-                        <Text className={styles.summaryValue}>{items.length}</Text>
-                        <Caption1>Items currently shown after search and filters.</Caption1>
-                    </Card>
-                    <Card className={styles.summaryCard}>
-                        <Caption1 className={styles.summaryLabel}>Total backlog</Caption1>
-                        <Text className={styles.summaryValue}>{totalWorkItemCount}</Text>
-                        <Caption1>Everything tracked in this project right now.</Caption1>
-                    </Card>
-                    <Card className={styles.summaryCard}>
-                        <Caption1 className={styles.summaryLabel}>Open work</Caption1>
-                        <Text className={styles.summaryValue}>{openWorkItemCount}</Text>
-                        <Caption1>Items not yet resolved or closed.</Caption1>
-                    </Card>
-                    <Card className={styles.summaryCard}>
-                        <Caption1 className={styles.summaryLabel}>AI-owned</Caption1>
-                        <Text className={styles.summaryValue}>{aiOwnedWorkItemCount}</Text>
-                        <Caption1>Items already routed into AI-assisted execution.</Caption1>
-                    </Card>
-                </div>
-
                 <div className={mergeClasses(styles.toolbarRow, isMobile && styles.toolbarRowMobile)}>
                     <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
                         <TabList
@@ -853,7 +795,6 @@ export function WorkItemsPage() {
                             <Tab value="board" icon={<BoardRegular />}>Board</Tab>
                         </TabList>
                         <Toolbar className={mergeClasses(styles.inlineToolbar, isMobile && styles.inlineToolbarMobile)}>
-                            <ToolbarDivider />
                             <Input
                                 className={mergeClasses(styles.searchInput, isMobile && styles.searchInputMobile)}
                                 placeholder="Search work items..."

@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button, Text, makeStyles, tokens } from '@fluentui/react-components'
 import { ArrowClockwiseRegular, ErrorCircleRegular } from '@fluentui/react-icons'
+import { getUserFacingErrorMessage, isStaleChunkError, tryRecoverFromStaleChunk } from '../../utils/staleChunkRecovery'
 
 const useStyles = makeStyles({
     container: {
@@ -40,13 +41,6 @@ interface ErrorBoundaryState {
     error: Error | null
 }
 
-function isStaleChunkError(error: Error): boolean {
-    const msg = error.message
-    return msg.includes('Failed to fetch dynamically imported module')
-        || msg.includes('Importing a module script failed')
-        || msg.includes('error loading dynamically imported module')
-}
-
 class ErrorBoundaryInner extends Component<ErrorBoundaryProps & { classes: ReturnType<typeof useStyles> }, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps & { classes: ReturnType<typeof useStyles> }) {
         super(props)
@@ -59,21 +53,7 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryProps & { classes: Retur
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
         console.error('ErrorBoundary caught:', error, errorInfo)
-
-        // After a deployment, chunk hashes change. Browsers with stale HTML
-        // try to load old chunk URLs that no longer exist. Auto-reload once
-        // to pick up the new HTML with correct chunk references.
-        if (isStaleChunkError(error)) {
-            const key = 'fleet_chunk_reload'
-            const lastReload = sessionStorage.getItem(key)
-            const now = Date.now()
-            // Only auto-reload if we haven't done so in the past 30 seconds
-            // to avoid infinite reload loops.
-            if (!lastReload || now - Number(lastReload) > 30_000) {
-                sessionStorage.setItem(key, String(now))
-                window.location.reload()
-            }
-        }
+        tryRecoverFromStaleChunk(error)
     }
 
     handleReset = () => {
@@ -85,20 +65,26 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryProps & { classes: Retur
             if (this.props.fallback) return this.props.fallback
 
             const { classes } = this.props
+            const isChunkError = this.state.error ? isStaleChunkError(this.state.error) : false
+            const detailMessage = getUserFacingErrorMessage(this.state.error)
             return (
                 <div className={classes.container}>
                     <ErrorCircleRegular className={classes.icon} />
                     <Text size={500} weight="semibold">Something went wrong</Text>
-                    <Text size={300}>An unexpected error occurred. Try refreshing the page.</Text>
-                    {this.state.error && (
-                        <div className={classes.details}>{this.state.error.message}</div>
+                    <Text size={300}>
+                        {isChunkError
+                            ? 'Fleet refreshed in the background. Reload to pick up the latest version.'
+                            : 'An unexpected error occurred. Try refreshing the page.'}
+                    </Text>
+                    {this.state.error && !isChunkError && (
+                        <div className={classes.details}>{detailMessage}</div>
                     )}
                     <Button
                         appearance="primary"
                         icon={<ArrowClockwiseRegular />}
-                        onClick={this.handleReset}
+                        onClick={isChunkError ? () => window.location.reload() : this.handleReset}
                     >
-                        Try Again
+                        {isChunkError ? 'Reload Fleet' : 'Try Again'}
                     </Button>
                 </div>
             )

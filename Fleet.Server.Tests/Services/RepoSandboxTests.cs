@@ -271,6 +271,43 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void ApplySharedPythonToolingEnvironment_PrependsSharedSitePackages()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PYTHONPATH"] = "repo-tools",
+        };
+
+        RepoSandbox.ApplySharedPythonToolingEnvironment(environment, "/opt/fleet-python-tools");
+
+        Assert.AreEqual(
+            $"/opt/fleet-python-tools{Path.PathSeparator}repo-tools",
+            environment["PYTHONPATH"]);
+    }
+
+    [TestMethod]
+    public void ApplySharedNodeToolingEnvironment_PrependsSharedModulesAndBinPaths()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PATH"] = "repo-bin",
+            ["NODE_PATH"] = "repo-modules",
+        };
+
+        RepoSandbox.ApplySharedNodeToolingEnvironment(
+            environment,
+            sharedNodeModulesPath: "/opt/fleet-node-tools/node_modules",
+            sharedNodeBinPath: "/opt/fleet-node-tools/node_modules/.bin");
+
+        Assert.AreEqual(
+            $"/opt/fleet-node-tools/node_modules/.bin{Path.PathSeparator}repo-bin",
+            environment["PATH"]);
+        Assert.AreEqual(
+            $"/opt/fleet-node-tools/node_modules{Path.PathSeparator}repo-modules",
+            environment["NODE_PATH"]);
+    }
+
+    [TestMethod]
     public void EnsureLocalGitIgnoreEntries_AppendsMissingEntriesOnce()
     {
         var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));

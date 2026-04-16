@@ -53,6 +53,9 @@ public class RepoSandbox : IRepoSandbox
     ];
 
     private const string PythonVirtualEnvironmentDirectoryName = ".venv";
+    internal const string SharedPythonSitePackagesEnvVar = "FLEET_SHARED_PYTHON_SITE_PACKAGES";
+    internal const string SharedNodeModulesPathEnvVar = "FLEET_SHARED_NODE_MODULES_PATH";
+    internal const string SharedNodeBinPathEnvVar = "FLEET_SHARED_NODE_BIN_PATH";
 
     public RepoSandbox(
         ILogger<RepoSandbox> logger,
@@ -390,6 +393,7 @@ public class RepoSandbox : IRepoSandbox
                 psi.Environment["PIP_NO_INPUT"] = "1";
                 psi.Environment["PYTHONNOUSERSITE"] = "1";
                 psi.Environment["PIP_CACHE_DIR"] = EnsureGitInternalToolPath(_repoRoot, "fleet-pip-cache");
+                ApplySharedPythonToolingEnvironment(psi.Environment);
             }
 
             if (requiresNodeEnvironment)
@@ -409,6 +413,7 @@ public class RepoSandbox : IRepoSandbox
                 psi.Environment["npm_config_update_notifier"] = "false";
                 psi.Environment["npm_config_fund"] = "false";
                 psi.Environment["npm_config_audit"] = "false";
+                ApplySharedNodeToolingEnvironment(psi.Environment);
             }
 
             return await RunProcessAsync(psi, cts.Token);
@@ -917,6 +922,51 @@ public class RepoSandbox : IRepoSandbox
             return existingPath;
 
         return $"{segment}{separator}{existingPath}";
+    }
+
+    internal static void ApplySharedPythonToolingEnvironment(
+        IDictionary<string, string?> environment,
+        string? sharedPythonSitePackages = null)
+    {
+        var effectiveSharedPath = string.IsNullOrWhiteSpace(sharedPythonSitePackages)
+            ? Environment.GetEnvironmentVariable(SharedPythonSitePackagesEnvVar)
+            : sharedPythonSitePackages;
+
+        if (string.IsNullOrWhiteSpace(effectiveSharedPath))
+            return;
+
+        var existingPythonPath = environment.TryGetValue("PYTHONPATH", out var pythonPathValue)
+            ? pythonPathValue ?? string.Empty
+            : string.Empty;
+        environment["PYTHONPATH"] = PrependToPath(effectiveSharedPath, existingPythonPath);
+    }
+
+    internal static void ApplySharedNodeToolingEnvironment(
+        IDictionary<string, string?> environment,
+        string? sharedNodeModulesPath = null,
+        string? sharedNodeBinPath = null)
+    {
+        var effectiveNodeModulesPath = string.IsNullOrWhiteSpace(sharedNodeModulesPath)
+            ? Environment.GetEnvironmentVariable(SharedNodeModulesPathEnvVar)
+            : sharedNodeModulesPath;
+        if (!string.IsNullOrWhiteSpace(effectiveNodeModulesPath))
+        {
+            var existingNodePath = environment.TryGetValue("NODE_PATH", out var nodePathValue)
+                ? nodePathValue ?? string.Empty
+                : Environment.GetEnvironmentVariable("NODE_PATH") ?? string.Empty;
+            environment["NODE_PATH"] = PrependToPath(effectiveNodeModulesPath, existingNodePath);
+        }
+
+        var effectiveNodeBinPath = string.IsNullOrWhiteSpace(sharedNodeBinPath)
+            ? Environment.GetEnvironmentVariable(SharedNodeBinPathEnvVar)
+            : sharedNodeBinPath;
+        if (!string.IsNullOrWhiteSpace(effectiveNodeBinPath))
+        {
+            var existingPath = environment.TryGetValue("PATH", out var pathValue)
+                ? pathValue ?? string.Empty
+                : Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            environment["PATH"] = PrependToPath(effectiveNodeBinPath, existingPath);
+        }
     }
 
     private static bool IsProtectedBranchPush(string combinedCommand)

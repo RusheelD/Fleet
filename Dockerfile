@@ -35,6 +35,29 @@ RUN set -eux; \
     mkdir -p /usr/lib/jvm; \
     ln -sfn "$java_home" /usr/lib/jvm/default-java
 
+ENV FLEET_SHARED_NODE_TOOL_ROOT=/opt/fleet-node-tools \
+    FLEET_SHARED_NODE_MODULES_PATH=/opt/fleet-node-tools/node_modules \
+    FLEET_SHARED_NODE_BIN_PATH=/opt/fleet-node-tools/node_modules/.bin \
+    FLEET_SHARED_PYTHON_SITE_PACKAGES=/opt/fleet-python-tools
+
+RUN set -eux; \
+    mkdir -p "$FLEET_SHARED_NODE_TOOL_ROOT" "$FLEET_SHARED_PYTHON_SITE_PACKAGES"; \
+    npm install --prefix "$FLEET_SHARED_NODE_TOOL_ROOT" \
+        vitest \
+        jsdom \
+        happy-dom \
+        @vitest/coverage-v8 \
+        @testing-library/dom \
+        @testing-library/jest-dom \
+        @testing-library/react; \
+    python3 -m pip install --no-cache-dir --target "$FLEET_SHARED_PYTHON_SITE_PACKAGES" \
+        pytest \
+        pytest-asyncio \
+        pytest-cov \
+        pytest-mock \
+        pytest-timeout \
+        pytest-xdist
+
 # Copy the pre-built publish output prepared before docker build.
 COPY publish/ ./
 

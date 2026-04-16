@@ -14,8 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { compareLogEntriesByTime, normalizeLogEntries, type AgentExecution, type LogEntry } from '../../models'
 import { useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
-import { InfoBadge } from '../../components/shared/InfoBadge'
-import { parseStructuredLogMessage } from './logFormatting'
+import { formatLogAgentLabel, parseStructuredLogMessage } from './logFormatting'
 
 const LOG_LEVEL_CLASSES: Record<string, 'logLevelInfo' | 'logLevelWarn' | 'logLevelError' | 'logLevelSuccess'> = {
     info: 'logLevelInfo',
@@ -438,6 +437,10 @@ export function LogPanel({
         () => flattenExecutions(executions),
         [executions],
     )
+    const executionsById = useMemo(
+        () => new Map(flattenedExecutionList.map((execution) => [execution.id, execution])),
+        [flattenedExecutionList],
+    )
 
     const runTabs = useMemo<RunTabDefinition[]>(() => {
         const result: RunTabDefinition[] = []
@@ -604,7 +607,6 @@ export function LogPanel({
                         <Title3 className={styles.logTitle}>Live Logs</Title3>
                         <Caption1 className={styles.logHeaderSubtitle}>{selectedRunLabel}</Caption1>
                     </div>
-                    <InfoBadge appearance="filled" size="small">{sortedVisibleLogs.length}</InfoBadge>
                 </div>
                 <div className={mergeClasses(styles.logHeaderActions, isMobile && styles.logHeaderActionsMobile)}>
                     <ToggleButton
@@ -669,11 +671,15 @@ export function LogPanel({
                 {sortedVisibleLogs.map((log, i) => (
                     (() => {
                         const structuredLog = parseStructuredLogMessage(log.message, log.level)
+                        const execution = log.resolvedExecutionId
+                            ? executionsById.get(log.resolvedExecutionId) ?? null
+                            : null
+                        const agentLabel = formatLogAgentLabel(log.agent, execution, selectedRun === 'all')
 
                         return (
                             <div key={i} className={mergeClasses(styles.logEntry, isMobile && styles.logEntryMobile)}>
                                 <span className={styles.logTime}>{formatLogTime(log.time)}</span>
-                                <span className={mergeClasses(styles.logAgent, isMobile && styles.logAgentMobile)}>{log.agent}</span>
+                                <span className={mergeClasses(styles.logAgent, isMobile && styles.logAgentMobile)}>{agentLabel}</span>
                                 <span className={mergeClasses(styles.levelDot, styles[LEVEL_DOT_CLASSES[log.level]])} />
                                 {structuredLog ? (
                                     <div

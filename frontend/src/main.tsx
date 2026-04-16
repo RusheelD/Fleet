@@ -6,6 +6,7 @@ import './index.css'
 import { AuthProvider, PreferencesProvider } from './hooks'
 import { msalInstance } from './auth'
 import { ThemedApp } from './ThemedApp'
+import { installStaleChunkRecovery } from './utils/staleChunkRecovery'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +18,8 @@ const queryClient = new QueryClient({
 })
 
 // Initialize MSAL before rendering
+installStaleChunkRecovery()
+
 msalInstance.initialize().then(() => {
   // Handle redirect promise from login redirect
   msalInstance.handleRedirectPromise().then(() => {

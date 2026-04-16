@@ -1,4 +1,4 @@
-import type { LogEntry } from '../../models'
+import type { AgentExecution, LogEntry } from '../../models'
 
 export interface ParsedLogBadge {
   label: string
@@ -16,6 +16,20 @@ export interface ParsedStructuredLog {
   body?: string
   badges: ParsedLogBadge[]
   metadata: ParsedLogMeta[]
+}
+
+export function formatLogAgentLabel(
+  agent: string,
+  execution?: Pick<AgentExecution, 'workItemId' | 'parentExecutionId'> | null,
+  includeExecutionContext = false,
+): string {
+  const normalizedAgent = agent.trim() || 'System'
+  if (!includeExecutionContext || !execution) {
+    return normalizedAgent
+  }
+
+  const prefix = execution.parentExecutionId ? 'Sub-flow' : 'Flow'
+  return `${prefix} #${execution.workItemId} · ${normalizedAgent}`
 }
 
 function splitOnce(value: string, separator: string): [string, string] | null {

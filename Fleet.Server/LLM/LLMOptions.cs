@@ -21,6 +21,11 @@ public class LLMOptions
     public int GenerateMaxToolLoops { get; set; } = 400;
     /// <summary>Max non-write tool calls for work-item generation before the run is capped.</summary>
     public int GenerateMaxToolCallsTotal { get; set; } = 400;
+    /// <summary>
+    /// Hard app-wide ceiling for concurrent autonomous agent model turns.
+    /// Runs wait for capacity when this ceiling is saturated.
+    /// </summary>
+    public int MaxConcurrentAgentCalls { get; set; } = 8;
     public int MaxToolOutputLength { get; set; } = 24000;
     /// <summary>
     /// Maximum aggregate characters of tool output per LLM turn. When many tools
@@ -35,4 +40,3 @@ public class LLMOptions
     /// <summary>Fallback model to use when the primary model fails with a retryable error (429, 500+).</summary>
     public string? FallbackModel { get; set; }
 }
-

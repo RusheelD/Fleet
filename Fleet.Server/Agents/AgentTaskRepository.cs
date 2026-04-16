@@ -23,7 +23,8 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
                 .Where(result =>
                     executionIds.Contains(result.ExecutionId) &&
                     result.Success &&
-                    result.Role == AgentRole.Review.ToString())
+                    (result.Role == AgentRole.Review.ToString() ||
+                     result.Role.StartsWith($"{AgentRole.Review} #")))
                 .OrderBy(result => result.ExecutionId)
                 .ThenBy(result => result.PhaseOrder)
                 .ToListAsync();

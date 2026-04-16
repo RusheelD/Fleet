@@ -196,87 +196,9 @@ const useStyles = makeStyles({
         width: '100%',
         justifyContent: 'flex-end',
     },
-    detailPillRow: {
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: appTokens.space.sm,
-    },
-    detailPillRowCompact: {
-        gap: appTokens.space.xs,
-    },
-    detailPill: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
-        minWidth: '120px',
-        paddingTop: appTokens.space.xs,
-        paddingBottom: appTokens.space.xs,
-        paddingLeft: appTokens.space.sm,
-        paddingRight: appTokens.space.sm,
-        borderRadius: appTokens.radius.md,
-        border: appTokens.border.subtle,
-        backgroundColor: appTokens.color.surfaceRaised,
-    },
-    detailPillCompact: {
-        minWidth: '104px',
-        paddingTop: appTokens.space.xxxs,
-        paddingBottom: appTokens.space.xxxs,
-        paddingLeft: appTokens.space.xs,
-        paddingRight: appTokens.space.xs,
-    },
-    detailPillMobile: {
-        flex: '1 1 calc(50% - 0.5rem)',
-        minWidth: 'unset',
-    },
-    detailPillLabel: {
-        color: appTokens.color.textTertiary,
-    },
-    detailPillValue: {
-        color: appTokens.color.textPrimary,
-    },
-    phaseBanner: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: appTokens.space.xs,
-        paddingTop: appTokens.space.xs,
-        paddingBottom: appTokens.space.xs,
-        paddingLeft: appTokens.space.sm,
-        paddingRight: appTokens.space.sm,
-        borderRadius: appTokens.radius.md,
-        border: appTokens.border.subtle,
-        backgroundColor: appTokens.color.surfaceRaised,
-        color: appTokens.color.textSecondary,
-    },
-    phaseBannerRunning: {
-        borderTopColor: appTokens.color.brandStroke,
-        borderRightColor: appTokens.color.brandStroke,
-        borderBottomColor: appTokens.color.brandStroke,
-        borderLeftColor: appTokens.color.brandStroke,
-        backgroundColor: appTokens.color.surfaceSelected,
-        color: appTokens.color.textPrimary,
-    },
-    phaseBannerFailed: {
-        borderTopColor: appTokens.color.danger,
-        borderRightColor: appTokens.color.danger,
-        borderBottomColor: appTokens.color.danger,
-        borderLeftColor: appTokens.color.danger,
-        color: appTokens.color.danger,
-    },
-    phaseBannerPaused: {
-        borderTopColor: appTokens.color.info,
-        borderRightColor: appTokens.color.info,
-        borderBottomColor: appTokens.color.info,
-        borderLeftColor: appTokens.color.info,
-        color: appTokens.color.info,
-    },
-    phaseBannerIcon: {
-        flexShrink: 0,
-        color: appTokens.color.brand,
-    },
     sectionHeaderRow: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
         gap: appTokens.space.sm,
     },
     sectionHeaderLabel: {
@@ -787,6 +709,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
             .map((childNumber) => workItemsByNumber.get(childNumber))
             .filter((child): child is WorkItem => Boolean(child))
             .filter((child) => !NON_ACTIONABLE_SUBFLOW_STATES.has(child.state))
+            .sort((left, right) => left.workItemNumber - right.workItemNumber)
 
         const steps: PlannedSubFlowStep[] = plannedChildren.map((child): PlannedSubFlowStep => {
             const liveExecution = subFlowByWorkItemNumber.get(child.workItemNumber)
@@ -868,11 +791,20 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                     : Math.max(0, Math.min(subFlow.progress ?? 0, 1)),
             }))
 
-        return [...steps, ...orphanLiveSteps]
+        return [...steps, ...orphanLiveSteps].sort((left, right) => left.workItemNumber - right.workItemNumber)
     })()
     const displayedSubFlowCount = execution.executionMode === 'orchestration'
         ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
         : 0
+    const executionMetaParts = [
+        activePhaseLabel,
+        runModeLabel,
+        outputLabel,
+        displayedSubFlowCount > 0 ? `${displayedSubFlowCount} sub-flow${displayedSubFlowCount === 1 ? '' : 's'}` : null,
+        execution.branchName || null,
+        reviewLoopLabel && !isAutoRemediating ? reviewLoopLabel : null,
+        reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating ? `Review: ${lastReviewRecommendation}` : null,
+    ].filter((value): value is string => Boolean(value))
 
     const toggleSubFlowExpansion = (subFlowId: string) => {
         setExpandedSubFlowIds((current) => ({
@@ -920,24 +852,22 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                         icon={isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
                         onClick={() => toggleSubFlowExpansion(subFlow.id)}
                     >
-                        {isExpanded ? 'Hide' : 'Details'}
+                        {isExpanded ? 'Hide' : 'Show'}
                     </Button>
                 </div>
                 <div className={styles.subFlowSummaryDetails}>
                     <Caption1 className={styles.taskCaption}>
                         {subFlow.currentPhase || 'Waiting on sub-flow execution'}
                     </Caption1>
-                    <div className={styles.subFlowSummaryMeta}>
-                        <Caption1>Started {formatTimestamp(subFlow.startedAt)}</Caption1>
-                        <Caption1>•</Caption1>
-                        <Caption1>{subFlow.duration}</Caption1>
-                        {subFlow.branchName && (
-                            <>
-                                <Caption1>•</Caption1>
-                                <Caption1>{subFlow.branchName}</Caption1>
-                            </>
-                        )}
-                    </div>
+                    <Caption1 className={styles.subFlowSummaryMeta}>
+                        {[
+                            `Started ${formatTimestamp(subFlow.startedAt)}`,
+                            subFlow.duration,
+                            subFlow.branchName || null,
+                        ]
+                            .filter((value): value is string => Boolean(value))
+                            .join(' | ')}
+                    </Caption1>
                     {subFlow.status === 'running' && subFlow.progress > 0 && (
                         <ProgressBar
                             className={styles.subFlowSummaryProgress}
@@ -975,22 +905,6 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                     <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
                         {renderExecutionStatusBadge(execution.status)}
-                        {execution.executionMode === 'orchestration' && (
-                            <InfoBadge appearance="tint" size="small">
-                                Flow
-                            </InfoBadge>
-                        )}
-                        {reviewLoopLabel && (
-                            isAutoRemediating ? (
-                                <Badge appearance="tint" color="warning" size="small">
-                                    {reviewLoopLabel}
-                                </Badge>
-                            ) : (
-                                <InfoBadge appearance="tint" size="small">
-                                    {reviewLoopLabel}
-                                </InfoBadge>
-                            )
-                        )}
                     </div>
                     <Text
                         weight="semibold"
@@ -1001,23 +915,12 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                     <div className={mergeClasses(styles.metaRow, isCompact && styles.metaRowCompact)}>
                         <ClockRegular className={mergeClasses(styles.metaIcon, isCompact && styles.metaIconCompact)} />
                         <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
-                            Started {formatTimestamp(execution.startedAt)} - {execution.duration}
-                            {execution.currentPhase ? ` - ${execution.currentPhase}` : ''}
+                            Started {formatTimestamp(execution.startedAt)} | {execution.duration}
                         </Caption1>
                     </div>
-                    {execution.branchName && (
+                    {executionMetaParts.length > 0 && (
                         <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
-                            Branch: {execution.branchName}
-                        </Caption1>
-                    )}
-                    {execution.executionMode === 'orchestration' && displayedSubFlowCount > 0 && (
-                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
-                            Sub-flows: {displayedSubFlowCount}
-                        </Caption1>
-                    )}
-                    {reviewLoopCount > 0 && lastReviewRecommendation && !isAutoRemediating && (
-                        <Caption1 className={isCompact ? styles.metaCaptionCompact : undefined}>
-                            Final review outcome: {lastReviewRecommendation}
+                            {executionMetaParts.join(' | ')}
                         </Caption1>
                     )}
                 </div>
@@ -1041,39 +944,6 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                 </div>
             </div>
 
-            <div className={mergeClasses(styles.detailPillRow, isCompact && styles.detailPillRowCompact)}>
-                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
-                    <Caption1 className={styles.detailPillLabel}>Mode</Caption1>
-                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{runModeLabel}</Text>
-                </div>
-                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
-                    <Caption1 className={styles.detailPillLabel}>Phase</Caption1>
-                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{activePhaseLabel}</Text>
-                </div>
-                <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
-                    <Caption1 className={styles.detailPillLabel}>Output</Caption1>
-                    <Text size={200} weight="semibold" className={styles.detailPillValue}>{outputLabel}</Text>
-                </div>
-                {displayedSubFlowCount > 0 && (
-                    <div className={mergeClasses(styles.detailPill, isCompact && styles.detailPillCompact, isMobile && styles.detailPillMobile)}>
-                        <Caption1 className={styles.detailPillLabel}>Sub-flows</Caption1>
-                        <Text size={200} weight="semibold" className={styles.detailPillValue}>{displayedSubFlowCount}</Text>
-                    </div>
-                )}
-            </div>
-
-            <div
-                className={mergeClasses(
-                    styles.phaseBanner,
-                    execution.status === 'running' && styles.phaseBannerRunning,
-                    execution.status === 'failed' && styles.phaseBannerFailed,
-                    execution.status === 'paused' && styles.phaseBannerPaused,
-                )}
-            >
-                <FleetRocketLogo size={16} title="Run phase" variant="outline" className={styles.phaseBannerIcon} />
-                <Caption1>{activePhaseLabel}</Caption1>
-            </div>
-
             <ProgressBar
                 value={execution.progress}
                 thickness={isCompact ? 'medium' : 'large'}
@@ -1092,9 +962,6 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
 
             <div className={styles.sectionHeaderRow}>
                 <Text weight="semibold" className={styles.sectionHeaderLabel}>Pipeline</Text>
-                <InfoBadge appearance="tint" size="small">
-                    {agents.length + (execution.executionMode === 'orchestration' ? plannedSubFlowSteps.length : 0)} steps
-                </InfoBadge>
             </div>
 
             <div className={styles.pipeline}>
@@ -1321,9 +1188,6 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                         <Text weight="semibold" className={styles.subFlowHeader}>
                             Sub-flows
                         </Text>
-                        <InfoBadge appearance="tint" size="small">
-                            {subFlows.length} run{subFlows.length === 1 ? '' : 's'}
-                        </InfoBadge>
                     </div>
                     <div className={mergeClasses(styles.subFlowList, isCompact && styles.subFlowListCompact, isMobile && styles.subFlowListMobile)}>
                         <div className={styles.subFlowMobileList}>

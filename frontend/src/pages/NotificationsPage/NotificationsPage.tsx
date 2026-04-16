@@ -19,7 +19,6 @@ import {
   mergeClasses,
 } from '@fluentui/react-components'
 import { EmptyState, PageShell } from '../../components/shared'
-import { NotificationsTab } from '../SettingsPage/NotificationsTab'
 import {
   useMarkAllNotificationsAsRead,
   useMarkNotificationAsRead,
@@ -31,29 +30,6 @@ import { appTokens } from '../../styles/appTokens'
 import type { NotificationEvent } from '../../models'
 
 const useStyles = makeStyles({
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: appTokens.space.md,
-  },
-  summaryCard: {
-    padding: appTokens.space.lg,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: appTokens.space.xs,
-    backgroundColor: appTokens.color.surface,
-  },
-  summaryEyebrow: {
-    color: appTokens.color.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-  },
-  summaryValue: {
-    fontSize: appTokens.fontSize.metric,
-    lineHeight: appTokens.lineHeight.tight,
-    fontWeight: appTokens.fontWeight.semibold,
-    color: appTokens.color.textPrimary,
-  },
   inboxCard: {
     padding: appTokens.space.lg,
     display: 'flex',
@@ -130,6 +106,7 @@ const useStyles = makeStyles({
     gap: appTokens.space.xs,
     flexWrap: 'wrap',
     alignItems: 'center',
+    color: appTokens.color.textTertiary,
   },
   notificationActions: {
     display: 'flex',
@@ -212,19 +189,6 @@ export function NotificationsPage() {
         </Button>
       ) : undefined}
     >
-      <div className={styles.summaryGrid}>
-        <Card className={styles.summaryCard}>
-          <Caption1 className={styles.summaryEyebrow}>Unread</Caption1>
-          <Text className={styles.summaryValue}>{unreadCount}</Text>
-          <Caption1>Needs attention right now</Caption1>
-        </Card>
-        <Card className={styles.summaryCard}>
-          <Caption1 className={styles.summaryEyebrow}>Total</Caption1>
-          <Text className={styles.summaryValue}>{totalCount}</Text>
-          <Caption1>Events currently stored in your inbox</Caption1>
-        </Card>
-      </div>
-
       <Card className={mergeClasses(styles.inboxCard, isMobile && styles.inboxCardMobile)}>
         <div className={styles.inboxHeader}>
           <div className={styles.inboxTitleBlock}>
@@ -236,8 +200,8 @@ export function NotificationsPage() {
               className={styles.filterTabs}
               size="small"
             >
-              <Tab value="unread">Unread</Tab>
-              <Tab value="all">All</Tab>
+              <Tab value="unread">Unread ({unreadCount})</Tab>
+              <Tab value="all">All ({totalCount})</Tab>
             </TabList>
           </div>
         </div>
@@ -272,7 +236,6 @@ export function NotificationsPage() {
                     <div className={styles.notificationMeta}>
                       <div className={styles.notificationTitleRow}>
                         <Text weight="semibold">{notification.title}</Text>
-                        {!notification.isRead && <Badge color="danger">Unread</Badge>}
                         <Badge appearance="outline">{formatNotificationType(notification.type)}</Badge>
                       </div>
                       <Caption1>{formatTimestamp(notification.createdAtUtc)}</Caption1>
@@ -304,10 +267,8 @@ export function NotificationsPage() {
                   <Text size={300} className={styles.notificationBody}>{notification.message}</Text>
 
                   <div className={styles.notificationMetaRow}>
-                    <Badge appearance="outline">{projectLabel}</Badge>
-                    {notification.executionId ? (
-                      <Badge appearance="outline">Execution {notification.executionId}</Badge>
-                    ) : null}
+                    <Caption1>{projectLabel}</Caption1>
+                    {notification.executionId ? <Caption1>| Execution {notification.executionId}</Caption1> : null}
                   </div>
                 </Card>
               )
@@ -315,8 +276,6 @@ export function NotificationsPage() {
           </div>
         )}
       </Card>
-
-      <NotificationsTab />
     </PageShell>
   )
 }

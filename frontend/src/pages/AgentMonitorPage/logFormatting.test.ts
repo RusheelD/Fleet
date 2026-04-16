@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStructuredLogMessage } from './logFormatting'
+import { formatLogAgentLabel, parseStructuredLogMessage } from './logFormatting'
 
 describe('parseStructuredLogMessage', () => {
   it('parses orchestration failure summaries into a richer structure', () => {
@@ -38,5 +38,11 @@ describe('parseStructuredLogMessage', () => {
 
   it('leaves simple status logs alone', () => {
     expect(parseStructuredLogMessage('Status update: Working via read_file (step 3)', 'info')).toBeNull()
+  })
+
+  it('adds flow context to agent labels when requested', () => {
+    expect(formatLogAgentLabel('Planner', { workItemId: 4, parentExecutionId: null }, true)).toBe('Flow #4 · Planner')
+    expect(formatLogAgentLabel('Backend', { workItemId: 7, parentExecutionId: 'parent-1' }, true)).toBe('Sub-flow #7 · Backend')
+    expect(formatLogAgentLabel('System', null, true)).toBe('System')
   })
 })
