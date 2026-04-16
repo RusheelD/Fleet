@@ -8,7 +8,35 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
-    apt-get update; \
+    for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        [ -f "$sources" ] || continue; \
+        sed -i \
+            -e 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' \
+            "$sources"; \
+    done; \
+    printf '%s\n' \
+        'Acquire::Retries "10";' \
+        'Acquire::By-Hash "force";' \
+        'Acquire::http::No-Cache "true";' \
+        'Acquire::https::No-Cache "true";' \
+        'Acquire::http::No-Store "true";' \
+        'Acquire::https::No-Store "true";' \
+        'Acquire::http::Pipeline-Depth "0";' \
+        'Acquire::https::Pipeline-Depth "0";' \
+        'Acquire::http::Timeout "30";' \
+        'Acquire::https::Timeout "30";' \
+        > /etc/apt/apt.conf.d/99fleet-network-resilience; \
+    for attempt in 1 2 3 4 5; do \
+        rm -rf /var/lib/apt/lists/*; \
+        if apt-get update; then \
+            break; \
+        fi; \
+        if [ "$attempt" -eq 5 ]; then \
+            exit 1; \
+        fi; \
+        sleep "$((attempt * 15))"; \
+    done; \
     apt-get install -y --no-install-recommends \
         git \
         ca-certificates \
