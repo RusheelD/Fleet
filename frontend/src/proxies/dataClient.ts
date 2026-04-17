@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
-import { useMemo } from 'react'
 import { normalizeChatSessionActivities } from '../models/chat'
 import {
   getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
@@ -70,13 +69,7 @@ export const useDataQuery = <TData>(
     return true
   }
 
-  const allParams = [...requiredParams, ...(optionalParams ?? [])]
-  const allParamsString = JSON.stringify(allParams)
-
-  const queryKey = useMemo(
-    () => [queryName, allParamsString],
-    [queryName, allParamsString]
-  )
+  const queryKey = [queryName, ...requiredParams, ...(optionalParams ?? [])]
 
   const query = useQuery<TData>({
     queryKey,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentExecution } from '../../models/agent'
-import { countActiveAgents, countActiveFlows, formatCountLabel } from './monitorSummary'
+import { buildMonitorExecutionSummary, countActiveAgents, countActiveFlows, formatCountLabel } from './monitorSummary'
 
 function createExecution(overrides: Partial<AgentExecution> = {}): AgentExecution {
     return {
@@ -74,5 +74,43 @@ describe('monitorSummary', () => {
     it('pluralizes active summary labels for counts other than one', () => {
         expect(formatCountLabel(0, 'Active Flow')).toBe('Active Flows')
         expect(formatCountLabel(2, 'Active Agent')).toBe('Active Agents')
+    })
+
+    it('collects active, paused, completed, failed, and cancelled roots in one summary pass', () => {
+        const executions = [
+            createExecution({
+                id: 'active-root',
+                workItemId: 1,
+                status: 'running',
+                subFlows: [
+                    createExecution({ id: 'active-child', workItemId: 2, status: 'queued', parentExecutionId: 'active-root' }),
+                    createExecution({ id: 'complete-child', workItemId: 3, status: 'completed', parentExecutionId: 'active-root' }),
+                ],
+            }),
+            createExecution({
+                id: 'paused-root',
+                workItemId: 4,
+                status: 'paused',
+            }),
+            createExecution({
+                id: 'failed-root',
+                workItemId: 5,
+                status: 'failed',
+            }),
+            createExecution({
+                id: 'cancelled-root',
+                workItemId: 6,
+                status: 'cancelled',
+            }),
+        ]
+
+        const summary = buildMonitorExecutionSummary(executions)
+
+        expect(summary.activeRoots.map((execution) => execution.id)).toEqual(['active-root'])
+        expect(summary.pausedRoots.map((execution) => execution.id)).toEqual(['paused-root'])
+        expect(summary.completedRoots.map((execution) => execution.id)).toEqual(['complete-child'])
+        expect(summary.failedRoots.map((execution) => execution.id)).toEqual(['failed-root'])
+        expect(summary.cancelledRoots.map((execution) => execution.id)).toEqual(['cancelled-root'])
+        expect(summary.activeFlowCount).toBe(2)
     })
 })

@@ -196,6 +196,56 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void WriteFileIfChangedCore_SkipsRewriteWhenContentMatches()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var filePath = Path.Combine(root, ".fleet", ".docs", "changes", "fleet-42", "proposal.md");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            File.WriteAllText(filePath, "same");
+            var firstWriteUtc = File.GetLastWriteTimeUtc(filePath);
+            Thread.Sleep(20);
+
+            var changed = RepoSandbox.WriteFileIfChangedCore(filePath, "same", skipWhenUnchanged: true);
+            var secondWriteUtc = File.GetLastWriteTimeUtc(filePath);
+
+            Assert.IsFalse(changed);
+            Assert.AreEqual(firstWriteUtc, secondWriteUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void WriteFileIfChangedCore_RewritesWhenContentDiffers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fleet-tests", Guid.NewGuid().ToString("N"));
+        var filePath = Path.Combine(root, ".fleet", ".docs", "changes", "fleet-42", "proposal.md");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            File.WriteAllText(filePath, "before");
+            Thread.Sleep(20);
+
+            var changed = RepoSandbox.WriteFileIfChangedCore(filePath, "after", skipWhenUnchanged: true);
+
+            Assert.IsTrue(changed);
+            Assert.AreEqual("after", File.ReadAllText(filePath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void BuildCommitEnvironment_SetsAuthorAndCommitterIdentity()
     {
         var result = RepoSandbox.BuildCommitEnvironment(

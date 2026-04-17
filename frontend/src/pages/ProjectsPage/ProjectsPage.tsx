@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, type ChangeEvent } from 'react'
+import { Suspense, useState, useMemo, useRef, useCallback, type ChangeEvent, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
@@ -21,11 +21,22 @@ import {
 } from '@fluentui/react-icons'
 import { PageHeader } from '../../components/shared'
 import { EmptyState } from '../../components/shared'
-import { ProjectCard, ProjectRow, NewProjectDialog } from './'
+import { ProjectCard, ProjectRow } from './'
 import { useProjects, useExportProjects, useImportProjects } from '../../proxies'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import type { ProjectData } from '../../models'
+import { lazyWithRetry } from '../../utils/staleChunkRecovery'
+
+function lazyDialog<TProps extends object>(
+    importer: () => Promise<{ default: ComponentType<TProps> }>,
+): LazyExoticComponent<ComponentType<TProps>> {
+    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
+}
+
+type NewProjectDialogProps = ComponentProps<typeof import('./NewProjectDialog').NewProjectDialog>
+
+const NewProjectDialog = lazyDialog<NewProjectDialogProps>(() => import('./NewProjectDialog').then((module) => ({ default: module.NewProjectDialog })))
 
 const SORT_OPTIONS = ['Last activity', 'Name', 'Work items', 'Agents'] as const
 type SortKey = typeof SORT_OPTIONS[number]
@@ -383,11 +394,15 @@ export function ProjectsPage() {
                 </div>
             )}
 
-            <NewProjectDialog
-                open={newProjectOpen}
-                onOpenChange={setNewProjectOpen}
-                onCreated={(slug) => navigate(`/projects/${slug}`)}
-            />
+            <Suspense fallback={null}>
+                {newProjectOpen ? (
+                    <NewProjectDialog
+                        open={newProjectOpen}
+                        onOpenChange={setNewProjectOpen}
+                        onCreated={(slug) => navigate(`/projects/${slug}`)}
+                    />
+                ) : null}
+            </Suspense>
         </div>
     )
 }

@@ -224,12 +224,22 @@ public class RepoSandbox : IRepoSandbox
         try
         {
             var fullPath = ResolveSafePath(relativePath);
+            WriteFileIfChangedCore(fullPath, content, skipWhenUnchanged: false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
 
-            var dir = Path.GetDirectoryName(fullPath);
-            if (dir is not null && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
-            File.WriteAllText(fullPath, content);
+    public bool WriteFileIfChanged(string relativePath, string content)
+    {
+        EnsureInitialized();
+        _writeLock.Wait();
+        try
+        {
+            var fullPath = ResolveSafePath(relativePath);
+            return WriteFileIfChangedCore(fullPath, content, skipWhenUnchanged: true);
         }
         finally
         {
@@ -275,6 +285,23 @@ public class RepoSandbox : IRepoSandbox
         {
             _writeLock.Release();
         }
+    }
+
+    internal static bool WriteFileIfChangedCore(string fullPath, string content, bool skipWhenUnchanged)
+    {
+        var dir = Path.GetDirectoryName(fullPath);
+        if (dir is not null && !Directory.Exists(dir))
+            Directory.CreateDirectory(dir);
+
+        if (skipWhenUnchanged && File.Exists(fullPath))
+        {
+            var existingContent = File.ReadAllText(fullPath);
+            if (string.Equals(existingContent, content, StringComparison.Ordinal))
+                return false;
+        }
+
+        File.WriteAllText(fullPath, content);
+        return true;
     }
 
     public IReadOnlyList<SearchResult> SearchFiles(string pattern, bool isRegex = false, string? fileGlob = null, int maxResults = 50)

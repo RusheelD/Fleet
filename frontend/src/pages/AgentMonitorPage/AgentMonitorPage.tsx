@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { Suspense, useState, useMemo, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -27,19 +27,30 @@ import {
     BotRegular,
 } from '@fluentui/react-icons'
 import { FleetRocketLogo, PageHeader } from '../../components/shared'
-import { SummaryCard, ExecutionCard, ExecutionDocsDialog, LogPanel, StartExecutionDialog } from './'
+import { SummaryCard, ExecutionCard, LogPanel } from './'
 import { getApiErrorMessage, type ExecutionDocumentation, useExecutions, useLogs, useWorkItems, useStartExecution, useCancelExecution, usePauseExecution, useResumeExecution, useRetryExecution, useExecutionDocumentation, useClearLogs, useClearExecutionLogs, useDeleteExecution } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import { collectExecutionRootsByStatus, executionTreeHasAnyStatus, findExecutionInCollection, normalizeExecutionTree, sortExecutionCollectionByDisplayOrder } from '../../models/executionTree'
-import { countActiveAgents, countActiveFlows, formatCountLabel } from './monitorSummary'
+import { findExecutionInCollection, normalizeExecutionTree, sortExecutionCollectionByDisplayOrder } from '../../models/executionTree'
+import { buildMonitorExecutionSummary, formatCountLabel } from './monitorSummary'
+import { lazyWithRetry } from '../../utils/staleChunkRecovery'
+
+function lazyDialog<TProps extends object>(
+    importer: () => Promise<{ default: ComponentType<TProps> }>,
+): LazyExoticComponent<ComponentType<TProps>> {
+    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
+}
+
+type ExecutionDocsDialogProps = ComponentProps<typeof import('./ExecutionDocsDialog').ExecutionDocsDialog>
+type StartExecutionDialogProps = ComponentProps<typeof import('./StartExecutionDialog').StartExecutionDialog>
+
+const ExecutionDocsDialog = lazyDialog<ExecutionDocsDialogProps>(() => import('./ExecutionDocsDialog').then((module) => ({ default: module.ExecutionDocsDialog })))
+const StartExecutionDialog = lazyDialog<StartExecutionDialogProps>(() => import('./StartExecutionDialog').then((module) => ({ default: module.StartExecutionDialog })))
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
-const ACTIVE_EXECUTION_STATUSES = new Set(['running', 'queued'] as const)
-const PAUSED_EXECUTION_STATUSES = new Set(['paused'] as const)
 
 const useStyles = makeStyles({
     page: {
@@ -302,22 +313,15 @@ export function AgentMonitorPage() {
         [executions],
     )
     const allLogs = useMemo(() => logs ?? [], [logs])
-    const active = useMemo(
-        () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
-        [allExecutions],
-    )
-    const activeFlowCount = useMemo(() => countActiveFlows(allExecutions), [allExecutions])
+    const executionSummary = useMemo(() => buildMonitorExecutionSummary(allExecutions), [allExecutions])
+    const active = executionSummary.activeRoots
+    const activeFlowCount = executionSummary.activeFlowCount
     const activeFlowLabel = useMemo(() => formatCountLabel(activeFlowCount, 'Active Flow'), [activeFlowCount])
-    const paused = useMemo(
-        () => allExecutions.filter((execution) =>
-            !executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES) &&
-            executionTreeHasAnyStatus(execution, PAUSED_EXECUTION_STATUSES)),
-        [allExecutions],
-    )
-    const completed = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['completed']), [allExecutions])
-    const failed = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['failed']), [allExecutions])
-    const cancelled = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['cancelled']), [allExecutions])
-    const activeAgentCount = useMemo(() => countActiveAgents(allExecutions), [allExecutions])
+    const paused = executionSummary.pausedRoots
+    const completed = executionSummary.completedRoots
+    const failed = executionSummary.failedRoots
+    const cancelled = executionSummary.cancelledRoots
+    const activeAgentCount = executionSummary.activeAgentCount
     const activeAgentLabel = useMemo(() => formatCountLabel(activeAgentCount, 'Active Agent'), [activeAgentCount])
 
     const filteredByTab =
@@ -610,15 +614,19 @@ export function AgentMonitorPage() {
     return (
         <div className={mergeClasses(styles.page, isDense && styles.pageCompact)}>
             <Toaster toasterId={toasterId} />
-            <ExecutionDocsDialog
-                docs={selectedDocumentation}
-                open={!!selectedDocumentation}
-                onOpenChange={(open) => {
-                    if (!open) {
-                        setSelectedDocumentation(null)
-                    }
-                }}
-            />
+            <Suspense fallback={null}>
+                {selectedDocumentation ? (
+                    <ExecutionDocsDialog
+                        docs={selectedDocumentation}
+                        open={!!selectedDocumentation}
+                        onOpenChange={(open) => {
+                            if (!open) {
+                                setSelectedDocumentation(null)
+                            }
+                        }}
+                    />
+                ) : null}
+            </Suspense>
             <PageHeader
                 title="Agent Monitor"
                 subtitle="Track agent executions and view real-time logs"
@@ -769,14 +777,18 @@ export function AgentMonitorPage() {
                 />
             </div>
 
-            <StartExecutionDialog
-                open={dialogOpen}
-                onOpenChange={setDialogOpen}
-                workItems={workItems ?? []}
-                isLoading={loadingWorkItems}
-                isPending={startExecution.isPending}
-                onStart={handleStartExecution}
-            />
+            <Suspense fallback={null}>
+                {dialogOpen ? (
+                    <StartExecutionDialog
+                        open={dialogOpen}
+                        onOpenChange={setDialogOpen}
+                        workItems={workItems ?? []}
+                        isLoading={loadingWorkItems}
+                        isPending={startExecution.isPending}
+                        onStart={handleStartExecution}
+                    />
+                ) : null}
+            </Suspense>
         </div>
     )
 }

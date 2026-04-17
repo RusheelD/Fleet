@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from 'react'
+import { Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -10,7 +10,7 @@ import {
     AddRegular,
 } from '@fluentui/react-icons'
 import { EmptyState, PageHeader } from '../../components/shared'
-import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
+import { KanbanColumn, BacklogTreeTable, BacklogList } from './'
 import {
     useWorkItems,
     useWorkItemLevels,
@@ -40,6 +40,21 @@ import {
     type WorkItemFilters,
 } from './workItemFilters'
 import { useWorkItemColumnPreferences } from './useWorkItemColumnPreferences'
+import { lazyWithRetry } from '../../utils/staleChunkRecovery'
+
+function lazyDialog<TProps extends object>(
+    importer: () => Promise<{ default: ComponentType<TProps> }>,
+): LazyExoticComponent<ComponentType<TProps>> {
+    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
+}
+
+type CreateWorkItemDialogProps = ComponentProps<typeof import('./CreateWorkItemDialog').CreateWorkItemDialog>
+type WorkItemDetailDialogProps = ComponentProps<typeof import('./WorkItemDetailDialog').WorkItemDetailDialog>
+type ManageLevelsDialogProps = ComponentProps<typeof import('./ManageLevelsDialog').ManageLevelsDialog>
+
+const CreateWorkItemDialog = lazyDialog<CreateWorkItemDialogProps>(() => import('./CreateWorkItemDialog').then((module) => ({ default: module.CreateWorkItemDialog })))
+const WorkItemDetailDialog = lazyDialog<WorkItemDetailDialogProps>(() => import('./WorkItemDetailDialog').then((module) => ({ default: module.WorkItemDetailDialog })))
+const ManageLevelsDialog = lazyDialog<ManageLevelsDialogProps>(() => import('./ManageLevelsDialog').then((module) => ({ default: module.ManageLevelsDialog })))
 
 const useStyles = makeStyles({
     root: {
@@ -633,9 +648,21 @@ export function WorkItemsPage() {
 
             {projectId && (
                 <>
-                    <CreateWorkItemDialog projectId={projectId} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
-                    <WorkItemDetailDialog projectId={projectId} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
-                    <ManageLevelsDialog projectId={projectId} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />
+                    <Suspense fallback={null}>
+                        {createDialogOpen ? (
+                            <CreateWorkItemDialog projectId={projectId} workItems={workItems ?? []} levels={levels ?? []} open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+                        ) : null}
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        {selectedItem ? (
+                            <WorkItemDetailDialog projectId={projectId} item={selectedItem} workItems={workItems ?? []} levels={levels ?? []} onClose={() => setSelectedItem(null)} onNavigate={setSelectedItem} />
+                        ) : null}
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        {manageLevelsOpen ? (
+                            <ManageLevelsDialog projectId={projectId} open={manageLevelsOpen} onOpenChange={setManageLevelsOpen} />
+                        ) : null}
+                    </Suspense>
                 </>
             )}
         </div>

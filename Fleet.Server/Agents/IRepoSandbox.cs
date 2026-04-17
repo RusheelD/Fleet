@@ -58,6 +58,14 @@ public interface IRepoSandbox : IAsyncDisposable
     void WriteFile(string relativePath, string content);
 
     /// <summary>
+    /// Writes content to a file only when the contents have changed.
+    /// </summary>
+    /// <param name="relativePath">File path relative to the repo root.</param>
+    /// <param name="content">Content to write.</param>
+    /// <returns>True when the file was created or updated; false when the existing content already matched.</returns>
+    bool WriteFileIfChanged(string relativePath, string content);
+
+    /// <summary>
     /// Writes binary content to a file, creating directories as needed.
     /// </summary>
     /// <param name="relativePath">File path relative to the repo root.</param>

@@ -1894,12 +1894,13 @@ public class AgentOrchestrationService(
                 return string.Empty;
 
             var snapshot = await BuildOpenSpecSnapshotAsync(cancellationToken);
-            sandbox.WriteFile(snapshot.Paths.ProposalPath, snapshot.ProposalMarkdown);
-            sandbox.WriteFile(snapshot.Paths.TasksPath, snapshot.TasksMarkdown);
-            sandbox.WriteFile(snapshot.Paths.DesignPath, snapshot.DesignMarkdown);
-            sandbox.WriteFile(snapshot.Paths.SpecPath, snapshot.SpecMarkdown);
+            var changed =
+                sandbox.WriteFileIfChanged(snapshot.Paths.ProposalPath, snapshot.ProposalMarkdown) |
+                sandbox.WriteFileIfChanged(snapshot.Paths.TasksPath, snapshot.TasksMarkdown) |
+                sandbox.WriteFileIfChanged(snapshot.Paths.DesignPath, snapshot.DesignMarkdown) |
+                sandbox.WriteFileIfChanged(snapshot.Paths.SpecPath, snapshot.SpecMarkdown);
 
-            if (persistToRemote && !string.IsNullOrWhiteSpace(accessToken))
+            if (persistToRemote && changed && !string.IsNullOrWhiteSpace(accessToken))
             {
                 await sandbox.CommitFilesAndPushAsync(
                     accessToken,
