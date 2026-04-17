@@ -348,11 +348,27 @@ public class AgentOrchestrationRetryTests
             "auto",
             null);
 
+        Assert.AreEqual(5, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review, AgentRole.Documentation }, pipeline[4]);
+    }
+
+    [TestMethod]
+    public void BuildOrchestrationPipelineFromFollowingRoles_AlwaysIncludesMandatoryConsolidation()
+    {
+        var pipeline = AgentOrchestrationService.BuildOrchestrationPipelineFromFollowingRoles(
+            [AgentRole.Testing],
+            "manual",
+            1);
+
         Assert.AreEqual(4, pipeline.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Review, AgentRole.Documentation }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, pipeline[3]);
     }
 
     [TestMethod]
@@ -420,11 +436,12 @@ public class AgentOrchestrationRetryTests
             legacyPipeline,
             AgentExecutionModes.Orchestration);
 
-        Assert.AreEqual(4, normalized.Length);
+        Assert.AreEqual(5, normalized.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, normalized[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, normalized[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, normalized[2]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Review }, normalized[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, normalized[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, normalized[4]);
     }
 
     [TestMethod]
@@ -1524,6 +1541,7 @@ public class AgentOrchestrationRetryTests
 
         Assert.AreEqual(PlannerSubFlowMode.UseExistingSubFlows, guidance.SuggestedCurrentExecutionShape.SubFlowMode);
         CollectionAssert.Contains(guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray(), AgentRole.Contracts);
+        CollectionAssert.Contains(guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray(), AgentRole.Consolidation);
         CollectionAssert.Contains(guidance.SuggestedCurrentExecutionShape.FollowingAgents.ToArray(), AgentRole.Review);
     }
 
@@ -1598,7 +1616,7 @@ public class AgentOrchestrationRetryTests
 
         Assert.AreEqual(PlannerSubFlowMode.UseExistingSubFlows, resolved.SubFlowMode);
         CollectionAssert.AreEqual(
-            new[] { AgentRole.Contracts, AgentRole.Review, AgentRole.Documentation },
+            new[] { AgentRole.Contracts, AgentRole.Consolidation, AgentRole.Review, AgentRole.Documentation },
             resolved.FollowingAgents.ToArray());
     }
 

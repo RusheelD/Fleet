@@ -136,6 +136,7 @@ Rules for this block:
 - Use only Fleet role names in `target_roles` / `restart_from`.
 - For PATCH, set `target_roles` to the specific agents that should fix the findings.
 - For RESTART, set `restart_from` to the earliest phase that must be re-entered.
+- For RESTART, never set `restart_from` to `Review` or `Documentation`; choose the earliest upstream implementation/consolidation/contracts/planning phase that must actually rerun.
 - Keep `summary` and `rationale` short and concrete.
 
 ## Review Principles

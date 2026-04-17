@@ -476,14 +476,40 @@ internal static partial class ReviewFeedbackLoopPlanner
         if (restartFromRole is AgentRole.Manager)
             restartFromRole = AgentRole.Planner;
 
-        if (restartFromRole is not null && orderedRoles.Contains(restartFromRole.Value))
-            return restartFromRole;
+        if (restartFromRole is AgentRole.Review or AgentRole.Documentation)
+            restartFromRole = FindLatestRestartCapableRole(orderedRoles);
+
+        if (restartFromRole is not null &&
+            orderedRoles.Contains(restartFromRole.Value) &&
+            IsRestartCapableRole(restartFromRole.Value))
+        return restartFromRole;
 
         if (targetRoles.Count > 0)
-            return targetRoles.OrderBy(role => Array.IndexOf(orderedRoles.ToArray(), role)).First();
+        {
+            var actionableTarget = targetRoles
+                .Where(role => orderedRoles.Contains(role) && IsRestartCapableRole(role))
+                .OrderBy(role => Array.IndexOf(orderedRoles.ToArray(), role))
+                .FirstOrDefault();
+            if (actionableTarget != default)
+                return actionableTarget;
+        }
+
+        var latestRestartCapableRole = FindLatestRestartCapableRole(orderedRoles);
+        if (latestRestartCapableRole is not null)
+            return latestRestartCapableRole;
 
         return orderedRoles.FirstOrDefault(role => role != AgentRole.Manager);
     }
+
+    private static bool IsRestartCapableRole(AgentRole role)
+        => role is not AgentRole.Review and not AgentRole.Documentation;
+
+    private static AgentRole? FindLatestRestartCapableRole(IReadOnlyList<AgentRole> orderedRoles)
+        => orderedRoles
+            .Reverse()
+            .Where(role => role is not AgentRole.Manager and not AgentRole.Review and not AgentRole.Documentation)
+            .Cast<AgentRole?>()
+            .FirstOrDefault();
 
     private static IReadOnlyList<AgentRole> ParseFallbackPatchTargets(
         ReviewTriageDecision decision,

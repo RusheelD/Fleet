@@ -110,6 +110,30 @@ public class ReviewFeedbackLoopPlannerTests
     }
 
     [TestMethod]
+    public void DetermineRolesToRerun_ForRestart_DoesNotLoopOnReviewPhase()
+    {
+        var decision = new ReviewTriageDecision(
+            ReviewTriageRecommendation.Restart,
+            "P0",
+            "The merged output still needs another real pass.",
+            "Restarting only Review would not change the implementation.",
+            [],
+            [AgentRole.Review],
+            AgentRole.Review);
+
+        var rerunRoles = ReviewFeedbackLoopPlanner.DetermineRolesToRerun(FullPipeline, decision);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                AgentRole.Consolidation,
+                AgentRole.Review,
+                AgentRole.Documentation,
+            },
+            rerunRoles.ToArray());
+    }
+
+    [TestMethod]
     public void SummarizeExecutionReviews_CountsAutomaticLoops()
     {
         var phaseResults = new List<AgentPhaseResult>

@@ -3024,7 +3024,7 @@ public class AgentOrchestrationService(
                                             projectId,
                                             "System",
                                             "info",
-                                            $"Planner delegated this run into {directChildWorkItems.Count} existing sub-flow(s). Contracts will run before sub-flow execution, and any remaining parent follow-up phases will resume after the child branches merge back.",
+                                $"Planner delegated this run into {directChildWorkItems.Count} existing sub-flow(s). Contracts will run before sub-flow execution, Consolidation will run only after all sub-flows complete and their branches merge back, and any remaining parent follow-up phases will resume after that.",
                                             executionId: executionId));
                                     await PublishAgentsUpdatedAsync();
                                     await PublishLogsUpdatedAsync();
@@ -3133,6 +3133,15 @@ public class AgentOrchestrationService(
                 }
 
                 var rerunRoles = ReviewFeedbackLoopPlanner.DetermineRolesToRerun(pipeline, latestCycleReviewDecision);
+                if (rerunRoles.Count == 0 &&
+                    latestCycleReviewDecision.Recommendation == ReviewTriageRecommendation.Restart)
+                {
+                    rerunRoles = pipeline
+                        .SelectMany(group => group)
+                        .Where(role => role is not AgentRole.Manager)
+                        .ToArray();
+                }
+
                 if (rerunRoles.Count == 0)
                     throw new InvalidOperationException("Review requested another remediation loop, but Fleet could not determine which phases to rerun.");
 
@@ -4680,6 +4689,11 @@ public class AgentOrchestrationService(
 
         if (!roles.Contains(AgentRole.Contracts))
             roles.Insert(0, AgentRole.Contracts);
+        if (!roles.Contains(AgentRole.Consolidation))
+        {
+            var contractsIndex = roles.IndexOf(AgentRole.Contracts);
+            roles.Insert(contractsIndex >= 0 ? contractsIndex + 1 : 0, AgentRole.Consolidation);
+        }
 
         return roles;
     }
@@ -4722,7 +4736,7 @@ public class AgentOrchestrationService(
         sb.AppendLine($"- Direct-run rationale: {guidance.DirectExecutionReason}");
         sb.AppendLine($"- Suggested sub-flow mode: {FormatPlannerSubFlowMode(guidance.SuggestedCurrentExecutionShape.SubFlowMode)}.");
         sb.AppendLine($"- Sub-flow rationale: {guidance.SuggestedCurrentExecutionShape.SubFlowReason}");
-        sb.AppendLine($"- Suggested sub-flow follow-up agents (Contracts runs before child flows; the rest resume after merge): {(guidance.SuggestedCurrentExecutionShape.FollowingAgents.Count == 0 ? "none" : string.Join(", ", guidance.SuggestedCurrentExecutionShape.FollowingAgents))}.");
+        sb.AppendLine($"- Suggested sub-flow follow-up agents (Contracts runs before child flows; Consolidation runs only after all child sub-flows complete and merge back; the rest resume after consolidation): {(guidance.SuggestedCurrentExecutionShape.FollowingAgents.Count == 0 ? "none" : string.Join(", ", guidance.SuggestedCurrentExecutionShape.FollowingAgents))}.");
         sb.AppendLine($"- Existing direct child work items already in scope: {guidance.ExistingDirectChildCount}.");
         sb.AppendLine($"- Current execution depth: {guidance.ExecutionDepth}.");
         sb.AppendLine($"- Max direct sub-flows allowed at this depth: {guidance.MaxDirectSubFlows}.");
@@ -5763,23 +5777,64 @@ public class AgentOrchestrationService(
         string? assignmentMode,
         int? assignedAgentCount)
     {
-        var requestedRoles = followingRoles
+        var counts = followingRoles
             .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
-            .ToList();
-        if (!requestedRoles.Contains(AgentRole.Contracts))
-            requestedRoles.Insert(0, AgentRole.Contracts);
+            .GroupBy(role => role)
+            .ToDictionary(
+                group => group.Key,
+                group => Math.Min(group.Count(), group.Key is AgentRole.Contracts or AgentRole.Consolidation ? 1 : MaxPlannerRoleCopies));
 
-        var arranged = ArrangePipeline(requestedRoles);
-        arranged = ApplyAssignedAgentLimit(arranged, assignmentMode, assignedAgentCount);
-        return EnsureContractsInOrchestrationPipeline(arranged, AgentExecutionModes.Orchestration);
+        counts[AgentRole.Contracts] = 1;
+        counts[AgentRole.Consolidation] = 1;
+
+        var pipeline = new List<AgentRole[]>
+        {
+            new[] { AgentRole.Manager },
+            new[] { AgentRole.Planner },
+            new[] { AgentRole.Contracts },
+        };
+
+        var implementationGroup = new List<AgentRole>();
+        foreach (var role in new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Styling })
+        {
+            if (!counts.TryGetValue(role, out var count) || count <= 0)
+                continue;
+
+            implementationGroup.AddRange(Enumerable.Repeat(role, count));
+        }
+
+        if (implementationGroup.Count > 0)
+            pipeline.Add([.. implementationGroup]);
+
+        pipeline.Add(new[] { AgentRole.Consolidation });
+
+        if (counts.TryGetValue(AgentRole.Testing, out var testingCount) && testingCount > 0)
+            pipeline.Add(Enumerable.Repeat(AgentRole.Testing, testingCount).ToArray());
+
+        var reviewGroup = new List<AgentRole>();
+        foreach (var role in new[] { AgentRole.Review, AgentRole.Documentation })
+        {
+            if (!counts.TryGetValue(role, out var count) || count <= 0)
+                continue;
+
+            reviewGroup.AddRange(Enumerable.Repeat(role, count));
+        }
+
+        if (reviewGroup.Count > 0)
+            pipeline.Add([.. reviewGroup]);
+
+        return ApplyAssignedAgentLimitPreservingRoles(
+            [.. pipeline],
+            assignmentMode,
+            assignedAgentCount,
+            [AgentRole.Contracts, AgentRole.Consolidation]);
     }
 
     internal static AgentRole[][] EnsureContractsInOrchestrationPipeline(
         AgentRole[][] pipeline,
         string? executionMode)
     {
-        if (!string.Equals(executionMode, AgentExecutionModes.Orchestration, StringComparison.OrdinalIgnoreCase) ||
-            pipeline.SelectMany(group => group).Contains(AgentRole.Contracts))
+        if (!string.Equals(executionMode, AgentExecutionModes.Orchestration, StringComparison.OrdinalIgnoreCase))
         {
             return pipeline;
         }
@@ -5787,10 +5842,65 @@ public class AgentOrchestrationService(
         var requestedRoles = pipeline
             .SelectMany(group => group)
             .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
-            .ToList();
-        requestedRoles.Insert(0, AgentRole.Contracts);
+            .ToArray();
 
-        return ArrangePipeline(requestedRoles);
+        return BuildOrchestrationPipelineFromFollowingRoles(
+            requestedRoles,
+            assignmentMode: null,
+            assignedAgentCount: null);
+    }
+
+    private static AgentRole[][] ApplyAssignedAgentLimitPreservingRoles(
+        AgentRole[][] pipeline,
+        string? assignmentMode,
+        int? assignedAgentCount,
+        IReadOnlyCollection<AgentRole> mandatoryRoles)
+    {
+        var effectiveAssignedAgentCount = ResolveEffectiveAssignedAgentCount(assignmentMode, assignedAgentCount);
+        if (effectiveAssignedAgentCount is null)
+            return pipeline;
+
+        var mandatoryRoleSet = mandatoryRoles.ToHashSet();
+        var mandatoryWorkerSlots = pipeline
+            .SelectMany(group => group)
+            .Count(role => role is not AgentRole.Manager and not AgentRole.Planner && mandatoryRoleSet.Contains(role));
+        var remainingOptionalWorkerSlots = Math.Max(0, effectiveAssignedAgentCount.Value - mandatoryWorkerSlots);
+        var totalWorkerSlots = pipeline
+            .SelectMany(group => group)
+            .Count(role => role is not AgentRole.Manager and not AgentRole.Planner);
+
+        if (totalWorkerSlots <= mandatoryWorkerSlots + remainingOptionalWorkerSlots)
+            return pipeline;
+
+        return pipeline
+            .Select(group =>
+            {
+                var retained = new List<AgentRole>();
+                foreach (var role in group)
+                {
+                    if (role is AgentRole.Manager or AgentRole.Planner)
+                    {
+                        retained.Add(role);
+                        continue;
+                    }
+
+                    if (mandatoryRoleSet.Contains(role))
+                    {
+                        retained.Add(role);
+                        continue;
+                    }
+
+                    if (remainingOptionalWorkerSlots <= 0)
+                        continue;
+
+                    retained.Add(role);
+                    remainingOptionalWorkerSlots--;
+                }
+
+                return retained.ToArray();
+            })
+            .Where(group => group.Length > 0)
+            .ToArray();
     }
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
