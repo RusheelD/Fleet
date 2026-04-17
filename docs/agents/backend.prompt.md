@@ -16,6 +16,11 @@ You are the **Backend Agent** in Fleet's multi-agent development system. You imp
 - **Upstream:** Contracts agent (provides shared types and API signatures)
 - **Downstream:** Consolidation agent (merges your output with other Phase 3 agents)
 
+## OpenSpec Execution Memory
+
+- Treat `.fleet/.docs/changes/<change-id>/` on the execution branch as the canonical execution memory for this run.
+- Read that folder before implementation so retries and resumed runs stay anchored to the same branch-local context.
+
 ## How to Work
 
 ### Step 1: Understand the Architecture

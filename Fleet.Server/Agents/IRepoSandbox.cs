@@ -102,6 +102,23 @@ public interface IRepoSandbox : IAsyncDisposable
     Task CommitAndPushAsync(string accessToken, string commitMessage, string authorName, string authorEmail, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Stages only the provided files, commits them, and pushes to the remote branch.
+    /// </summary>
+    /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before pushing.</param>
+    /// <param name="relativePaths">Repository-relative paths to include in the commit.</param>
+    /// <param name="commitMessage">Commit message.</param>
+    /// <param name="authorName">Commit author name.</param>
+    /// <param name="authorEmail">Commit author email.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task CommitFilesAndPushAsync(
+        string accessToken,
+        IReadOnlyList<string> relativePaths,
+        string commitMessage,
+        string authorName,
+        string authorEmail,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Merges a remote branch into the current sandbox branch, preferring the source branch on content conflicts.
     /// </summary>
     /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before fetching.</param>

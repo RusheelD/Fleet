@@ -479,6 +479,70 @@ public class RepoSandbox : IRepoSandbox
         }
     }
 
+    public async Task CommitFilesAndPushAsync(
+        string accessToken,
+        IReadOnlyList<string> relativePaths,
+        string commitMessage,
+        string authorName,
+        string authorEmail,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        ArgumentNullException.ThrowIfNull(relativePaths);
+
+        var normalizedPaths = relativePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeRelativePathSpec)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedPaths.Length == 0)
+            return;
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            var result = await RunGitAsync(
+                BuildAddPathspecArgumentList(normalizedPaths),
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git add failed: {result.Stderr}");
+
+            var stagedStatus = await RunGitAsync(
+                BuildDiffCachedNameOnlyArgumentList(normalizedPaths),
+                cancellationToken: cancellationToken);
+            if (stagedStatus.ExitCode != 0)
+                throw new InvalidOperationException($"Git diff failed: {stagedStatus.Stderr}");
+            if (string.IsNullOrWhiteSpace(stagedStatus.Stdout))
+            {
+                _logger.LogInformation("No targeted changes to commit for {Paths}", string.Join(", ", normalizedPaths));
+                return;
+            }
+
+            result = await RunGitAsync(
+                BuildCommitOnlyArgumentList(commitMessage, normalizedPaths),
+                BuildCommitEnvironment(authorName, authorEmail),
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git commit failed: {result.Stderr}");
+
+            await UpdateOriginRemoteAsync(accessToken, cancellationToken);
+            result = await RunGitAsync(
+                ["push", "-u", "origin", _branchName],
+                cancellationToken: cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git push failed: {result.Stderr}");
+
+            _logger.LogInformation(
+                "Committed and pushed targeted files to {Branch}: {Paths}",
+                _branchName,
+                string.Join(", ", normalizedPaths));
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     public async Task MergeBranchAsync(
         string accessToken,
         string sourceBranchName,
@@ -1140,6 +1204,52 @@ public class RepoSandbox : IRepoSandbox
         ];
     }
 
+    internal static IReadOnlyList<string> BuildCommitOnlyArgumentList(string commitMessage, IReadOnlyList<string> relativePaths)
+    {
+        if (string.IsNullOrWhiteSpace(commitMessage))
+            throw new ArgumentException("Commit message is required.", nameof(commitMessage));
+        if (relativePaths is null || relativePaths.Count == 0)
+            throw new ArgumentException("At least one path is required.", nameof(relativePaths));
+
+        return
+        [
+            "commit",
+            "--only",
+            "-m",
+            commitMessage,
+            "--",
+            .. relativePaths,
+        ];
+    }
+
+    internal static IReadOnlyList<string> BuildAddPathspecArgumentList(IReadOnlyList<string> relativePaths)
+    {
+        if (relativePaths is null || relativePaths.Count == 0)
+            throw new ArgumentException("At least one path is required.", nameof(relativePaths));
+
+        return
+        [
+            "add",
+            "--",
+            .. relativePaths,
+        ];
+    }
+
+    internal static IReadOnlyList<string> BuildDiffCachedNameOnlyArgumentList(IReadOnlyList<string> relativePaths)
+    {
+        if (relativePaths is null || relativePaths.Count == 0)
+            throw new ArgumentException("At least one path is required.", nameof(relativePaths));
+
+        return
+        [
+            "diff",
+            "--cached",
+            "--name-only",
+            "--",
+            .. relativePaths,
+        ];
+    }
+
     internal static IReadOnlyDictionary<string, string> BuildCommitEnvironment(string authorName, string authorEmail)
     {
         if (string.IsNullOrWhiteSpace(authorName))
@@ -1242,6 +1352,18 @@ public class RepoSandbox : IRepoSandbox
             throw new ArgumentException("Branch name is required.", argumentName);
 
         return branchName.Trim();
+    }
+
+    private string NormalizeRelativePathSpec(string relativePath)
+    {
+        var fullPath = ResolveSafePath(relativePath);
+        var normalized = Path.GetRelativePath(_repoRoot, fullPath)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == ".")
+            throw new ArgumentException("Relative path must target a file inside the repository.", nameof(relativePath));
+
+        return normalized;
     }
 
     internal static string BuildAuthenticatedCloneUrl(

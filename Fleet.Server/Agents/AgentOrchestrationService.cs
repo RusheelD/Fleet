@@ -1773,6 +1773,7 @@ public class AgentOrchestrationService(
 
         IRepoSandbox? sandbox = null;
         string accessToken = string.Empty;
+        string openSpecPromptContext = string.Empty;
 
         Task WithDbLockAsync(Func<FleetDbContext, Task> action) => dbQueue.EnqueueAsync(async queuedDb =>
         {
@@ -1826,6 +1827,91 @@ public class AgentOrchestrationService(
                         log.IsDetailed,
                         log.ExecutionId))
                     .FirstOrDefaultAsync(CancellationToken.None));
+
+        async Task<OpenSpecExecutionSnapshot> BuildOpenSpecSnapshotAsync(CancellationToken cancellationToken)
+            => await WithDbResultAsync(async queuedDb =>
+            {
+                var execution = await queuedDb.AgentExecutions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        agentExecution => agentExecution.Id == executionId && agentExecution.ProjectId == projectId,
+                        cancellationToken);
+                if (execution is null)
+                    throw new InvalidOperationException($"Execution {executionId} was not found while building OpenSpec artifacts.");
+
+                var descendantExecutionIds = await CollectDescendantExecutionIdsAsync(
+                    queuedDb,
+                    projectId,
+                    executionId,
+                    cancellationToken);
+                var descendantExecutions = descendantExecutionIds.Count == 0
+                    ? []
+                    : await queuedDb.AgentExecutions
+                        .AsNoTracking()
+                        .Where(agentExecution => descendantExecutionIds.Contains(agentExecution.Id))
+                        .OrderBy(agentExecution => agentExecution.StartedAtUtc)
+                        .ToListAsync(cancellationToken);
+
+                var relevantExecutionIds = descendantExecutionIds
+                    .Append(executionId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var phaseResults = await queuedDb.AgentPhaseResults
+                    .AsNoTracking()
+                    .Where(result => relevantExecutionIds.Contains(result.ExecutionId))
+                    .OrderBy(result => result.ExecutionId)
+                    .ThenBy(result => result.PhaseOrder)
+                    .ToListAsync(cancellationToken);
+                var phaseResultsByExecution = phaseResults
+                    .GroupBy(result => result.ExecutionId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => (IReadOnlyList<AgentPhaseResult>)group.ToList(),
+                        StringComparer.OrdinalIgnoreCase);
+                phaseResultsByExecution.TryGetValue(executionId, out var rootPhaseResults);
+
+                var executionDocumentationMarkdown = BuildExecutionDocumentationMarkdown(
+                    execution,
+                    rootPhaseResults ?? [],
+                    descendantExecutions,
+                    phaseResultsByExecution);
+
+                return OpenSpecExecutionArtifacts.BuildSnapshot(
+                    execution,
+                    workItem,
+                    pullRequestTargetBranch,
+                    rootPhaseResults ?? [],
+                    descendantExecutions,
+                    executionDocumentationMarkdown);
+            });
+
+        async Task<string> RefreshOpenSpecExecutionArtifactsAsync(
+            string updateReason,
+            bool persistToRemote,
+            CancellationToken cancellationToken)
+        {
+            if (sandbox is null)
+                return string.Empty;
+
+            var snapshot = await BuildOpenSpecSnapshotAsync(cancellationToken);
+            sandbox.WriteFile(snapshot.Paths.ProposalPath, snapshot.ProposalMarkdown);
+            sandbox.WriteFile(snapshot.Paths.TasksPath, snapshot.TasksMarkdown);
+            sandbox.WriteFile(snapshot.Paths.DesignPath, snapshot.DesignMarkdown);
+            sandbox.WriteFile(snapshot.Paths.SpecPath, snapshot.SpecMarkdown);
+
+            if (persistToRemote && !string.IsNullOrWhiteSpace(accessToken))
+            {
+                await sandbox.CommitFilesAndPushAsync(
+                    accessToken,
+                    snapshot.TrackedPaths,
+                    $"fleet: update openspec for #{workItem.WorkItemNumber} ({updateReason})",
+                    commitAuthorName,
+                    commitAuthorEmail,
+                    cancellationToken);
+            }
+
+            return snapshot.PromptContext;
+        }
 
         async Task PublishAgentsUpdatedAsync()
         {
@@ -2430,6 +2516,10 @@ public class AgentOrchestrationService(
 
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed"));
                 await PublishAgentsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    "completed-after-subflows",
+                    persistToRemote: true,
+                    externalCancellation);
 
                 await scopedWorkItemRepo.UpdateAsync(
                     projectId,
@@ -2503,6 +2593,10 @@ public class AgentOrchestrationService(
                         $"Sub-flow orchestration merged {orderedChildren.Length} child branch(es) into '{sandbox.BranchName}'. Continuing with parent follow-up phases on the merged branch.",
                         executionId: executionId));
                 await PublishLogsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    "subflow-merge-followup",
+                    persistToRemote: true,
+                    externalCancellation);
 
                 return (
                     false,
@@ -2566,6 +2660,10 @@ public class AgentOrchestrationService(
 
             await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed", orchestrationPrUrl));
             await PublishAgentsUpdatedAsync();
+            openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                "completed-after-subflows",
+                persistToRemote: true,
+                externalCancellation);
             await scopedNotificationService.PublishAsync(
                 userId,
                 projectId,
@@ -2696,6 +2794,10 @@ public class AgentOrchestrationService(
                 .Where(agentExecution => agentExecution.Id == executionId)
                 .Select(agentExecution => agentExecution.ExecutionMode)
                 .FirstOrDefaultAsync(externalCancellation);
+            openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                "initialized",
+                persistToRemote: true,
+                externalCancellation);
 
             var totalRoles = pipeline.SelectMany(g => g).Count();
             var phaseOrder = 0;
@@ -2849,6 +2951,10 @@ public class AgentOrchestrationService(
                                 return;
 
                             orchestrationExecution = false;
+                            openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                                "subflows-synchronized",
+                                persistToRemote: true,
+                                externalCancellation);
                             if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
                                 currentWorkItemContext = $"{currentWorkItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
                         }
@@ -2927,6 +3033,10 @@ public class AgentOrchestrationService(
                             return;
 
                         orchestrationExecution = false;
+                        openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                            "subflows-synchronized",
+                            persistToRemote: true,
+                            externalCancellation);
                         if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
                             currentWorkItemContext = $"{currentWorkItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
                     }
@@ -3015,6 +3125,10 @@ public class AgentOrchestrationService(
                                         await PublishWorkItemsUpdatedAsync();
                                         await PublishProjectsUpdatedAsync();
                                         await PublishLogsUpdatedAsync();
+                                        openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                                            "planner-generated-subflows",
+                                            persistToRemote: true,
+                                            externalCancellation);
                                         break;
                                     }
                                 }
@@ -3064,6 +3178,10 @@ public class AgentOrchestrationService(
                                             executionId: executionId));
                                     await PublishAgentsUpdatedAsync();
                                     await PublishLogsUpdatedAsync();
+                                    openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                                        "planner-existing-subflows",
+                                        persistToRemote: true,
+                                        externalCancellation);
                                     break;
                                 }
                             }
@@ -3129,6 +3247,10 @@ public class AgentOrchestrationService(
                                             $"Planner refined the direct execution pipeline to {string.Join(", ", pipeline.SelectMany(group => group).Where(role => role is not AgentRole.Manager and not AgentRole.Planner))}.",
                                             executionId: executionId));
                                     await PublishLogsUpdatedAsync();
+                                    openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                                        "planner-direct-pipeline",
+                                        persistToRemote: true,
+                                        externalCancellation);
                                     break;
                                 }
                             }
@@ -3208,6 +3330,10 @@ public class AgentOrchestrationService(
                 });
                 await PublishAgentsUpdatedAsync();
                 await PublishLogsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    $"review-loop-{reviewLoopCount}",
+                    persistToRemote: true,
+                    externalCancellation);
             }
 
             async Task<RolePhaseExecutionResult> RunRoleAsync(
@@ -3249,7 +3375,8 @@ public class AgentOrchestrationService(
                     priorOutputs,
                     draftPullRequestReady,
                     trustedPhaseBrief,
-                    agentLabel);
+                    agentLabel,
+                    openSpecPromptContext);
                 if (!string.IsNullOrWhiteSpace(steeringBlock))
                     baseUserMessage += steeringBlock;
 
@@ -3572,6 +3699,10 @@ public class AgentOrchestrationService(
                         });
                         await PublishAgentsUpdatedAsync();
                         await PublishLogsUpdatedAsync();
+                        openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                            $"{agentLabel.ToLowerInvariant()}-attempt-{attempt}-{(result.Success ? "completed" : "failed")}",
+                            persistToRemote: true,
+                            externalCancellation);
 
                         if (result.Success)
                         {
@@ -3674,6 +3805,10 @@ public class AgentOrchestrationService(
                         return;
 
                     orchestrationExecution = false;
+                    openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                        "subflows-synchronized",
+                        persistToRemote: true,
+                        externalCancellation);
                     if (!string.IsNullOrWhiteSpace(orchestrationResult.FollowUpContextMarkdown))
                         workItemContext = $"{workItemContext}\n\n{orchestrationResult.FollowUpContextMarkdown}";
                 }
@@ -3723,6 +3858,10 @@ public class AgentOrchestrationService(
                     externalCancellation);
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed"));
                 await PublishAgentsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    "completed",
+                    persistToRemote: true,
+                    externalCancellation);
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
@@ -3802,6 +3941,10 @@ public class AgentOrchestrationService(
 
             await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed", prUrl));
             await PublishAgentsUpdatedAsync();
+            openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                "completed",
+                persistToRemote: true,
+                externalCancellation);
             await scopedNotificationService.PublishAsync(
                 userId,
                 projectId,
@@ -3867,6 +4010,10 @@ public class AgentOrchestrationService(
                 await StopDescendantExecutionsAsync(finalStatus);
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, finalStatus));
                 await PublishAgentsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    finalStatus,
+                    persistToRemote: true,
+                    externalCancellation);
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
@@ -3928,6 +4075,10 @@ public class AgentOrchestrationService(
             {
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "failed", errorMessage: finalErrorMessage));
                 await PublishAgentsUpdatedAsync();
+                openSpecPromptContext = await RefreshOpenSpecExecutionArtifactsAsync(
+                    "failed",
+                    persistToRemote: true,
+                    externalCancellation);
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
@@ -5404,14 +5555,16 @@ public class AgentOrchestrationService(
         List<(AgentRole Role, string Output)> priorOutputs,
         bool draftPullRequestReady,
         string? trustedPhaseBrief = null,
-        string? agentLabel = null)
+        string? agentLabel = null,
+        string? openSpecContext = null)
         => AgentExecutionPromptBuilder.BuildPhaseMessage(
             role,
             workItemContext,
             priorOutputs,
             draftPullRequestReady,
             trustedPhaseBrief,
-            agentLabel);
+            agentLabel,
+            openSpecContext);
 
     internal static IReadOnlyDictionary<AgentRole, string> BuildRetryCarryForwardOutputs(
         IReadOnlyList<AgentPhaseResult> priorPhaseResults)
@@ -6861,7 +7014,7 @@ public class AgentOrchestrationService(
         {
             if (seedBranchWithMarkerCommit)
             {
-                sandbox.WriteFile(".fleet",
+                sandbox.WriteFile(".fleet/execution.txt",
                     $"Fleet execution for work item #{workItem.WorkItemNumber}: {workItem.Title}\n" +
                     $"Started: {DateTime.UtcNow:O}\nBranch: {sandbox.BranchName}\n" +
                     $"Target branch: {pullRequestTargetBranch}\n");

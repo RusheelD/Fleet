@@ -35,6 +35,11 @@ Triage:  Manager (STOP / PATCH / RESTART)
 - Final triage decision happens after Phase 5.
 - If the Planner emits a valid sub-flow plan, Fleet will generate child work items and orchestrate child executions instead of forcing all implementation through one pipeline.
 
+## OpenSpec Execution Memory
+
+- Treat `.fleet/.docs/changes/<change-id>/` on the execution branch as the canonical execution memory for this run.
+- Read that folder before major orchestration decisions and keep it aligned with the actual branch state when you intentionally update execution documentation.
+
 ## Role Assignment Guidelines
 
 | Work item type        | Typical roles assigned |

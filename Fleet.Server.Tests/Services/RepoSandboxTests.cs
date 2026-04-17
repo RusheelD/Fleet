@@ -140,6 +140,62 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void BuildCommitOnlyArgumentList_TargetsSpecificPaths()
+    {
+        var result = RepoSandbox.BuildCommitOnlyArgumentList(
+            "Update OpenSpec progress",
+            [".fleet/.docs/changes/fleet-42/tasks.md", ".fleet/.docs/changes/fleet-42/design.md"]);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "commit",
+                "--only",
+                "-m",
+                "Update OpenSpec progress",
+                "--",
+                ".fleet/.docs/changes/fleet-42/tasks.md",
+                ".fleet/.docs/changes/fleet-42/design.md",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildAddPathspecArgumentList_StagesOnlyRequestedPaths()
+    {
+        var result = RepoSandbox.BuildAddPathspecArgumentList(
+            [".fleet/.docs/changes/fleet-42/proposal.md", ".fleet/.docs/changes/fleet-42/tasks.md"]);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "add",
+                "--",
+                ".fleet/.docs/changes/fleet-42/proposal.md",
+                ".fleet/.docs/changes/fleet-42/tasks.md",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildDiffCachedNameOnlyArgumentList_FiltersToRequestedPaths()
+    {
+        var result = RepoSandbox.BuildDiffCachedNameOnlyArgumentList(
+            [".fleet/.docs/changes/fleet-42/proposal.md"]);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "diff",
+                "--cached",
+                "--name-only",
+                "--",
+                ".fleet/.docs/changes/fleet-42/proposal.md",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
     public void BuildCommitEnvironment_SetsAuthorAndCommitterIdentity()
     {
         var result = RepoSandbox.BuildCommitEnvironment(

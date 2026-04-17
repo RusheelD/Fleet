@@ -34,7 +34,7 @@ import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import { collectExecutionRootsByStatus, executionTreeHasAnyStatus, findExecutionInCollection, normalizeExecutionTree, sortExecutionCollectionByDisplayOrder } from '../../models/executionTree'
-import { countActiveAgents, countActiveFlows } from './monitorSummary'
+import { countActiveAgents, countActiveFlows, formatCountLabel } from './monitorSummary'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
@@ -307,6 +307,7 @@ export function AgentMonitorPage() {
         [allExecutions],
     )
     const activeFlowCount = useMemo(() => countActiveFlows(allExecutions), [allExecutions])
+    const activeFlowLabel = useMemo(() => formatCountLabel(activeFlowCount, 'Active Flow'), [activeFlowCount])
     const paused = useMemo(
         () => allExecutions.filter((execution) =>
             !executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES) &&
@@ -317,6 +318,7 @@ export function AgentMonitorPage() {
     const failed = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['failed']), [allExecutions])
     const cancelled = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['cancelled']), [allExecutions])
     const activeAgentCount = useMemo(() => countActiveAgents(allExecutions), [allExecutions])
+    const activeAgentLabel = useMemo(() => formatCountLabel(activeAgentCount, 'Active Agent'), [activeAgentCount])
 
     const filteredByTab =
         tab === 'active' ? active :
@@ -655,7 +657,7 @@ export function AgentMonitorPage() {
                     icon={<PlayRegular />}
                     iconClassName={styles.summaryIconWarning}
                     value={activeFlowCount}
-                    label="Active Flows"
+                    label={activeFlowLabel}
                     onClick={() => setTab('active')}
                     isActive={tab === 'active'}
                 />
@@ -695,7 +697,7 @@ export function AgentMonitorPage() {
                     icon={<BotRegular />}
                     iconClassName={styles.summaryIconBrand}
                     value={activeAgentCount}
-                    label="Active Agents"
+                    label={activeAgentLabel}
                     onClick={() => setTab('active')}
                     isActive={tab === 'active'}
                 />

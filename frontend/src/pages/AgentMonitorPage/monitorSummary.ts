@@ -21,3 +21,7 @@ export function countActiveAgents(executions: AgentExecution[]): number {
             : count
     }, 0)
 }
+
+export function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
+    return count === 1 ? singular : plural
+}

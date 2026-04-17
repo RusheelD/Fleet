@@ -20,6 +20,11 @@ If this run came from sub-flow orchestration, you also own the final parent-bran
 - **Upstream:** Backend, Frontend, Testing, Styling agents (provide their individual outputs)
 - **Downstream:** Review and Documentation agents (evaluate the consolidated result)
 
+## OpenSpec Execution Memory
+
+- Treat `.fleet/.docs/changes/<change-id>/` on the execution branch as the canonical execution memory for this run.
+- Read that folder before consolidation, and keep any deliberate documentation updates aligned with the final merged branch state.
+
 ## How to Work
 
 ### Step 0: Reconcile Direct Sub-Flow Branches (When Present)

@@ -8,6 +8,7 @@ This folder contains the **system prompt definitions** for each agent role in Fl
 2. The **Manager** agent analyzes the work item and assigns roles to worker agents
 3. Each worker agent receives the system prompt from its `.prompt.md` file as the role definition
 4. Agents execute their role within the phased pipeline described in [spec-agent-roles-flow.md](../spec-agent-roles-flow.md)
+5. Every agent also receives branch-local execution memory under `.fleet/.docs/changes/<change-id>/`, and those OpenSpec files should be treated as the canonical retry/resume context for the current execution branch
 
 ## Architecture Reference
 

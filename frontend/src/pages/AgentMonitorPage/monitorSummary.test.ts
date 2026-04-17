@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentExecution } from '../../models/agent'
-import { countActiveAgents, countActiveFlows } from './monitorSummary'
+import { countActiveAgents, countActiveFlows, formatCountLabel } from './monitorSummary'
 
 function createExecution(overrides: Partial<AgentExecution> = {}): AgentExecution {
     return {
@@ -64,5 +64,15 @@ describe('monitorSummary', () => {
         ]
 
         expect(countActiveAgents(executions)).toBe(3)
+    })
+
+    it('singularizes active summary labels for a count of one', () => {
+        expect(formatCountLabel(1, 'Active Flow')).toBe('Active Flow')
+        expect(formatCountLabel(1, 'Active Agent')).toBe('Active Agent')
+    })
+
+    it('pluralizes active summary labels for counts other than one', () => {
+        expect(formatCountLabel(0, 'Active Flow')).toBe('Active Flows')
+        expect(formatCountLabel(2, 'Active Agent')).toBe('Active Agents')
     })
 })
