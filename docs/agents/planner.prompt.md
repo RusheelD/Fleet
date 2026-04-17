@@ -110,7 +110,8 @@ Execution-shape rules:
   - `generate_subflows` - Fleet should create new child work items from your sub-flow JSON
 - `following_agents` must reflect the agents that should run after Planner for the mode you chose.
 - If you choose `direct`, `following_agents` should be the lean downstream role set for the single execution.
-- For `direct`, include `Contracts` only when later downstream execution will branch into parallel agents. Sequential direct runs do not need `Contracts`.
+- For `direct`, include `Contracts` only when later downstream execution will branch into sub-flows or a real parallel implementation stage. Sequential direct runs do not need `Contracts`.
+- A mixed-role parallel implementation stage like `Backend + Frontend + Testing + Styling` still needs `Contracts`, just like duplicate same-role workers do.
 - `following_agents` may contain repeated roles when parallel same-role execution would help. For example, `["Backend", "Backend", "Frontend", "Testing"]` is valid.
 - You may omit roles entirely when they are not needed. Do not include a role just because it often appears in the default pipeline.
 - Fleet will accept at most 3 copies of any single downstream role. Treat that as a strict ceiling, not a target.

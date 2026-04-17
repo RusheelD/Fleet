@@ -332,7 +332,7 @@ public class AgentOrchestrationService(
 
             Available roles and when to include them:
             - Planner: Creates the implementation plan. ALWAYS include this.
-            - Contracts: Defines shared interfaces and types. Include only when later execution will branch into sub-flows or parallel downstream agents.
+            - Contracts: Defines shared interfaces and types. Include only when later execution will branch into sub-flows or a real parallel downstream implementation stage.
             - Backend: Implements server-side changes (APIs, services, database, .NET/C#). Include for any backend work.
             - Frontend: Implements UI changes (React, TypeScript, components). Include for any frontend/UI work.
             - Testing: Writes and runs tests. Include when new functionality is added.
@@ -343,7 +343,7 @@ public class AgentOrchestrationService(
 
             Rules:
             1. Planner is ALWAYS included.
-            2. Include Contracts only when later execution will branch into sub-flows or parallel downstream agents. Sequential direct runs do not need Contracts.
+            2. Include Contracts only when later execution will branch into sub-flows or a real parallel downstream implementation stage. Sequential direct runs do not need Contracts.
             3. Include Consolidation ONLY if both Backend and Frontend are selected.
             4. Never include Consolidation if only one of Backend/Frontend is selected.
             4. Minimize the number of roles Ã¢â‚¬â€ fewer = faster and cheaper execution.

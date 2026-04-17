@@ -54,10 +54,6 @@ internal static class AgentPipelineLayout
         if (counts.TryGetValue(AgentRole.Research, out var researchCount) && researchCount > 0)
             pipeline.Add(Enumerable.Repeat(AgentRole.Research, researchCount).ToArray());
 
-        var requiresContracts = RequiresContractsForDirectPipeline(counts);
-        if (requiresContracts)
-            pipeline.Add([AgentRole.Contracts]);
-
         foreach (var role in new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling })
         {
             if (!counts.TryGetValue(role, out var count) || count <= 0)
@@ -82,6 +78,12 @@ internal static class AgentPipelineLayout
                 continue;
 
             pipeline.Add(Enumerable.Repeat(role, count).ToArray());
+        }
+
+        if (RequiresContractsForDirectPipeline([.. pipeline]))
+        {
+            var contractsInsertionIndex = pipeline.FindLastIndex(group => group.Contains(AgentRole.Research));
+            pipeline.Insert(contractsInsertionIndex >= 0 ? contractsInsertionIndex + 1 : 2, [AgentRole.Contracts]);
         }
 
         return [.. pipeline];
@@ -243,11 +245,11 @@ internal static class AgentPipelineLayout
             .ToArray();
     }
 
-    private static bool RequiresContractsForDirectPipeline(
-        IReadOnlyDictionary<AgentRole, int> counts)
-        => counts.Any(entry =>
-            entry.Key is not (AgentRole.Manager or AgentRole.Planner or AgentRole.Contracts or AgentRole.Research) &&
-            entry.Value > 1);
+    internal static bool RequiresContractsForDirectPipeline(AgentRole[][] pipeline)
+        => pipeline.Any(group => group.Count(IsContractsSensitiveDirectRole) > 1);
+
+    private static bool IsContractsSensitiveDirectRole(AgentRole role)
+        => role is AgentRole.Backend or AgentRole.Frontend or AgentRole.Testing or AgentRole.Styling;
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
     {

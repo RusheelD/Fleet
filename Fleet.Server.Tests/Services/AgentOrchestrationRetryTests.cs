@@ -376,6 +376,20 @@ public class AgentOrchestrationRetryTests
     }
 
     [TestMethod]
+    public void RequiresContractsForDirectPipeline_ReturnsTrue_ForMixedParallelImplementationStage()
+    {
+        AgentRole[][] pipeline =
+        [
+            [AgentRole.Manager],
+            [AgentRole.Planner],
+            [AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling],
+            [AgentRole.Consolidation],
+        ];
+
+        Assert.IsTrue(AgentPipelineLayout.RequiresContractsForDirectPipeline(pipeline));
+    }
+
+    [TestMethod]
     public void BuildOrchestrationPipelineFromFollowingRoles_PreservesFollowUpStagesAfterContracts()
     {
         var pipeline = AgentOrchestrationService.BuildOrchestrationPipelineFromFollowingRoles(
