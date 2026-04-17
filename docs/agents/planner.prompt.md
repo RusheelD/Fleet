@@ -109,6 +109,7 @@ Execution-shape rules:
   - `use_existing_subflows` - the existing child work items are already the right sub-flow branches
   - `generate_subflows` - Fleet should create new child work items from your sub-flow JSON
 - `following_agents` must reflect the agents that should run after Planner for the mode you chose.
+- `following_agents` must always include `Review`. Fleet will enforce that requirement even if you forget, so include it deliberately and plan around it.
 - If you choose `direct`, `following_agents` should be the lean downstream role set for the single execution.
 - For `direct`, include `Contracts` only when later downstream execution will branch into sub-flows or a real parallel implementation stage. Sequential direct runs do not need `Contracts`.
 - A mixed-role parallel implementation stage like `Backend + Frontend + Testing + Styling` still needs `Contracts`, just like duplicate same-role workers do.
@@ -120,8 +121,9 @@ Execution-shape rules:
 - If you choose `use_existing_subflows` or `generate_subflows`, `following_agents` should include every parent-phase role that should still run in this execution.
 - `Contracts` is required for sub-flow modes and always runs before the child flows begin.
 - `Consolidation` is required for sub-flow modes and always runs immediately after the child branches merge back into the parent branch.
-- Any remaining roles in `following_agents` for sub-flow modes run after Consolidation.
-- If no parent follow-up is needed beyond the mandatory merge handling, `["Contracts", "Consolidation"]` is the minimal valid list.
+- `Review` is also required for sub-flow modes and runs after Consolidation.
+- Any remaining roles in `following_agents` for sub-flow modes run after Review unless their ordering explicitly says otherwise.
+- If no parent follow-up is needed beyond the mandatory merge handling, `["Contracts", "Consolidation", "Review"]` is the minimal valid list.
 - If you choose `use_existing_subflows`, you may add `existing_subflow_dependencies` to control which direct child work items must wait for earlier siblings.
 - `existing_subflow_dependencies` must reference exact work item numbers from the `Sub-Items` section.
 - Only list a child in `existing_subflow_dependencies` when it truly needs to wait. Omit children that can run immediately in parallel.

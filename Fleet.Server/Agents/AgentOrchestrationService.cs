@@ -338,7 +338,7 @@ public class AgentOrchestrationService(
             - Testing: Writes and runs tests. Include when new functionality is added.
             - Styling: Applies CSS/styling polish. Include only when visual/UI styling changes are needed.
             - Consolidation: Merges and integrates outputs. Include ONLY when BOTH Backend AND Frontend are selected.
-            - Review: Reviews code quality. Include for medium-to-large changes.
+            - Review: Reviews code quality. ALWAYS include this.
             - Documentation: Generates documentation. Include only for significant new features.
 
             Rules:
@@ -346,13 +346,14 @@ public class AgentOrchestrationService(
             2. Include Contracts only when later execution will branch into sub-flows or a real parallel downstream implementation stage. Sequential direct runs do not need Contracts.
             3. Include Consolidation ONLY if both Backend and Frontend are selected.
             4. Never include Consolidation if only one of Backend/Frontend is selected.
-            4. Minimize the number of roles Ã¢â‚¬â€ fewer = faster and cheaper execution.
-            6. For backend-only tasks, you typically need: Planner, Backend, and optionally Testing/Review.
-            7. For frontend-only tasks, you typically need: Planner, Frontend, and optionally Styling/Review.
-            8. For full-stack tasks, you typically need: Planner, Contracts, Backend, Frontend, Consolidation, and optionally Testing/Review when implementation will run in parallel.
+            5. ALWAYS include Review somewhere in the downstream pipeline.
+            6. Minimize the number of roles - fewer = faster and cheaper execution.
+            7. For backend-only tasks, you typically need: Planner, Backend, Review, and optionally Testing.
+            8. For frontend-only tasks, you typically need: Planner, Frontend, Review, and optionally Styling.
+            9. For full-stack tasks, you typically need: Planner, Contracts, Backend, Frontend, Consolidation, Review, and optionally Testing when implementation will run in parallel.
 
             Return ONLY a JSON array of role name strings like: ["Planner", "Backend", "Testing"]
-            No explanation, no markdown fences Ã¢â‚¬â€ just the raw JSON array.
+            No explanation, no markdown fences - just the raw JSON array.
             """;
 
         try

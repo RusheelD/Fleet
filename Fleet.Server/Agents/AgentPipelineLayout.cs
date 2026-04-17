@@ -44,6 +44,7 @@ internal static class AgentPipelineLayout
 
         counts[AgentRole.Manager] = 1;
         counts[AgentRole.Planner] = 1;
+        counts[AgentRole.Review] = Math.Max(counts.GetValueOrDefault(AgentRole.Review), 1);
 
         var pipeline = new List<AgentRole[]>
         {
@@ -120,6 +121,7 @@ internal static class AgentPipelineLayout
 
         counts[AgentRole.Contracts] = 1;
         counts[AgentRole.Consolidation] = 1;
+        counts[AgentRole.Review] = Math.Max(counts.GetValueOrDefault(AgentRole.Review), 1);
 
         var pipeline = new List<AgentRole[]>
         {
@@ -203,6 +205,7 @@ internal static class AgentPipelineLayout
         roles.RemoveAll(role =>
             role == AgentRole.Consolidation &&
             (backendCount == 0 || frontendCount == 0));
+        EnsureReviewRole(roles);
 
         return roles;
     }
@@ -265,7 +268,7 @@ internal static class AgentPipelineLayout
         if (totalWorkerSlots <= remainingWorkerSlots)
             return pipeline;
 
-        return pipeline
+        var limitedPipeline = pipeline
             .Select(group =>
             {
                 var retained = new List<AgentRole>();
@@ -288,6 +291,8 @@ internal static class AgentPipelineLayout
             })
             .Where(group => group.Length > 0)
             .ToArray();
+
+        return EnsureReviewStagePresent(pipeline, limitedPipeline);
     }
 
     internal static int ResolveMaxConcurrentAgentsPerTask(int tierLimit, string? assignmentMode, int? assignedAgentCount)
@@ -358,7 +363,7 @@ internal static class AgentPipelineLayout
         if (totalWorkerSlots <= mandatoryWorkerSlots + remainingOptionalWorkerSlots)
             return pipeline;
 
-        return pipeline
+        var limitedPipeline = pipeline
             .Select(group =>
             {
                 var retained = new List<AgentRole>();
@@ -387,5 +392,30 @@ internal static class AgentPipelineLayout
             })
             .Where(group => group.Length > 0)
             .ToArray();
+
+        return EnsureReviewStagePresent(pipeline, limitedPipeline);
+    }
+
+    private static void EnsureReviewRole(ICollection<AgentRole> roles)
+    {
+        if (!roles.Contains(AgentRole.Review))
+            roles.Add(AgentRole.Review);
+    }
+
+    private static AgentRole[][] EnsureReviewStagePresent(AgentRole[][] originalPipeline, AgentRole[][] limitedPipeline)
+    {
+        var originalIncludesReview = originalPipeline
+            .SelectMany(group => group)
+            .Contains(AgentRole.Review);
+        if (!originalIncludesReview)
+            return limitedPipeline;
+
+        var limitedIncludesReview = limitedPipeline
+            .SelectMany(group => group)
+            .Contains(AgentRole.Review);
+        if (limitedIncludesReview)
+            return limitedPipeline;
+
+        return [.. limitedPipeline, [AgentRole.Review]];
     }
 }

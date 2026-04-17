@@ -323,11 +323,12 @@ public class AgentOrchestrationRetryTests
 
         var limited = AgentOrchestrationService.ApplyAssignedAgentLimit(pipeline, "manual", 2);
 
-        Assert.AreEqual(4, limited.Length);
+        Assert.AreEqual(5, limited.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, limited[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, limited[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, limited[2]);
         CollectionAssert.AreEqual(new[] { AgentRole.Backend }, limited[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, limited[4]);
     }
 
     [TestMethod]
@@ -413,11 +414,22 @@ public class AgentOrchestrationRetryTests
             "manual",
             1);
 
-        Assert.AreEqual(4, pipeline.Length);
+        Assert.AreEqual(5, pipeline.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
         CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[4]);
+    }
+
+    [TestMethod]
+    public void NormalizePlannerFollowingRoles_AddsReviewWhenPlannerOmitsIt()
+    {
+        var normalized = AgentPipelineLayout.NormalizePlannerFollowingRoles(
+            [AgentRole.Backend, AgentRole.Testing],
+            [AgentRole.Backend, AgentRole.Testing]);
+
+        CollectionAssert.Contains(normalized.ToArray(), AgentRole.Review);
     }
 
     [TestMethod]

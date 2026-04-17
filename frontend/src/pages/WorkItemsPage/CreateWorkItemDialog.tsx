@@ -15,9 +15,13 @@ import {
     DialogBody,
     DialogContent,
     DialogActions,
+    Toast,
+    ToastTitle,
+    Toaster,
+    useId,
+    useToastController,
 } from '@fluentui/react-components'
-import { useCreateWorkItem } from '../../proxies'
-import { resolveLevelIcon } from '../../proxies'
+import { getApiErrorMessage, resolveLevelIcon, useCreateWorkItem, useStartExecution } from '../../proxies'
 import type { WorkItem, WorkItemLevel } from '../../models'
 import { useIsMobile } from '../../hooks'
 import {
@@ -89,6 +93,9 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
     const styles = useStyles()
     const isMobile = useIsMobile()
     const createMutation = useCreateWorkItem(projectId)
+    const startExecutionMutation = useStartExecution(projectId)
+    const toasterId = useId('create-work-item-toaster')
+    const { dispatchToast } = useToastController(toasterId)
 
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
@@ -103,6 +110,9 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
 
     const parentOptions = workItems ?? []
     const sortedLevels = [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal)
+    const agentSettings = getWorkItemAssignmentSettings(agentLabel)
+    const canStartImmediately = agentSettings.isAI
+    const isSubmitting = createMutation.isPending || startExecutionMutation.isPending
 
     const resetForm = () => {
         setTitle('')
@@ -117,45 +127,96 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
         setLevelLabel(NONE_LEVEL)
     }
 
+    const buildRequest = () => {
+        const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
+        const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
+
+        return {
+            title: title.trim(),
+            description: description.trim(),
+            priority: PRIORITY_MAP[priorityLabel] ?? 2,
+            difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
+            state,
+            assignedTo: agentSettings.assignedTo,
+            tags: tags
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean),
+            isAI: agentSettings.isAI,
+            parentWorkItemNumber: selectedParent?.workItemNumber ?? null,
+            levelId: selectedLevel?.id ?? null,
+            assignmentMode: agentSettings.assignmentMode,
+            assignedAgentCount: agentSettings.assignedAgentCount,
+            acceptanceCriteria: acceptanceCriteria.trim(),
+        }
+    }
+
+    const closeAfterSuccess = () => {
+        resetForm()
+        onOpenChange(false)
+    }
+
     const handleCreate = () => {
         if (!title.trim()) return
 
-        const selectedParent = parentOptions.find((wi) => `#${wi.workItemNumber} ${wi.title}` === parentLabel)
-        const selectedLevel = sortedLevels.find((l) => l.name === levelLabel)
-        const agentSettings = getWorkItemAssignmentSettings(agentLabel)
-
         createMutation.mutate(
+            buildRequest(),
             {
-                title: title.trim(),
-                description: description.trim(),
-                priority: PRIORITY_MAP[priorityLabel] ?? 2,
-                difficulty: DIFFICULTY_MAP[difficultyLabel] ?? 3,
-                state,
-                assignedTo: agentSettings.assignedTo,
-                tags: tags
-                    .split(',')
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                isAI: agentSettings.isAI,
-                parentWorkItemNumber: selectedParent?.workItemNumber ?? null,
-                levelId: selectedLevel?.id ?? null,
-                assignmentMode: agentSettings.assignmentMode,
-                assignedAgentCount: agentSettings.assignedAgentCount,
-                acceptanceCriteria: acceptanceCriteria.trim(),
-            },
-            {
-                onSuccess: () => {
-                    resetForm()
-                    onOpenChange(false)
-                },
+                onSuccess: closeAfterSuccess,
             },
         )
+    }
+
+    const handleCreateAndStart = async () => {
+        if (!title.trim() || !canStartImmediately) {
+            return
+        }
+
+        try {
+            const createdItem = await createMutation.mutateAsync(buildRequest())
+
+            try {
+                const result = await startExecutionMutation.mutateAsync({ workItemNumber: createdItem.workItemNumber })
+                closeAfterSuccess()
+                dispatchToast(
+                    <Toast>
+                        <ToastTitle>
+                            Work item #{createdItem.workItemNumber} created and execution started (ID: {result.executionId})
+                        </ToastTitle>
+                    </Toast>,
+                    { intent: 'success' },
+                )
+            } catch (error) {
+                closeAfterSuccess()
+                dispatchToast(
+                    <Toast>
+                        <ToastTitle>
+                            {getApiErrorMessage(
+                                error,
+                                `Work item #${createdItem.workItemNumber} was created, but execution failed to start.`,
+                            )}
+                        </ToastTitle>
+                    </Toast>,
+                    { intent: 'error' },
+                )
+            }
+        } catch (error) {
+            dispatchToast(
+                <Toast>
+                    <ToastTitle>
+                        {getApiErrorMessage(error, 'Failed to create work item.')}
+                    </ToastTitle>
+                </Toast>,
+                { intent: 'error' },
+            )
+        }
     }
 
     return (
         <Dialog open={open} onOpenChange={(_e, data) => { onOpenChange(data.open); if (!data.open) resetForm() }}>
             <DialogSurface className={styles.dialogSurface}>
                 <DialogBody>
+                    <Toaster toasterId={toasterId} />
                     <DialogTitle>Create Work Item</DialogTitle>
                     <DialogContent>
                         <div className={mergeClasses(styles.dialogForm, isMobile && styles.dialogFormMobile)}>
@@ -280,10 +341,20 @@ export function CreateWorkItemDialog({ projectId, workItems, levels, open, onOpe
                         <DialogTrigger disableButtonEnhancement>
                             <Button appearance="secondary" className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}>Cancel</Button>
                         </DialogTrigger>
+                        {canStartImmediately ? (
+                            <Button
+                                appearance="secondary"
+                                onClick={() => { void handleCreateAndStart() }}
+                                disabled={!title.trim() || isSubmitting}
+                                className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
+                            >
+                                {isSubmitting ? 'Starting...' : 'Start Execution Immediately'}
+                            </Button>
+                        ) : null}
                         <Button
                             appearance="primary"
                             onClick={handleCreate}
-                            disabled={!title.trim() || createMutation.isPending}
+                            disabled={!title.trim() || isSubmitting}
                             className={mergeClasses(isMobile && styles.dialogActionButtonMobile)}
                         >
                             {createMutation.isPending ? 'Creating...' : 'Create'}
