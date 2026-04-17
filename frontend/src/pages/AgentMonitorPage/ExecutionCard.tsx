@@ -1015,11 +1015,11 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                                         className={mergeClasses(
                                             styles.connectorSegment,
                                             styles.connectorBottom,
-                                            getConnectorToneClass(agent.status),
+                                            getConnectorToneClass(step.status),
                                         )}
                                     />
                                 )}
-                                <AgentStepIcon status={agent.status} isCompact={isCompact} />
+                                <AgentStepIcon status={step.status} isCompact={isCompact} />
                             </div>
 
                             <div className={styles.stepBody}>
