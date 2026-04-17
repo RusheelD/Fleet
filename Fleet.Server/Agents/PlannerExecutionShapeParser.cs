@@ -17,7 +17,8 @@ internal sealed record PlannerExecutionShape(
     PlannerSubFlowMode SubFlowMode,
     string SubFlowReason,
     IReadOnlyList<AgentRole> FollowingAgents,
-    int FollowingAgentCount);
+    int FollowingAgentCount,
+    IReadOnlyList<ExistingSubFlowDependencySpec>? ExistingSubFlowDependencies = null);
 
 internal static partial class PlannerExecutionShapeParser
 {
@@ -100,7 +101,17 @@ internal static partial class PlannerExecutionShapeParser
                 subFlowMode,
                 payload.SubFlowReason?.Trim() ?? string.Empty,
                 followingAgents,
-                followingAgents.Length);
+                followingAgents.Length,
+                payload.ExistingSubFlowDependencies?
+                    .Where(spec => spec.WorkItemNumber > 0)
+                    .Select(spec => new ExistingSubFlowDependencySpec(
+                        spec.WorkItemNumber,
+                        spec.DependsOnWorkItemNumbers?
+                            .Where(number => number > 0)
+                            .Distinct()
+                            .ToArray() ?? [],
+                        spec.Reason?.Trim() ?? string.Empty))
+                    .ToArray() ?? []);
         }
         catch
         {
@@ -205,5 +216,20 @@ internal static partial class PlannerExecutionShapeParser
 
         [JsonPropertyName("following_agents")]
         public List<string>? FollowingAgents { get; set; }
+
+        [JsonPropertyName("existing_subflow_dependencies")]
+        public List<ExistingSubFlowDependencyContract>? ExistingSubFlowDependencies { get; set; }
+    }
+
+    private sealed class ExistingSubFlowDependencyContract
+    {
+        [JsonPropertyName("work_item_number")]
+        public int WorkItemNumber { get; set; }
+
+        [JsonPropertyName("depends_on_work_item_numbers")]
+        public List<int>? DependsOnWorkItemNumbers { get; set; }
+
+        [JsonPropertyName("reason")]
+        public string? Reason { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentExecution } from './agent'
 import {
+  collectExecutionRootsByStatus,
   executionTreeHasAnyStatus,
   findExecutionInCollection,
   normalizeExecutionTree,
@@ -89,7 +90,7 @@ describe('executionTree helpers', () => {
     expect(nested.executions[0].subFlows?.[0].id).toBe('child-retry')
   })
 
-  it('sorts sub-flows by status bucket and then work item number when normalizing the tree', () => {
+  it('sorts sub-flows by completion phase and then work item number when normalizing the tree', () => {
     const normalized = normalizeExecutionTree(createExecution({
       id: 'parent-flow',
       executionMode: 'orchestration',
@@ -103,7 +104,7 @@ describe('executionTree helpers', () => {
       ],
     }))
 
-    expect(normalized.subFlows?.map((execution) => execution.workItemId)).toEqual([1, 2, 3, 5, 6, 4])
+    expect(normalized.subFlows?.map((execution) => execution.workItemId)).toEqual([1, 2, 3, 4, 5, 6])
   })
 
   it('treats descendant live retries as active tree members', () => {
@@ -123,5 +124,49 @@ describe('executionTree helpers', () => {
     })
 
     expect(executionTreeHasAnyStatus(execution, ['running', 'queued'])).toBe(true)
+  })
+
+  it('collects terminal render roots without hiding matching sub-flows under non-matching parents', () => {
+    const completedGrandchild = createExecution({
+      id: 'completed-grandchild',
+      workItemId: 4,
+      workItemTitle: 'Completed grandchild',
+      status: 'completed',
+      parentExecutionId: 'completed-child',
+    })
+    const completedChild = createExecution({
+      id: 'completed-child',
+      workItemId: 3,
+      workItemTitle: 'Completed child',
+      status: 'completed',
+      parentExecutionId: 'failed-parent',
+      subFlows: [completedGrandchild],
+    })
+    const completedParent = createExecution({
+      id: 'completed-parent',
+      workItemId: 1,
+      workItemTitle: 'Completed parent',
+      status: 'completed',
+      subFlows: [
+        createExecution({
+          id: 'completed-parent-child',
+          workItemId: 2,
+          workItemTitle: 'Completed parent child',
+          status: 'completed',
+          parentExecutionId: 'completed-parent',
+        }),
+      ],
+    })
+    const failedParent = createExecution({
+      id: 'failed-parent',
+      workItemId: 5,
+      workItemTitle: 'Failed parent',
+      status: 'failed',
+      subFlows: [completedChild],
+    })
+
+    const renderRoots = collectExecutionRootsByStatus([completedParent, failedParent], ['completed'])
+
+    expect(renderRoots.map((execution) => execution.id)).toEqual(['completed-parent', 'completed-child'])
   })
 })

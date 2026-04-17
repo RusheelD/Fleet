@@ -103,7 +103,7 @@ internal static class AgentPlannerHeuristics
             "prototype",
             "explore",
             "analyze");
-        var contracts = ContainsAnyKeyword(
+        var contractSignals = ContainsAnyKeyword(
             keywordContext,
             "contract",
             "schema",
@@ -120,21 +120,19 @@ internal static class AgentPlannerHeuristics
         if (styling)
             frontend = true;
 
-        var docsOnly = documentation && !backend && !frontend && !contracts && !research;
+        var docsOnly = documentation && !backend && !frontend && !contractSignals && !research;
         if (!backend && !frontend && !documentation && !research)
             backend = true;
 
         var review = effectiveDifficulty >= 4 ||
                      (backend && frontend) ||
-                     contracts ||
+                     contractSignals ||
                      directChildWorkItems.Count >= 2 ||
                      descendants.Count >= 3;
 
         var roles = new List<AgentRole>();
         if (research)
             roles.Add(AgentRole.Research);
-        if (contracts)
-            roles.Add(AgentRole.Contracts);
         if (backend)
             roles.Add(AgentRole.Backend);
         if (frontend)

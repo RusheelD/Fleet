@@ -78,7 +78,8 @@ public class RepoSandbox : IRepoSandbox
         string branchName,
         CancellationToken cancellationToken,
         string? baseBranch = null,
-        bool resumeFromBranch = false)
+        bool resumeFromBranch = false,
+        bool rebaseOntoBaseBranchWhenResuming = false)
     {
         _repoFullName = repoFullName;
         _branchName = branchName;
@@ -128,6 +129,13 @@ public class RepoSandbox : IRepoSandbox
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(
                     $"Git checkout of existing branch '{branchName}' failed: {result.Stderr}");
+
+            if (rebaseOntoBaseBranchWhenResuming &&
+                !string.IsNullOrWhiteSpace(baseBranch) &&
+                !string.Equals(branchName, baseBranch, StringComparison.OrdinalIgnoreCase))
+            {
+                await RebaseCurrentBranchOntoBaseBranchAsync(baseBranch, cancellationToken);
+            }
         }
         // Create and checkout a new feature branch from a caller-provided base branch.
         else if (!string.IsNullOrWhiteSpace(baseBranch))
@@ -556,6 +564,123 @@ public class RepoSandbox : IRepoSandbox
         }
     }
 
+    public async Task<bool> IsRemoteBranchMergedIntoCurrentBranchAsync(
+        string accessToken,
+        string sourceBranchName,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+
+        if (string.IsNullOrWhiteSpace(sourceBranchName))
+            throw new ArgumentException("Source branch name is required.", nameof(sourceBranchName));
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await UpdateOriginRemoteAsync(accessToken, cancellationToken);
+
+            var normalizedSourceBranch = NormalizeBranchName(sourceBranchName, nameof(sourceBranchName));
+            var result = await FetchRemoteBranchAsync(
+                normalizedSourceBranch,
+                cancellationToken,
+                depth: DefaultGitHistoryDepth);
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Git fetch of branch '{normalizedSourceBranch}' failed while checking whether it is already merged into '{_branchName}': {result.Stderr}");
+            }
+
+            result = await RunGitAsync(
+                BuildBranchHeadContainedInCurrentBranchArgumentList(normalizedSourceBranch),
+                cancellationToken: cancellationToken);
+            if (result.ExitCode == 0)
+                return true;
+
+            if (result.ExitCode == 1)
+            {
+                await EnsureFullMergeHistoryAsync(normalizedSourceBranch, cancellationToken);
+                result = await RunGitAsync(
+                    BuildBranchHeadContainedInCurrentBranchArgumentList(normalizedSourceBranch),
+                    cancellationToken: cancellationToken);
+                if (result.ExitCode == 0)
+                    return true;
+                if (result.ExitCode == 1)
+                    return false;
+            }
+
+            throw new InvalidOperationException(
+                $"Git branch containment check for '{normalizedSourceBranch}' against '{_branchName}' failed: {result.Stderr}");
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private async Task RebaseCurrentBranchOntoBaseBranchAsync(string baseBranch, CancellationToken cancellationToken)
+    {
+        var normalizedBaseBranch = NormalizeBranchName(baseBranch, nameof(baseBranch));
+        var result = await FetchRemoteBranchAsync(
+            normalizedBaseBranch,
+            cancellationToken,
+            depth: DefaultGitHistoryDepth);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Git fetch of rebase base branch '{normalizedBaseBranch}' failed: {result.Stderr}");
+        }
+
+        var hasCommonMergeBase = await EnsureCommonMergeBaseAsync(normalizedBaseBranch, cancellationToken);
+        if (!hasCommonMergeBase)
+        {
+            throw new InvalidOperationException(
+                $"Git rebase of branch '{_branchName}' onto '{normalizedBaseBranch}' failed: " +
+                "Fleet could not determine a common merge base even after fetching full history. " +
+                "This sub-flow branch no longer matches the current parent-flow lineage and should be rerun from the active parent context.");
+        }
+
+        result = await RunGitAsync(
+            BuildRebaseOntoRemoteBranchArgumentList(normalizedBaseBranch),
+            cancellationToken: cancellationToken);
+        if (result.ExitCode == 0)
+        {
+            _logger.LogInformation("Rebased branch {Branch} onto {BaseBranch}", _branchName, normalizedBaseBranch);
+            return;
+        }
+
+        await AbortRebaseIfNeededAsync(cancellationToken);
+
+        if (LooksLikeUnrelatedHistoriesMergeFailure(result.Stderr))
+        {
+            await EnsureFullMergeHistoryAsync(normalizedBaseBranch, cancellationToken);
+            hasCommonMergeBase = await HasCommonMergeBaseAsync(normalizedBaseBranch, cancellationToken);
+            if (!hasCommonMergeBase)
+            {
+                throw new InvalidOperationException(
+                    $"Git rebase of branch '{_branchName}' onto '{normalizedBaseBranch}' failed: " +
+                    "Fleet still could not determine a common merge base after fetching full history. " +
+                    "This sub-flow branch no longer matches the current parent-flow lineage and should be rerun from the active parent context.");
+            }
+
+            result = await RunGitAsync(
+                BuildRebaseOntoRemoteBranchArgumentList(normalizedBaseBranch),
+                cancellationToken: cancellationToken);
+            if (result.ExitCode == 0)
+            {
+                _logger.LogInformation(
+                    "Rebased branch {Branch} onto {BaseBranch} after deepening git history",
+                    _branchName,
+                    normalizedBaseBranch);
+                return;
+            }
+
+            await AbortRebaseIfNeededAsync(cancellationToken);
+        }
+
+        throw new InvalidOperationException(
+            $"Git rebase of branch '{_branchName}' onto '{normalizedBaseBranch}' failed: {result.Stderr}");
+    }
+
     public async Task PushBranchAsync(string accessToken, CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
@@ -586,6 +711,16 @@ public class RepoSandbox : IRepoSandbox
 
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Git remote update failed: {result.Stderr}");
+    }
+
+    private async Task AbortRebaseIfNeededAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(
+            ["rebase", "--abort"],
+            cancellationToken: cancellationToken);
+
+        if (result.ExitCode == 0)
+            _logger.LogDebug("Aborted in-progress git rebase in sandbox");
     }
 
     public async Task<IReadOnlyList<FileChange>> GetChangeSummaryAsync(CancellationToken cancellationToken)
@@ -1064,6 +1199,28 @@ public class RepoSandbox : IRepoSandbox
             "merge-base",
             "HEAD",
             BuildRemoteTrackingBranchRef(normalizedSourceBranch),
+        ];
+    }
+
+    internal static IReadOnlyList<string> BuildBranchHeadContainedInCurrentBranchArgumentList(string sourceBranchName)
+    {
+        var normalizedSourceBranch = NormalizeBranchName(sourceBranchName, nameof(sourceBranchName));
+        return
+        [
+            "merge-base",
+            "--is-ancestor",
+            BuildRemoteTrackingBranchRef(normalizedSourceBranch),
+            "HEAD",
+        ];
+    }
+
+    internal static IReadOnlyList<string> BuildRebaseOntoRemoteBranchArgumentList(string branchName)
+    {
+        var normalizedBranch = NormalizeBranchName(branchName, nameof(branchName));
+        return
+        [
+            "rebase",
+            BuildRemoteTrackingBranchRef(normalizedBranch),
         ];
     }
 

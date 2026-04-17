@@ -33,7 +33,8 @@ public interface IRepoSandbox : IAsyncDisposable
         string branchName,
         CancellationToken cancellationToken = default,
         string? baseBranch = null,
-        bool resumeFromBranch = false);
+        bool resumeFromBranch = false,
+        bool rebaseOntoBaseBranchWhenResuming = false);
 
     /// <summary>
     /// Lists files and directories at the given relative path.
@@ -109,6 +110,14 @@ public interface IRepoSandbox : IAsyncDisposable
     /// <param name="authorEmail">Commit author email for the merge commit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task MergeBranchAsync(string accessToken, string sourceBranchName, string authorName, string authorEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Determines whether the current sandbox branch already contains the remote branch head.
+    /// </summary>
+    /// <param name="accessToken">GitHub OAuth token used to refresh the authenticated remote before fetching.</param>
+    /// <param name="sourceBranchName">The remote branch whose head should be checked against the current branch.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<bool> IsRemoteBranchMergedIntoCurrentBranchAsync(string accessToken, string sourceBranchName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Pushes the current branch to origin.

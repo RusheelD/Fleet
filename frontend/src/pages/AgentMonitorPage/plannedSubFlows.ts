@@ -1,4 +1,5 @@
 import type { AgentExecution, WorkItem } from '../../models'
+import { compareFlowDisplayOrder } from '../../models/flowDisplayOrder'
 import type { ExecutionStepStatus, PlannedSubFlowStep } from './pipelineDisplay'
 
 const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
@@ -9,34 +10,21 @@ const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
     'Closed',
 ])
 
-function getSubFlowDisplayPriority(status: ExecutionStepStatus): number {
-    switch (status) {
-        case 'completed':
-            return 0
-        case 'running':
-            return 1
-        case 'queued':
-        case 'paused':
-            return 2
-        case 'failed':
-        case 'cancelled':
-            return 3
-        default:
-            return 2
-    }
-}
-
 function comparePlannedSubFlowSteps(left: PlannedSubFlowStep, right: PlannedSubFlowStep): number {
-    const statusPriorityDifference = getSubFlowDisplayPriority(left.status) - getSubFlowDisplayPriority(right.status)
-    if (statusPriorityDifference !== 0) {
-        return statusPriorityDifference
-    }
-
-    if (left.workItemNumber !== right.workItemNumber) {
-        return left.workItemNumber - right.workItemNumber
-    }
-
-    return left.title.localeCompare(right.title)
+    return compareFlowDisplayOrder(
+        {
+            status: left.status,
+            flowNumber: left.workItemNumber,
+            title: left.title,
+            uniqueId: left.title,
+        },
+        {
+            status: right.status,
+            flowNumber: right.workItemNumber,
+            title: right.title,
+            uniqueId: right.title,
+        },
+    )
 }
 
 function mapExecutionStatusToStepStatus(status: AgentExecution['status']): ExecutionStepStatus {

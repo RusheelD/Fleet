@@ -253,6 +253,15 @@ public class AgentOrchestrationService(
         RetryOrRestart,
     }
 
+    internal sealed record ConsolidationSubFlowBranchAuditItem(
+        int WorkItemNumber,
+        string WorkItemTitle,
+        string ExecutionId,
+        string BranchName,
+        string ExecutionStatus,
+        bool BranchExistsRemotely,
+        bool IsMergedIntoCurrentBranch);
+
     internal static SubFlowExecutionActivationStrategy ResolveSubFlowExecutionActivationStrategy(string? status)
     {
         if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
@@ -323,7 +332,7 @@ public class AgentOrchestrationService(
 
             Available roles and when to include them:
             - Planner: Creates the implementation plan. ALWAYS include this.
-            - Contracts: Defines shared interfaces and types. Include when multiple components interact or API contracts change.
+            - Contracts: Defines shared interfaces and types. Include only when later execution will branch into sub-flows or parallel downstream agents.
             - Backend: Implements server-side changes (APIs, services, database, .NET/C#). Include for any backend work.
             - Frontend: Implements UI changes (React, TypeScript, components). Include for any frontend/UI work.
             - Testing: Writes and runs tests. Include when new functionality is added.
@@ -334,12 +343,13 @@ public class AgentOrchestrationService(
 
             Rules:
             1. Planner is ALWAYS included.
-            2. Include Consolidation ONLY if both Backend and Frontend are selected.
-            3. Never include Consolidation if only one of Backend/Frontend is selected.
+            2. Include Contracts only when later execution will branch into sub-flows or parallel downstream agents. Sequential direct runs do not need Contracts.
+            3. Include Consolidation ONLY if both Backend and Frontend are selected.
+            4. Never include Consolidation if only one of Backend/Frontend is selected.
             4. Minimize the number of roles Ã¢â‚¬â€ fewer = faster and cheaper execution.
-            5. For backend-only tasks, you typically need: Planner, Backend, and optionally Testing/Review.
-            6. For frontend-only tasks, you typically need: Planner, Frontend, and optionally Styling/Review.
-            7. For full-stack tasks, you typically need: Planner, Contracts, Backend, Frontend, Consolidation, and optionally Testing/Review.
+            6. For backend-only tasks, you typically need: Planner, Backend, and optionally Testing/Review.
+            7. For frontend-only tasks, you typically need: Planner, Frontend, and optionally Styling/Review.
+            8. For full-stack tasks, you typically need: Planner, Contracts, Backend, Frontend, Consolidation, and optionally Testing/Review when implementation will run in parallel.
 
             Return ONLY a JSON array of role name strings like: ["Planner", "Backend", "Testing"]
             No explanation, no markdown fences Ã¢â‚¬â€ just the raw JSON array.
@@ -2122,7 +2132,8 @@ public class AgentOrchestrationService(
         async Task<(bool ExecutionCompleted, string FollowUpContextMarkdown)> ExecuteSubFlowsAsync(
             Models.WorkItemDto parentWorkItem,
             IReadOnlyList<Models.WorkItemDto> directChildWorkItems,
-            bool continueWithFollowUpRoles)
+            bool continueWithFollowUpRoles,
+            string? plannerOutputOverride = null)
         {
             if (sandbox is null)
                 throw new InvalidOperationException("Execution sandbox is not ready for sub-flow orchestration.");
@@ -2151,6 +2162,18 @@ public class AgentOrchestrationService(
             var orderedChildren = directChildWorkItems
                 .OrderBy(child => child.WorkItemNumber)
                 .ToArray();
+            var plannerOutput = plannerOutputOverride ?? await WithDbResultAsync(async queuedDb =>
+                await queuedDb.AgentPhaseResults
+                    .AsNoTracking()
+                    .Where(phase =>
+                        phase.ExecutionId == executionId &&
+                        phase.Success &&
+                        phase.Role == AgentRole.Planner.ToString())
+                    .OrderByDescending(phase => phase.PhaseOrder)
+                    .ThenByDescending(phase => phase.Id)
+                    .Select(phase => phase.Output)
+                    .FirstOrDefaultAsync(CancellationToken.None));
+            var subFlowExecutionPlan = SubFlowExecutionPlanner.Resolve(orderedChildren, plannerOutput);
             var parallelism = ResolveParallelBatchSize(
                 maxConcurrentAgentsPerTask,
                 agentCallCapacityManager.Capacity,
@@ -2158,7 +2181,24 @@ public class AgentOrchestrationService(
             var completedSubFlows = 0;
             var mergedChildBranchesPendingCleanup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            await PublishParentBranchForSubFlowsAsync("preparing child executions");
+            string BuildSubFlowBatchLabel(IReadOnlyList<Models.WorkItemDto> batch)
+                => string.Join(
+                    ", ",
+                    batch.Select(child =>
+                    {
+                        if (!subFlowExecutionPlan.DependenciesByWorkItemNumber.TryGetValue(child.WorkItemNumber, out var dependencies) ||
+                            dependencies.Count == 0)
+                        {
+                            return $"#{child.WorkItemNumber}";
+                        }
+
+                        return $"#{child.WorkItemNumber} (after {string.Join(", ", dependencies.OrderBy(number => number).Select(number => $"#{number}"))})";
+                    }));
+
+            await PublishParentBranchForSubFlowsAsync(
+                subFlowExecutionPlan.Batches.Count > 1
+                    ? "preparing the first sub-flow dependency stage"
+                    : "preparing child executions");
 
             await WithDbLockAsync(async queuedDb =>
                 await WriteLogEntryAsync(
@@ -2168,87 +2208,59 @@ public class AgentOrchestrationService(
                     "info",
                     $"Execution {executionId} is orchestrating {orderedChildren.Length} sub-flow(s) for work item #{parentWorkItem.WorkItemNumber}.",
                     executionId: executionId));
-            await PublishLogsUpdatedAsync();
-
-            for (var batchStart = 0; batchStart < orderedChildren.Length; batchStart += parallelism)
+            if (!string.IsNullOrWhiteSpace(subFlowExecutionPlan.SummaryMessage))
             {
-                var batch = orderedChildren.Skip(batchStart).Take(parallelism).ToArray();
-                var batchLabel = string.Join(", ", batch.Select(child => $"#{child.WorkItemNumber}"));
-                await UpdateOrchestrationProgressAsync(
-                    completedSubFlows,
-                    orderedChildren.Length,
-                    $"Queuing sub-flows {batchLabel}");
+                await WithDbLockAsync(async queuedDb =>
+                    await WriteLogEntryAsync(
+                        queuedDb,
+                        projectId,
+                        "Planner Agent",
+                        "info",
+                        subFlowExecutionPlan.SummaryMessage,
+                        executionId: executionId));
+            }
 
+            if (!string.IsNullOrWhiteSpace(subFlowExecutionPlan.WarningMessage))
+            {
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
                         projectId,
                         "System",
-                        "info",
-                        $"Queuing sub-flow batch {batchLabel}.",
+                        "warn",
+                        subFlowExecutionPlan.WarningMessage,
                         executionId: executionId));
-                await PublishLogsUpdatedAsync();
+            }
+            await PublishLogsUpdatedAsync();
 
-                var launchedChildren = new List<(Models.WorkItemDto WorkItem, string ExecutionId)>(batch.Length);
-                foreach (var child in batch)
+            for (var stageIndex = 0; stageIndex < subFlowExecutionPlan.Batches.Count; stageIndex++)
+            {
+                var stage = subFlowExecutionPlan.Batches[stageIndex];
+                var stageLabel = BuildSubFlowBatchLabel(stage.WorkItems);
+                if (subFlowExecutionPlan.Batches.Count > 1)
                 {
-                    var childExecutionId = await EnsureSubFlowExecutionRunningAsync(child);
-                    launchedChildren.Add((child, childExecutionId));
-
                     await WithDbLockAsync(async queuedDb =>
                         await WriteLogEntryAsync(
                             queuedDb,
                             projectId,
                             "System",
                             "info",
-                            $"Sub-flow #{child.WorkItemNumber} is running as execution {childExecutionId}.",
+                            $"Planner unlocked sub-flow stage {stageIndex + 1}/{subFlowExecutionPlan.Batches.Count}: {stageLabel}.",
                             executionId: executionId));
-                    await PublishLogsUpdatedAsync();
                 }
 
-                await UpdateOrchestrationProgressAsync(
-                    completedSubFlows,
-                    orderedChildren.Length,
-                    $"Waiting on sub-flows {batchLabel}");
-
-                var terminalExecutionMap = await WaitForTerminalSubFlowExecutionsAsync(
-                    launchedChildren.Select(launched => launched.ExecutionId).ToArray());
-
-                var terminalExecutions = launchedChildren
-                    .Select(launched => (launched.WorkItem, Execution: terminalExecutionMap[launched.ExecutionId]))
+                var stageChunks = stage.WorkItems
+                    .Chunk(parallelism)
+                    .Select(chunk => chunk.ToArray())
                     .ToArray();
-
-                var blockingExecution = terminalExecutions.FirstOrDefault(result =>
-                    !string.Equals(result.Execution.Status, "completed", StringComparison.OrdinalIgnoreCase));
-                if (blockingExecution.Execution is not null)
+                for (var chunkIndex = 0; chunkIndex < stageChunks.Length; chunkIndex++)
                 {
-                    throw new InvalidOperationException(
-                        DescribeSubFlowTerminalFailure(
-                            blockingExecution.WorkItem.WorkItemNumber,
-                            blockingExecution.Execution.Id,
-                            blockingExecution.Execution.Status,
-                            blockingExecution.Execution.CurrentPhase));
-                }
-
-                accessToken = await ResolveRequiredRepoAccessTokenAsync(
-                    scopedConnectionService,
-                    userId,
-                    repoFullName,
-                    externalCancellation);
-
-                await UpdateOrchestrationProgressAsync(
-                    completedSubFlows,
-                    orderedChildren.Length,
-                    $"Merging sub-flows {batchLabel} into parent batch");
-
-                foreach (var terminalExecution in terminalExecutions.OrderBy(result => result.WorkItem.WorkItemNumber))
-                {
-                    var childBranchName = terminalExecution.Execution.BranchName?.Trim();
-                    if (string.IsNullOrWhiteSpace(childBranchName))
-                    {
-                        throw new InvalidOperationException(
-                            $"Sub-flow #{terminalExecution.WorkItem.WorkItemNumber} completed without a branch name to merge.");
-                    }
+                    var batch = stageChunks[chunkIndex];
+                    var batchLabel = BuildSubFlowBatchLabel(batch);
+                    await UpdateOrchestrationProgressAsync(
+                        completedSubFlows,
+                        orderedChildren.Length,
+                        $"Queuing sub-flows {batchLabel}");
 
                     await WithDbLockAsync(async queuedDb =>
                         await WriteLogEntryAsync(
@@ -2256,50 +2268,127 @@ public class AgentOrchestrationService(
                             projectId,
                             "System",
                             "info",
-                            $"Merging sub-flow #{terminalExecution.WorkItem.WorkItemNumber} from branch '{childBranchName}' into '{sandbox.BranchName}'.",
+                            $"Queuing sub-flow batch {batchLabel}.",
                             executionId: executionId));
                     await PublishLogsUpdatedAsync();
 
-                    var childBranchStillExists = await BranchExistsAsync(
-                        httpClientFactory.CreateClient("GitHub"),
-                        accessToken,
-                        repoFullName,
-                        childBranchName,
-                        externalCancellation);
-                    if (!childBranchStillExists)
+                    var launchedChildren = new List<(Models.WorkItemDto WorkItem, string ExecutionId)>(batch.Length);
+                    foreach (var child in batch)
                     {
+                        var childExecutionId = await EnsureSubFlowExecutionRunningAsync(child);
+                        launchedChildren.Add((child, childExecutionId));
+
                         await WithDbLockAsync(async queuedDb =>
                             await WriteLogEntryAsync(
                                 queuedDb,
                                 projectId,
                                 "System",
-                                "warn",
-                                $"Sub-flow branch '{childBranchName}' was already gone before merge; assuming its commits were already incorporated into '{sandbox.BranchName}'.",
+                                "info",
+                                $"Sub-flow #{child.WorkItemNumber} is running as execution {childExecutionId}.",
                                 executionId: executionId));
                         await PublishLogsUpdatedAsync();
-                        continue;
                     }
 
-                    await sandbox.MergeBranchAsync(
-                        accessToken,
-                        childBranchName,
-                        commitAuthorName,
-                        commitAuthorEmail,
+                    await UpdateOrchestrationProgressAsync(
+                        completedSubFlows,
+                        orderedChildren.Length,
+                        $"Waiting on sub-flows {batchLabel}");
+
+                    var terminalExecutionMap = await WaitForTerminalSubFlowExecutionsAsync(
+                        launchedChildren.Select(launched => launched.ExecutionId).ToArray());
+
+                    var terminalExecutions = launchedChildren
+                        .Select(launched => (launched.WorkItem, Execution: terminalExecutionMap[launched.ExecutionId]))
+                        .ToArray();
+
+                    var blockingExecution = terminalExecutions.FirstOrDefault(result =>
+                        !string.Equals(result.Execution.Status, "completed", StringComparison.OrdinalIgnoreCase));
+                    if (blockingExecution.Execution is not null)
+                    {
+                        throw new InvalidOperationException(
+                            DescribeSubFlowTerminalFailure(
+                                blockingExecution.WorkItem.WorkItemNumber,
+                                blockingExecution.Execution.Id,
+                                blockingExecution.Execution.Status,
+                                blockingExecution.Execution.CurrentPhase));
+                    }
+
+                    accessToken = await ResolveRequiredRepoAccessTokenAsync(
+                        scopedConnectionService,
+                        userId,
+                        repoFullName,
                         externalCancellation);
-                    mergedChildBranchesPendingCleanup.Add(childBranchName);
-                }
 
-                completedSubFlows += terminalExecutions.Length;
-                await UpdateOrchestrationProgressAsync(
-                    completedSubFlows,
-                    orderedChildren.Length,
-                    completedSubFlows >= orderedChildren.Length
-                        ? "Sub-flows completed"
-                        : $"Completed {completedSubFlows}/{orderedChildren.Length} sub-flows");
+                    await UpdateOrchestrationProgressAsync(
+                        completedSubFlows,
+                        orderedChildren.Length,
+                        $"Merging sub-flows {batchLabel} into parent batch");
 
-                if (completedSubFlows < orderedChildren.Length)
-                {
-                    await PublishParentBranchForSubFlowsAsync("publishing merged parent state for the next batch");
+                    foreach (var terminalExecution in terminalExecutions.OrderBy(result => result.WorkItem.WorkItemNumber))
+                    {
+                        var childBranchName = terminalExecution.Execution.BranchName?.Trim();
+                        if (string.IsNullOrWhiteSpace(childBranchName))
+                        {
+                            throw new InvalidOperationException(
+                                $"Sub-flow #{terminalExecution.WorkItem.WorkItemNumber} completed without a branch name to merge.");
+                        }
+
+                        await WithDbLockAsync(async queuedDb =>
+                            await WriteLogEntryAsync(
+                                queuedDb,
+                                projectId,
+                                "System",
+                                "info",
+                                $"Merging sub-flow #{terminalExecution.WorkItem.WorkItemNumber} from branch '{childBranchName}' into '{sandbox.BranchName}'.",
+                                executionId: executionId));
+                        await PublishLogsUpdatedAsync();
+
+                        var childBranchStillExists = await BranchExistsAsync(
+                            httpClientFactory.CreateClient("GitHub"),
+                            accessToken,
+                            repoFullName,
+                            childBranchName,
+                            externalCancellation);
+                        if (!childBranchStillExists)
+                        {
+                            await WithDbLockAsync(async queuedDb =>
+                                await WriteLogEntryAsync(
+                                    queuedDb,
+                                    projectId,
+                                    "System",
+                                    "warn",
+                                    $"Sub-flow branch '{childBranchName}' was already gone before merge; assuming its commits were already incorporated into '{sandbox.BranchName}'.",
+                                    executionId: executionId));
+                            await PublishLogsUpdatedAsync();
+                            continue;
+                        }
+
+                        await sandbox.MergeBranchAsync(
+                            accessToken,
+                            childBranchName,
+                            commitAuthorName,
+                            commitAuthorEmail,
+                            externalCancellation);
+                        mergedChildBranchesPendingCleanup.Add(childBranchName);
+                    }
+
+                    completedSubFlows += terminalExecutions.Length;
+                    await UpdateOrchestrationProgressAsync(
+                        completedSubFlows,
+                        orderedChildren.Length,
+                        completedSubFlows >= orderedChildren.Length
+                            ? "Sub-flows completed"
+                            : $"Completed {completedSubFlows}/{orderedChildren.Length} sub-flows");
+
+                    var hasMoreSubFlowChunksInStage = chunkIndex < stageChunks.Length - 1;
+                    var hasMoreSubFlowStages = stageIndex < subFlowExecutionPlan.Batches.Count - 1;
+                    if (hasMoreSubFlowChunksInStage || hasMoreSubFlowStages)
+                    {
+                        await PublishParentBranchForSubFlowsAsync(
+                            hasMoreSubFlowChunksInStage
+                                ? "publishing merged parent state so the remaining sub-flow batch can rebase onto the refreshed base branch"
+                                : "publishing merged parent state for the next dependency stage");
+                    }
                 }
             }
 
@@ -2318,15 +2407,18 @@ public class AgentOrchestrationService(
 
             await sandbox.PushBranchAsync(accessToken, externalCancellation);
 
-            foreach (var childBranchName in mergedChildBranchesPendingCleanup)
+            if (!continueWithFollowUpRoles)
             {
-                await TryDeleteRemoteBranchIfSafeAsync(
-                    accessToken,
-                    repoFullName,
-                    childBranchName,
-                    externalCancellation,
-                    protectedBranchName: sandbox.BranchName,
-                    projectId: projectId);
+                foreach (var childBranchName in mergedChildBranchesPendingCleanup)
+                {
+                    await TryDeleteRemoteBranchIfSafeAsync(
+                        accessToken,
+                        repoFullName,
+                        childBranchName,
+                        externalCancellation,
+                        protectedBranchName: sandbox.BranchName,
+                        projectId: projectId);
+                }
             }
 
             var refreshedDirectChildren = new List<Models.WorkItemDto>();
@@ -2378,6 +2470,29 @@ public class AgentOrchestrationService(
             if (continueWithFollowUpRoles)
             {
                 var mergedChildrenLabel = string.Join(", ", orderedChildren.Select(child => $"#{child.WorkItemNumber}"));
+                var directChildExecutionBranches = await db.AgentExecutions
+                    .AsNoTracking()
+                    .Where(childExecution =>
+                        childExecution.ProjectId == projectId &&
+                        childExecution.ParentExecutionId == executionId)
+                    .OrderBy(childExecution => childExecution.WorkItemId)
+                    .Select(childExecution => new
+                    {
+                        childExecution.WorkItemId,
+                        childExecution.Id,
+                        childExecution.BranchName,
+                    })
+                    .ToListAsync(externalCancellation);
+                var childBranchAuditLines = string.Join(
+                    "\n",
+                    directChildExecutionBranches
+                        .Select(result =>
+                        {
+                            var childBranchName = result.BranchName?.Trim();
+                            return string.IsNullOrWhiteSpace(childBranchName)
+                                ? $"- #{result.WorkItemId} (`{result.Id}`) did not report a branch name."
+                                : $"- #{result.WorkItemId} (`{result.Id}`) -> `{childBranchName}`";
+                        }));
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
@@ -2393,6 +2508,9 @@ public class AgentOrchestrationService(
                     $$"""
                     ## Sub-flow Orchestration Completed
                     - Merged child work items into the current parent branch: {{mergedChildrenLabel}}.
+                    - Direct child execution branches for this orchestration layer:
+                    {{childBranchAuditLines}}
+                    - Consolidation must verify that each surviving child branch head is reachable from the current parent branch. If any child branch still exists remotely and is not yet merged, merge it now, resolve conflicts, and rerun verification before continuing.
                     - Continue from the merged parent branch state. Do not recreate or rerun those child implementations unless a new failure explicitly requires it.
                     - Focus only on the remaining parent follow-up phases after sub-flow orchestration.
                     """);
@@ -2528,7 +2646,8 @@ public class AgentOrchestrationService(
                 branchName,
                 externalCancellation,
                 baseBranch: pullRequestTargetBranch,
-                resumeFromBranch: retryPlan?.ResumeFromRemoteBranch == true);
+                resumeFromBranch: retryPlan?.ResumeFromRemoteBranch == true,
+                rebaseOntoBaseBranchWhenResuming: parentExecutionId is not null);
 
             var toolContext = new AgentToolContext(
                 sandbox, projectId, userId.ToString(), accessToken, repoFullName, executionId)
@@ -2721,7 +2840,10 @@ public class AgentOrchestrationService(
                             var orchestrationResult = await ExecuteSubFlowsAsync(
                                 workItem,
                                 directChildWorkItems,
-                                HasOrchestrationFollowUpStages(currentCyclePipeline));
+                                HasOrchestrationFollowUpStages(currentCyclePipeline),
+                                currentRawOutputsByRole.TryGetValue(AgentRole.Planner, out var plannerOutput)
+                                    ? plannerOutput
+                                    : null);
                             if (orchestrationResult.ExecutionCompleted)
                                 return;
 
@@ -2796,7 +2918,10 @@ public class AgentOrchestrationService(
                         var orchestrationResult = await ExecuteSubFlowsAsync(
                             workItem,
                             directChildWorkItems,
-                            HasOrchestrationFollowUpStages(currentCyclePipeline));
+                            HasOrchestrationFollowUpStages(currentCyclePipeline),
+                            currentRawOutputsByRole.TryGetValue(AgentRole.Planner, out var currentPlannerOutput)
+                                ? currentPlannerOutput
+                                : null);
                         if (orchestrationResult.ExecutionCompleted)
                             return;
 
@@ -3102,6 +3227,19 @@ public class AgentOrchestrationService(
                         childWorkItems,
                         executionDepth);
                     trustedPhaseBrief = BuildPlannerGuidanceBlock(plannerGuidance);
+                }
+                else if (role == AgentRole.Consolidation)
+                {
+                    var consolidationAuditItems = await BuildConsolidationSubFlowBranchAuditAsync(
+                        projectId,
+                        executionId,
+                        userId,
+                        repoFullName,
+                        sandbox,
+                        externalCancellation);
+                    trustedPhaseBrief = BuildConsolidationSubFlowBranchAuditBrief(
+                        sandbox.BranchName,
+                        consolidationAuditItems);
                 }
 
                 var baseUserMessage = BuildPhaseMessage(
@@ -3436,6 +3574,44 @@ public class AgentOrchestrationService(
 
                         if (result.Success)
                         {
+                            if (role == AgentRole.Consolidation)
+                            {
+                                var postConsolidationAuditItems = await BuildConsolidationSubFlowBranchAuditAsync(
+                                    projectId,
+                                    executionId,
+                                    userId,
+                                    repoFullName,
+                                    sandbox,
+                                    externalCancellation);
+                                var consolidationVerificationFailure = BuildConsolidationSubFlowBranchVerificationFailureMessage(
+                                    sandbox.BranchName,
+                                    postConsolidationAuditItems);
+                                if (!string.IsNullOrWhiteSpace(consolidationVerificationFailure))
+                                {
+                                    await WithDbLockAsync(async queuedDb =>
+                                        await WriteLogEntryAsync(
+                                            queuedDb,
+                                            projectId,
+                                            $"{agentLabel} Agent",
+                                            "warn",
+                                            consolidationVerificationFailure,
+                                            executionId: executionId));
+                                    await PublishLogsUpdatedAsync();
+
+                                    priorAttempts.Add(new PhaseResult(
+                                        role,
+                                        result.Output,
+                                        result.ToolCallCount,
+                                        false,
+                                        consolidationVerificationFailure,
+                                        result.EstimatedCompletionPercent,
+                                        result.LastProgressSummary,
+                                        result.InputTokens,
+                                        result.OutputTokens));
+                                    continue;
+                                }
+                            }
+
                             var summarized = await SummarizePhaseOutputAsync(role, result.Output, externalCancellation);
                             return new RolePhaseExecutionResult(
                                 role,
@@ -3489,7 +3665,10 @@ public class AgentOrchestrationService(
                     var orchestrationResult = await ExecuteSubFlowsAsync(
                         workItem,
                         directChildWorkItems,
-                        HasOrchestrationFollowUpStages(pipeline));
+                        HasOrchestrationFollowUpStages(pipeline),
+                        currentRawOutputsByRole.TryGetValue(AgentRole.Planner, out var currentPlannerOutput)
+                            ? currentPlannerOutput
+                            : null);
                     if (orchestrationResult.ExecutionCompleted)
                         return;
 
@@ -3534,6 +3713,13 @@ public class AgentOrchestrationService(
             if (!shouldCreatePullRequest)
             {
                 await sandbox.PushBranchAsync(accessToken, externalCancellation);
+                await CleanupDirectSubFlowBranchesAsync(
+                    projectId,
+                    executionId,
+                    userId,
+                    repoFullName,
+                    sandbox.BranchName,
+                    externalCancellation);
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed"));
                 await PublishAgentsUpdatedAsync();
                 await WithDbLockAsync(async queuedDb =>
@@ -3588,7 +3774,7 @@ public class AgentOrchestrationService(
                     "pr_ready",
                     $"PR ready for #{workItem.WorkItemNumber}",
                     prUrl ?? "A pull request is ready for review.",
-                        executionId);
+                    executionId);
             }
             else if (!string.IsNullOrWhiteSpace(prUrl))
             {
@@ -3597,6 +3783,14 @@ public class AgentOrchestrationService(
                     executionId,
                     prUrl);
             }
+
+            await CleanupDirectSubFlowBranchesAsync(
+                projectId,
+                executionId,
+                userId,
+                repoFullName,
+                sandbox.BranchName,
+                externalCancellation);
 
             var prLifecycle = resolvedPrNumber > 0
                 ? await GetPullRequestLifecycleAsync(accessToken, repoFullName, resolvedPrNumber, externalCancellation)
@@ -3886,6 +4080,61 @@ public class AgentOrchestrationService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Cast<string>()
             .ToArray();
+
+    internal static string BuildConsolidationSubFlowBranchAuditBrief(
+        string currentBranchName,
+        IReadOnlyList<ConsolidationSubFlowBranchAuditItem> auditItems)
+    {
+        if (auditItems.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## Trusted Sub-Flow Branch Audit");
+        sb.AppendLine($"- Current parent branch: `{currentBranchName}`.");
+        sb.AppendLine("- Before any other consolidation work, audit each direct child sub-flow branch below.");
+        sb.AppendLine($"- If a child branch still exists remotely and is not yet merged into `{currentBranchName}`, merge it now, resolve conflicts, and rerun build/test/lint before continuing.");
+        sb.AppendLine("- If a child branch is already merged, do not re-merge it. Record that it is already incorporated and move on.");
+        sb.AppendLine();
+        sb.AppendLine("### Direct Child Sub-Flow Branches");
+
+        foreach (var auditItem in auditItems.OrderBy(item => item.WorkItemNumber))
+        {
+            var remoteState = auditItem.BranchExistsRemotely
+                ? "present on origin"
+                : "no longer present on origin";
+            var mergeState = auditItem.BranchExistsRemotely
+                ? auditItem.IsMergedIntoCurrentBranch
+                    ? $"already merged into `{currentBranchName}`"
+                    : $"NOT merged into `{currentBranchName}` yet; merge it now"
+                : "remote branch unavailable; inspect local history/logs before assuming it is safe";
+
+            sb.AppendLine(
+                $"- #{auditItem.WorkItemNumber} `{auditItem.WorkItemTitle}` " +
+                $"(execution `{auditItem.ExecutionId}`, branch `{auditItem.BranchName}`, status `{auditItem.ExecutionStatus}`): {remoteState}; {mergeState}.");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    internal static string BuildConsolidationSubFlowBranchVerificationFailureMessage(
+        string currentBranchName,
+        IReadOnlyList<ConsolidationSubFlowBranchAuditItem> auditItems)
+    {
+        var unresolvedBranches = auditItems
+            .Where(item => item.BranchExistsRemotely && !item.IsMergedIntoCurrentBranch)
+            .OrderBy(item => item.WorkItemNumber)
+            .ToArray();
+
+        if (unresolvedBranches.Length == 0)
+            return string.Empty;
+
+        var branchSummary = string.Join(
+            ", ",
+            unresolvedBranches.Select(item => $"#{item.WorkItemNumber} `{item.BranchName}`"));
+        return
+            $"Consolidation completed, but the current parent branch '{currentBranchName}' still does not contain these direct sub-flow branches: {branchSummary}. " +
+            "Consolidation must merge any surviving unmerged child branches before Review or Documentation can trust the consolidated result.";
+    }
 
     internal static IReadOnlyList<string> BuildReusableSubFlowParentExecutionIds(
         string executionId,
@@ -4342,7 +4591,10 @@ public class AgentOrchestrationService(
             normalizedMode,
             string.IsNullOrWhiteSpace(plannerShape.SubFlowReason) ? fallback.SubFlowReason : plannerShape.SubFlowReason.Trim(),
             followingRoles,
-            followingRoles.Length);
+            followingRoles.Length,
+            normalizedMode == PlannerSubFlowMode.UseExistingSubFlows
+                ? plannerShape.ExistingSubFlowDependencies ?? []
+                : []);
     }
 
     internal static IReadOnlyList<AgentRole> BuildDeterministicOrchestrationFollowingRoles(
@@ -4378,6 +4630,10 @@ public class AgentOrchestrationService(
         sb.AppendLine($"- Current execution depth: {guidance.ExecutionDepth}.");
         sb.AppendLine($"- Max direct sub-flows allowed at this depth: {guidance.MaxDirectSubFlows}.");
         sb.AppendLine($"- Max generated branch depth allowed at this depth: {guidance.MaxGeneratedBranchDepth}.");
+        sb.AppendLine("- If some sub-flows are docs/release/review focused, prefer making them depend on implementation/testing siblings instead of launching them in the first parallel wave.");
+        sb.AppendLine("- If one sub-flow is specifically about GitHub Pages deployment/publishing, make it depend on the implementation/testing siblings so it runs last.");
+        sb.AppendLine("- For existing child work items, reference exact work item numbers when you define sub-flow dependencies.");
+        sb.AppendLine("- For generated sibling sub-flows under the same parent, use exact sibling titles in `depends_on` when you need sequencing.");
         sb.AppendLine($"- Nested branching allowed at this depth: {(guidance.NestedBranchingAllowed ? "yes" : "no")}.");
         sb.AppendLine($"- Direct executions may request repeated downstream roles, but Fleet will cap any single role at {MaxPlannerRoleCopies} copies.");
         sb.AppendLine("- If you request multiple copies of the same role, divide their ownership into explicit non-overlapping slices.");
@@ -6857,6 +7113,115 @@ public class AgentOrchestrationService(
                 cancellationToken,
                 protectedBranchName,
                 projectId: projectId);
+        }
+    }
+
+    private async Task<IReadOnlyList<ConsolidationSubFlowBranchAuditItem>> BuildConsolidationSubFlowBranchAuditAsync(
+        string projectId,
+        string executionId,
+        int userId,
+        string repoFullName,
+        IRepoSandbox sandbox,
+        CancellationToken cancellationToken)
+    {
+        var directChildExecutions = await db.AgentExecutions
+            .AsNoTracking()
+            .Where(execution =>
+                execution.ProjectId == projectId &&
+                execution.ParentExecutionId == executionId &&
+                execution.BranchName != null &&
+                execution.BranchName != string.Empty)
+            .OrderBy(execution => execution.WorkItemId)
+            .Select(execution => new
+            {
+                execution.WorkItemId,
+                execution.WorkItemTitle,
+                execution.Id,
+                execution.BranchName,
+                execution.Status,
+            })
+            .ToListAsync(cancellationToken);
+
+        if (directChildExecutions.Count == 0)
+            return [];
+
+        var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId, repoFullName, cancellationToken);
+        var client = httpClientFactory.CreateClient("GitHub");
+        var auditItems = new List<ConsolidationSubFlowBranchAuditItem>(directChildExecutions.Count);
+
+        foreach (var directChildExecution in directChildExecutions)
+        {
+            var normalizedBranchName = directChildExecution.BranchName!.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedBranchName))
+                continue;
+
+            var branchExistsRemotely = await BranchExistsAsync(
+                client,
+                accessToken,
+                repoFullName,
+                normalizedBranchName,
+                cancellationToken);
+            var isMergedIntoCurrentBranch = branchExistsRemotely &&
+                await sandbox.IsRemoteBranchMergedIntoCurrentBranchAsync(
+                    accessToken,
+                    normalizedBranchName,
+                    cancellationToken);
+
+            auditItems.Add(new ConsolidationSubFlowBranchAuditItem(
+                directChildExecution.WorkItemId,
+                directChildExecution.WorkItemTitle,
+                directChildExecution.Id,
+                normalizedBranchName,
+                directChildExecution.Status,
+                branchExistsRemotely,
+                isMergedIntoCurrentBranch));
+        }
+
+        return auditItems;
+    }
+
+    private async Task CleanupDirectSubFlowBranchesAsync(
+        string projectId,
+        string executionId,
+        int userId,
+        string repoFullName,
+        string protectedBranchName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var directChildBranches = await db.AgentExecutions
+                .AsNoTracking()
+                .Where(execution =>
+                    execution.ProjectId == projectId &&
+                    execution.ParentExecutionId == executionId &&
+                    execution.BranchName != null &&
+                    execution.BranchName != string.Empty)
+                .Select(execution => execution.BranchName!)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (directChildBranches.Count == 0)
+                return;
+
+            var accessToken = await ResolveRequiredRepoAccessTokenAsync(userId, repoFullName, cancellationToken);
+            foreach (var directChildBranch in directChildBranches)
+            {
+                await TryDeleteRemoteBranchIfSafeAsync(
+                    accessToken,
+                    repoFullName,
+                    directChildBranch,
+                    cancellationToken,
+                    protectedBranchName: protectedBranchName,
+                    projectId: projectId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Execution {ExecutionId}: failed to clean up direct sub-flow branches after parent completion",
+                executionId);
         }
     }
 

@@ -33,7 +33,7 @@ import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnectio
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import { executionTreeHasAnyStatus, findExecutionInCollection } from '../../models/executionTree'
+import { collectExecutionRootsByStatus, executionTreeHasAnyStatus, findExecutionInCollection, normalizeExecutionTree, sortExecutionCollectionByDisplayOrder } from '../../models/executionTree'
 import { countActiveAgents, countActiveFlows } from './monitorSummary'
 
 const LIVE_FALLBACK_POLL_MS = 5000
@@ -297,7 +297,10 @@ export function AgentMonitorPage() {
     const toasterId = useId('agent-monitor-toaster')
     const { dispatchToast } = useToastController(toasterId)
 
-    const allExecutions = useMemo(() => executions ?? [], [executions])
+    const allExecutions = useMemo(
+        () => sortExecutionCollectionByDisplayOrder((executions ?? []).map(normalizeExecutionTree)),
+        [executions],
+    )
     const allLogs = useMemo(() => logs ?? [], [logs])
     const active = useMemo(
         () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
@@ -310,9 +313,9 @@ export function AgentMonitorPage() {
             executionTreeHasAnyStatus(execution, PAUSED_EXECUTION_STATUSES)),
         [allExecutions],
     )
-    const completed = useMemo(() => allExecutions.filter((e) => e.status === 'completed'), [allExecutions])
-    const failed = useMemo(() => allExecutions.filter((e) => e.status === 'failed'), [allExecutions])
-    const cancelled = useMemo(() => allExecutions.filter((e) => e.status === 'cancelled'), [allExecutions])
+    const completed = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['completed']), [allExecutions])
+    const failed = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['failed']), [allExecutions])
+    const cancelled = useMemo(() => collectExecutionRootsByStatus(allExecutions, ['cancelled']), [allExecutions])
     const activeAgentCount = useMemo(() => countActiveAgents(allExecutions), [allExecutions])
 
     const filteredByTab =

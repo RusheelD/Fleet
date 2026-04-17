@@ -277,11 +277,12 @@ public class AgentOrchestrationRetryTests
 
         var pipeline = AgentOrchestrationService.BuildPipelineFromExecutionAgents(persistedAgents);
 
-        Assert.AreEqual(4, pipeline.Length);
+        Assert.AreEqual(5, pipeline.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Testing }, pipeline[2]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Testing }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[4]);
     }
 
     [TestMethod]
@@ -299,11 +300,13 @@ public class AgentOrchestrationRetryTests
 
         var pipeline = AgentOrchestrationService.BuildPipelineFromExecutionAgents(persistedAgents);
 
-        Assert.AreEqual(4, pipeline.Length);
+        Assert.AreEqual(6, pipeline.Length);
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Backend, AgentRole.Frontend }, pipeline[2]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Backend }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Frontend }, pipeline[4]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[5]);
     }
 
     [TestMethod]
@@ -337,7 +340,39 @@ public class AgentOrchestrationRetryTests
 
         CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
-        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Backend, AgentRole.Frontend }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Backend }, pipeline[3]);
+    }
+
+    [TestMethod]
+    public void BuildPipelineFromFollowingRoles_OmitsContractsForSequentialDirectRun()
+    {
+        var pipeline = AgentOrchestrationService.BuildPipelineFromFollowingRoles(
+            [AgentRole.Contracts, AgentRole.Backend, AgentRole.Review],
+            "auto",
+            null);
+
+        Assert.AreEqual(4, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[3]);
+    }
+
+    [TestMethod]
+    public void BuildPipelineFromFollowingRoles_AddsContractsForParallelDirectStage()
+    {
+        var pipeline = AgentOrchestrationService.BuildPipelineFromFollowingRoles(
+            [AgentRole.Backend, AgentRole.Backend, AgentRole.Review],
+            "auto",
+            null);
+
+        Assert.AreEqual(5, pipeline.Length);
+        CollectionAssert.AreEqual(new[] { AgentRole.Manager }, pipeline[0]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Backend, AgentRole.Backend }, pipeline[3]);
+        CollectionAssert.AreEqual(new[] { AgentRole.Review }, pipeline[4]);
     }
 
     [TestMethod]
@@ -369,6 +404,64 @@ public class AgentOrchestrationRetryTests
         CollectionAssert.AreEqual(new[] { AgentRole.Planner }, pipeline[1]);
         CollectionAssert.AreEqual(new[] { AgentRole.Contracts }, pipeline[2]);
         CollectionAssert.AreEqual(new[] { AgentRole.Consolidation }, pipeline[3]);
+    }
+
+    [TestMethod]
+    public void BuildConsolidationSubFlowBranchAuditBrief_InstructsConsolidationToMergeUnmergedChildBranches()
+    {
+        var auditBrief = AgentOrchestrationService.BuildConsolidationSubFlowBranchAuditBrief(
+            "fleet/1-parent-copy",
+            [
+                new AgentOrchestrationService.ConsolidationSubFlowBranchAuditItem(
+                    2,
+                    "Backend slice",
+                    "child-1",
+                    "fleet/2-backend-copy",
+                    "completed",
+                    BranchExistsRemotely: true,
+                    IsMergedIntoCurrentBranch: false),
+                new AgentOrchestrationService.ConsolidationSubFlowBranchAuditItem(
+                    3,
+                    "Frontend slice",
+                    "child-2",
+                    "fleet/3-frontend-copy",
+                    "completed",
+                    BranchExistsRemotely: true,
+                    IsMergedIntoCurrentBranch: true),
+            ]);
+
+        StringAssert.Contains(auditBrief, "Trusted Sub-Flow Branch Audit");
+        StringAssert.Contains(auditBrief, "merge it now");
+        StringAssert.Contains(auditBrief, "fleet/2-backend-copy");
+        StringAssert.Contains(auditBrief, "already merged into `fleet/1-parent-copy`");
+    }
+
+    [TestMethod]
+    public void BuildConsolidationSubFlowBranchVerificationFailureMessage_OnlyFlagsActionableUnmergedBranches()
+    {
+        var message = AgentOrchestrationService.BuildConsolidationSubFlowBranchVerificationFailureMessage(
+            "fleet/1-parent-copy",
+            [
+                new AgentOrchestrationService.ConsolidationSubFlowBranchAuditItem(
+                    2,
+                    "Backend slice",
+                    "child-1",
+                    "fleet/2-backend-copy",
+                    "completed",
+                    BranchExistsRemotely: true,
+                    IsMergedIntoCurrentBranch: false),
+                new AgentOrchestrationService.ConsolidationSubFlowBranchAuditItem(
+                    3,
+                    "Frontend slice",
+                    "child-2",
+                    "fleet/3-frontend-copy",
+                    "completed",
+                    BranchExistsRemotely: false,
+                    IsMergedIntoCurrentBranch: false),
+            ]);
+
+        StringAssert.Contains(message, "fleet/2-backend-copy");
+        Assert.IsFalse(message.Contains("fleet/3-frontend-copy", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -1522,6 +1615,88 @@ public class AgentOrchestrationRetryTests
         CollectionAssert.AreEqual(
             new[] { AgentRole.Backend, AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Review },
             parsed.FollowingAgents.ToArray());
+    }
+
+    [TestMethod]
+    public void PlannerExecutionShapeParser_ParsesExistingSubFlowDependencies()
+    {
+        const string output = """
+            EXECUTION_PLAN_JSON
+            {
+              "effective_difficulty": 5,
+              "difficulty_reason": "Existing branches need sequencing.",
+              "subflow_mode": "use_existing_subflows",
+              "subflow_reason": "Use existing child branches.",
+              "following_agent_count": 2,
+              "following_agents": ["Contracts", "Consolidation"],
+              "existing_subflow_dependencies": [
+                {
+                  "work_item_number": 42,
+                  "depends_on_work_item_numbers": [40, 41],
+                  "reason": "Documentation should wait for implementation branches."
+                }
+              ]
+            }
+
+            SUBFLOW_PLAN_JSON
+            { "split": false }
+            """;
+
+        var parsed = PlannerExecutionShapeParser.Parse(output);
+
+        Assert.IsNotNull(parsed);
+        Assert.AreEqual(1, parsed.ExistingSubFlowDependencies?.Count);
+        Assert.AreEqual(42, parsed.ExistingSubFlowDependencies?[0].WorkItemNumber);
+        CollectionAssert.AreEqual(new[] { 40, 41 }, parsed.ExistingSubFlowDependencies?[0].DependsOnWorkItemNumbers.ToArray());
+    }
+
+    [TestMethod]
+    public void SubFlowPlanner_ParsesSiblingDependencies()
+    {
+        const string output = """
+            EXECUTION_PLAN_JSON
+            {
+              "effective_difficulty": 5,
+              "difficulty_reason": "Generated branches.",
+              "subflow_mode": "generate_subflows",
+              "subflow_reason": "Generate child branches.",
+              "following_agent_count": 2,
+              "following_agents": ["Contracts", "Consolidation"]
+            }
+
+            SUBFLOW_PLAN_JSON
+            {
+              "split": true,
+              "reason": "Split implementation from docs.",
+              "subflows": [
+                {
+                  "title": "Implementation",
+                  "description": "Build the feature.",
+                  "priority": 3,
+                  "difficulty": 4,
+                  "tags": ["backend"],
+                  "acceptance_criteria": "Feature works.",
+                  "subflows": []
+                },
+                {
+                  "title": "Documentation",
+                  "description": "Document the feature.",
+                  "priority": 2,
+                  "difficulty": 2,
+                  "tags": ["docs"],
+                  "acceptance_criteria": "Docs exist.",
+                  "depends_on": ["Implementation"],
+                  "subflows": []
+                }
+              ]
+            }
+            """;
+
+        var parsed = SubFlowPlanner.Parse(output);
+
+        Assert.IsNotNull(parsed);
+        Assert.AreEqual(2, parsed.SubFlows.Count);
+        CollectionAssert.AreEqual(new[] { "Implementation" }, parsed.SubFlows[1].DependsOn.ToArray());
     }
 
     [TestMethod]

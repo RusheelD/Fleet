@@ -88,8 +88,15 @@ EXECUTION_PLAN_JSON
   "difficulty_reason": "Why the true execution difficulty is D4 even if the work item label is different.",
   "subflow_mode": "direct",
   "subflow_reason": "Why this should stay as one execution, use existing child work items, or generate new sub-flows.",
-  "following_agent_count": 5,
-  "following_agents": ["Contracts", "Backend", "Frontend", "Testing", "Review"]
+  "following_agent_count": 2,
+  "following_agents": ["Backend", "Review"],
+  "existing_subflow_dependencies": [
+    {
+      "work_item_number": 42,
+      "depends_on_work_item_numbers": [40, 41],
+      "reason": "This docs/release-oriented child should wait for implementation branches."
+    }
+  ]
 }
 ```
 ```
@@ -103,6 +110,7 @@ Execution-shape rules:
   - `generate_subflows` - Fleet should create new child work items from your sub-flow JSON
 - `following_agents` must reflect the agents that should run after Planner for the mode you chose.
 - If you choose `direct`, `following_agents` should be the lean downstream role set for the single execution.
+- For `direct`, include `Contracts` only when later downstream execution will branch into parallel agents. Sequential direct runs do not need `Contracts`.
 - `following_agents` may contain repeated roles when parallel same-role execution would help. For example, `["Backend", "Backend", "Frontend", "Testing"]` is valid.
 - You may omit roles entirely when they are not needed. Do not include a role just because it often appears in the default pipeline.
 - Fleet will accept at most 3 copies of any single downstream role. Treat that as a strict ceiling, not a target.
@@ -113,6 +121,11 @@ Execution-shape rules:
 - `Consolidation` is required for sub-flow modes and always runs immediately after the child branches merge back into the parent branch.
 - Any remaining roles in `following_agents` for sub-flow modes run after Consolidation.
 - If no parent follow-up is needed beyond the mandatory merge handling, `["Contracts", "Consolidation"]` is the minimal valid list.
+- If you choose `use_existing_subflows`, you may add `existing_subflow_dependencies` to control which direct child work items must wait for earlier siblings.
+- `existing_subflow_dependencies` must reference exact work item numbers from the `Sub-Items` section.
+- Only list a child in `existing_subflow_dependencies` when it truly needs to wait. Omit children that can run immediately in parallel.
+- Docs/release/review-heavy child branches usually depend on implementation/testing branches finishing first.
+- For app work that includes a GitHub Pages deployment branch, that deployment branch should depend on all other sibling implementation/testing branches and run last.
 - Keep `following_agent_count` aligned with the actual number of entries in `following_agents`.
 - Treat any Fleet deterministic planning guidance in the trusted phase brief as a strong baseline. You may override it, but only when repository evidence clearly supports the change.
 
@@ -143,6 +156,7 @@ SUBFLOW_PLAN_JSON
       "difficulty": 3,
       "tags": ["backend", "api"],
       "acceptance_criteria": "How this child work item is verified.",
+      "depends_on": ["Another sibling title that must finish first"],
       "subflows": []
     }
   ]
@@ -154,8 +168,11 @@ Sub-flow rules:
 
 - If existing child work items already represent the right branches, set `subflow_mode` to `use_existing_subflows` and end with `SUBFLOW_PLAN_JSON` set to `{ "split": false }`.
 - Use `generate_subflows` only when Fleet must create new child work items.
-- Use sibling `subflows` only when they can run in parallel safely.
-- Express sequencing by nesting a dependent sub-flow under the work item it depends on.
+- Use sibling `subflows` when they share the same parent boundary; leave `depends_on` empty only when they can truly run in parallel safely.
+- When sibling child branches share the same parent but need sequencing, express that with `depends_on` instead of forcing them all to start together.
+- `depends_on` must reference exact sibling `title` values under the same parent node.
+- If one sibling is specifically about GitHub Pages deployment/publishing, make it depend on the implementation/testing siblings so it runs after the app is ready.
+- Use nesting only when a child should truly own its own descendant sub-flows, not just because it needs to wait for another sibling first.
 - Keep every generated child implementation-ready and scoped like a real work item.
 - Do not emit a split plan unless the task genuinely needs multiple full executions.
 - Never use sub-flows for a component-level task, a tight bug fix, or another task that one strong execution can finish cleanly.

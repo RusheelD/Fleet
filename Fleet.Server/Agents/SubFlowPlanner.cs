@@ -123,6 +123,9 @@ internal static partial class SubFlowPlanner
             if (HasNodeExceedingDirectChildLimit(subFlows))
                 return null;
 
+            if (HasInvalidDependencyGraph(subFlows))
+                return null;
+
             return new GeneratedSubFlowPlan(
                 string.IsNullOrWhiteSpace(payload.Reason) ? "Planner requested decomposition." : payload.Reason.Trim(),
                 subFlows);
@@ -155,7 +158,12 @@ internal static partial class SubFlowPlanner
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray() ?? [],
             contract.AcceptanceCriteria?.Trim() ?? string.Empty,
-            children);
+            children,
+            contract.DependsOn?
+                .Where(title => !string.IsNullOrWhiteSpace(title))
+                .Select(title => title.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray() ?? []);
     }
 
     private static int NormalizeScale(int? value)
@@ -177,6 +185,69 @@ internal static partial class SubFlowPlanner
     private static bool HasNodeExceedingDirectChildLimit(IReadOnlyList<GeneratedSubFlowSpec> specs)
         => specs.Count > MaxDirectSubFlowsPerNode ||
            specs.Any(spec => HasNodeExceedingDirectChildLimit(spec.SubFlows));
+
+    private static bool HasInvalidDependencyGraph(IReadOnlyList<GeneratedSubFlowSpec> specs)
+    {
+        if (specs.Count == 0)
+            return false;
+
+        var anyDependency = specs.Any(spec => spec.DependsOn.Count > 0);
+        if (anyDependency)
+        {
+            var duplicateTitleExists = specs
+                .GroupBy(spec => spec.Title, StringComparer.OrdinalIgnoreCase)
+                .Any(group => group.Count() > 1);
+            if (duplicateTitleExists)
+                return true;
+
+            var validTitles = specs
+                .Select(spec => spec.Title)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var spec in specs)
+            {
+                if (spec.DependsOn.Any(title =>
+                        string.Equals(title, spec.Title, StringComparison.OrdinalIgnoreCase) ||
+                        !validTitles.Contains(title)))
+                {
+                    return true;
+                }
+            }
+
+            if (HasSiblingDependencyCycle(specs))
+                return true;
+        }
+
+        return specs.Any(spec => HasInvalidDependencyGraph(spec.SubFlows));
+    }
+
+    private static bool HasSiblingDependencyCycle(IReadOnlyList<GeneratedSubFlowSpec> specs)
+    {
+        var remainingDependencies = specs.ToDictionary(
+            spec => spec.Title,
+            spec => new HashSet<string>(spec.DependsOn, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
+
+        while (remainingDependencies.Count > 0)
+        {
+            var readyTitles = remainingDependencies
+                .Where(entry => entry.Value.Count == 0)
+                .Select(entry => entry.Key)
+                .ToArray();
+            if (readyTitles.Length == 0)
+                return true;
+
+            foreach (var readyTitle in readyTitles)
+                remainingDependencies.Remove(readyTitle);
+
+            foreach (var dependencySet in remainingDependencies.Values)
+            {
+                foreach (var readyTitle in readyTitles)
+                    dependencySet.Remove(readyTitle);
+            }
+        }
+
+        return false;
+    }
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -219,6 +290,9 @@ internal static partial class SubFlowPlanner
         [JsonPropertyName("acceptance_criteria")]
         public string? AcceptanceCriteria { get; set; }
 
+        [JsonPropertyName("depends_on")]
+        public List<string>? DependsOn { get; set; }
+
         [JsonPropertyName("subflows")]
         public List<SubFlowSpecContract>? SubFlows { get; set; }
     }
@@ -235,4 +309,8 @@ internal sealed record GeneratedSubFlowSpec(
     int Difficulty,
     IReadOnlyList<string> Tags,
     string AcceptanceCriteria,
-    IReadOnlyList<GeneratedSubFlowSpec> SubFlows);
+    IReadOnlyList<GeneratedSubFlowSpec> SubFlows,
+    IReadOnlyList<string>? DependsOnTitles = null)
+{
+    public IReadOnlyList<string> DependsOn { get; init; } = DependsOnTitles ?? [];
+}

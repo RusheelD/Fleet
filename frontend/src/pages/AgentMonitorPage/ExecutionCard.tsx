@@ -346,7 +346,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
     const isMobile = useIsMobile()
     const [expandedSubFlowIds, setExpandedSubFlowIds] = useState<Record<string, boolean>>({})
     const isCompact = preferences?.compactMode ?? false
-    const isNested = nested || Boolean(execution.parentExecutionId)
+    const isNested = nested
     const toasterId = useId('exec-toaster')
     const { dispatchToast } = useToastController(toasterId)
 

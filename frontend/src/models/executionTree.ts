@@ -1,44 +1,23 @@
 import type { AgentExecution } from './agent'
-
-function getSubFlowStatusPriority(status: AgentExecution['status']): number {
-  switch (status) {
-    case 'completed':
-      return 0
-    case 'running':
-      return 1
-    case 'queued':
-    case 'paused':
-      return 2
-    case 'failed':
-    case 'cancelled':
-      return 3
-    default:
-      return 2
-  }
-}
+import { compareFlowDisplayOrder } from './flowDisplayOrder'
 
 function compareSubFlowExecutions(left: AgentExecution, right: AgentExecution): number {
-  const statusPriorityDifference = getSubFlowStatusPriority(left.status) - getSubFlowStatusPriority(right.status)
-  if (statusPriorityDifference !== 0) {
-    return statusPriorityDifference
-  }
-
-  if (left.workItemId !== right.workItemId) {
-    return left.workItemId - right.workItemId
-  }
-
-  const leftStartedAt = Date.parse(left.startedAt)
-  const rightStartedAt = Date.parse(right.startedAt)
-  if (!Number.isNaN(leftStartedAt) && !Number.isNaN(rightStartedAt) && leftStartedAt !== rightStartedAt) {
-    return leftStartedAt - rightStartedAt
-  }
-
-  const titleComparison = left.workItemTitle.localeCompare(right.workItemTitle)
-  if (titleComparison !== 0) {
-    return titleComparison
-  }
-
-  return left.id.localeCompare(right.id)
+  return compareFlowDisplayOrder(
+    {
+      status: left.status,
+      flowNumber: left.workItemId,
+      startedAt: left.startedAt,
+      title: left.workItemTitle,
+      uniqueId: left.id,
+    },
+    {
+      status: right.status,
+      flowNumber: right.workItemId,
+      startedAt: right.startedAt,
+      title: right.workItemTitle,
+      uniqueId: right.id,
+    },
+  )
 }
 
 function sortSubFlowExecutions(executions: AgentExecution[]): AgentExecution[] {
@@ -48,6 +27,10 @@ function sortSubFlowExecutions(executions: AgentExecution[]): AgentExecution[] {
       subFlows: sortSubFlowExecutions(execution.subFlows ?? []),
     }))
     .sort(compareSubFlowExecutions)
+}
+
+export function sortExecutionCollectionByDisplayOrder(executions: AgentExecution[]): AgentExecution[] {
+  return [...executions].sort(compareSubFlowExecutions)
 }
 
 function collectExecutionIds(execution: AgentExecution, ids: Set<string>) {
@@ -110,6 +93,31 @@ export function flattenExecutionCollection(executions: AgentExecution[]): AgentE
   }
 
   return flattened
+}
+
+export function collectExecutionRootsByStatus(
+  executions: AgentExecution[],
+  statuses: Iterable<AgentExecution['status']>,
+): AgentExecution[] {
+  const statusSet = statuses instanceof Set ? statuses : new Set(statuses)
+  const collected: AgentExecution[] = []
+
+  const visit = (execution: AgentExecution, ancestorMatches: boolean) => {
+    const matches = statusSet.has(execution.status)
+    if (matches && !ancestorMatches) {
+      collected.push(execution)
+    }
+
+    for (const child of execution.subFlows ?? []) {
+      visit(child, ancestorMatches || matches)
+    }
+  }
+
+  for (const execution of executions) {
+    visit(execution, false)
+  }
+
+  return sortExecutionCollectionByDisplayOrder(collected)
 }
 
 export function findExecutionInCollection(

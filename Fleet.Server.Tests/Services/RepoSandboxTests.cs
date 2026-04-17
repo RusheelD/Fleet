@@ -218,6 +218,36 @@ public class RepoSandboxTests
     }
 
     [TestMethod]
+    public void BuildBranchHeadContainedInCurrentBranchArgumentList_TargetsRemoteTrackingBranchAgainstHead()
+    {
+        var result = RepoSandbox.BuildBranchHeadContainedInCurrentBranchArgumentList("fleet/42-child-flow");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "merge-base",
+                "--is-ancestor",
+                "refs/remotes/origin/fleet/42-child-flow",
+                "HEAD",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
+    public void BuildRebaseOntoRemoteBranchArgumentList_TargetsRemoteTrackingBranch()
+    {
+        var result = RepoSandbox.BuildRebaseOntoRemoteBranchArgumentList("fleet/42-parent-flow");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "rebase",
+                "refs/remotes/origin/fleet/42-parent-flow",
+            },
+            result.ToArray());
+    }
+
+    [TestMethod]
     public void LooksLikeUnrelatedHistoriesMergeFailure_DetectsGitError()
     {
         Assert.IsTrue(RepoSandbox.LooksLikeUnrelatedHistoriesMergeFailure(

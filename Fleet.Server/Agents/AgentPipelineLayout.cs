@@ -54,20 +54,17 @@ internal static class AgentPipelineLayout
         if (counts.TryGetValue(AgentRole.Research, out var researchCount) && researchCount > 0)
             pipeline.Add(Enumerable.Repeat(AgentRole.Research, researchCount).ToArray());
 
-        if (counts.TryGetValue(AgentRole.Contracts, out var contractsCount) && contractsCount > 0)
-            pipeline.Add(Enumerable.Repeat(AgentRole.Contracts, contractsCount).ToArray());
+        var requiresContracts = RequiresContractsForDirectPipeline(counts);
+        if (requiresContracts)
+            pipeline.Add([AgentRole.Contracts]);
 
-        var implementationGroup = new List<AgentRole>();
         foreach (var role in new[] { AgentRole.Backend, AgentRole.Frontend, AgentRole.Testing, AgentRole.Styling })
         {
             if (!counts.TryGetValue(role, out var count) || count <= 0)
                 continue;
 
-            implementationGroup.AddRange(Enumerable.Repeat(role, count));
+            pipeline.Add(Enumerable.Repeat(role, count).ToArray());
         }
-
-        if (implementationGroup.Count > 0)
-            pipeline.Add([.. implementationGroup]);
 
         if (counts.TryGetValue(AgentRole.Consolidation, out var consolidationCount) &&
             consolidationCount > 0 &&
@@ -79,17 +76,13 @@ internal static class AgentPipelineLayout
             pipeline.Add(Enumerable.Repeat(AgentRole.Consolidation, consolidationCount).ToArray());
         }
 
-        var reviewGroup = new List<AgentRole>();
         foreach (var role in new[] { AgentRole.Review, AgentRole.Documentation })
         {
             if (!counts.TryGetValue(role, out var count) || count <= 0)
                 continue;
 
-            reviewGroup.AddRange(Enumerable.Repeat(role, count));
+            pipeline.Add(Enumerable.Repeat(role, count).ToArray());
         }
-
-        if (reviewGroup.Count > 0)
-            pipeline.Add([.. reviewGroup]);
 
         return [.. pipeline];
     }
@@ -209,14 +202,6 @@ internal static class AgentPipelineLayout
             role == AgentRole.Consolidation &&
             (backendCount == 0 || frontendCount == 0));
 
-        if (backendCount > 0 &&
-            frontendCount > 0 &&
-            deterministicDirectExecutionRoles.Contains(AgentRole.Contracts) &&
-            !roles.Contains(AgentRole.Contracts))
-        {
-            roles.Add(AgentRole.Contracts);
-        }
-
         return roles;
     }
 
@@ -257,6 +242,12 @@ internal static class AgentPipelineLayout
             .Where(role => role is not AgentRole.Manager and not AgentRole.Planner)
             .ToArray();
     }
+
+    private static bool RequiresContractsForDirectPipeline(
+        IReadOnlyDictionary<AgentRole, int> counts)
+        => counts.Any(entry =>
+            entry.Key is not (AgentRole.Manager or AgentRole.Planner or AgentRole.Contracts or AgentRole.Research) &&
+            entry.Value > 1);
 
     internal static AgentRole[][] ApplyAssignedAgentLimit(AgentRole[][] pipeline, string? assignmentMode, int? assignedAgentCount)
     {
