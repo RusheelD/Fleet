@@ -1,4 +1,4 @@
-import { Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
+import { Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ComponentProps } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -40,13 +40,7 @@ import {
     type WorkItemFilters,
 } from './workItemFilters'
 import { useWorkItemColumnPreferences } from './useWorkItemColumnPreferences'
-import { lazyWithRetry } from '../../utils/staleChunkRecovery'
-
-function lazyDialog<TProps extends object>(
-    importer: () => Promise<{ default: ComponentType<TProps> }>,
-): LazyExoticComponent<ComponentType<TProps>> {
-    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
-}
+import { lazyDialog } from '../../utils/staleChunkRecovery'
 
 type CreateWorkItemDialogProps = ComponentProps<typeof import('./CreateWorkItemDialog').CreateWorkItemDialog>
 type WorkItemDetailDialogProps = ComponentProps<typeof import('./WorkItemDetailDialog').WorkItemDetailDialog>

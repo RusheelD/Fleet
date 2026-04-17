@@ -1,4 +1,4 @@
-import { Suspense, useState, useMemo, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
+import { Suspense, useState, useMemo, type ComponentProps } from 'react'
 import {
     makeStyles,
     mergeClasses,
@@ -35,13 +35,7 @@ import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import { findExecutionInCollection, normalizeExecutionTree, sortExecutionCollectionByDisplayOrder } from '../../models/executionTree'
 import { buildMonitorExecutionSummary, formatCountLabel } from './monitorSummary'
-import { lazyWithRetry } from '../../utils/staleChunkRecovery'
-
-function lazyDialog<TProps extends object>(
-    importer: () => Promise<{ default: ComponentType<TProps> }>,
-): LazyExoticComponent<ComponentType<TProps>> {
-    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
-}
+import { lazyDialog } from '../../utils/staleChunkRecovery'
 
 type ExecutionDocsDialogProps = ComponentProps<typeof import('./ExecutionDocsDialog').ExecutionDocsDialog>
 type StartExecutionDialogProps = ComponentProps<typeof import('./StartExecutionDialog').StartExecutionDialog>

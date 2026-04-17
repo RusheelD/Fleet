@@ -118,3 +118,11 @@ export function lazyWithRetry<T extends ComponentType<unknown>>(
         }
     })
 }
+
+export function lazyDialog<TProps extends object>(
+    importer: () => Promise<{ default: ComponentType<TProps> }>,
+): LazyExoticComponent<ComponentType<TProps>> {
+    return lazyWithRetry(
+        importer as unknown as () => Promise<{ default: ComponentType<unknown> }>,
+    ) as LazyExoticComponent<ComponentType<TProps>>
+}

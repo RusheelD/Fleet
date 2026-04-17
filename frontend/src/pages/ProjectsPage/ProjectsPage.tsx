@@ -1,4 +1,4 @@
-import { Suspense, useState, useMemo, useRef, useCallback, type ChangeEvent, type ComponentProps, type ComponentType, type LazyExoticComponent } from 'react'
+import { Suspense, useState, useMemo, useRef, useCallback, type ChangeEvent, type ComponentProps } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     makeStyles,
@@ -26,13 +26,7 @@ import { useProjects, useExportProjects, useImportProjects } from '../../proxies
 import { usePreferences, useIsMobile } from '../../hooks'
 import { appTokens } from '../../styles/appTokens'
 import type { ProjectData } from '../../models'
-import { lazyWithRetry } from '../../utils/staleChunkRecovery'
-
-function lazyDialog<TProps extends object>(
-    importer: () => Promise<{ default: ComponentType<TProps> }>,
-): LazyExoticComponent<ComponentType<TProps>> {
-    return lazyWithRetry(importer as unknown as () => Promise<{ default: ComponentType<unknown> }>) as LazyExoticComponent<ComponentType<TProps>>
-}
+import { lazyDialog } from '../../utils/staleChunkRecovery'
 
 type NewProjectDialogProps = ComponentProps<typeof import('./NewProjectDialog').NewProjectDialog>
 
