@@ -124,28 +124,44 @@ const useStyles = makeStyles({
     },
     dropdownHeader: {
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
+        gap: appTokens.space.md,
         paddingTop: appTokens.space.xs,
         paddingRight: appTokens.space.sm,
         paddingBottom: appTokens.space.xxs,
         paddingLeft: appTokens.space.sm,
     },
+    dropdownHeaderInfo: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        minWidth: 0,
+        flex: 1,
+    },
     dropdownTitle: {
+        display: 'block',
         fontSize: appTokens.fontSize.xs,
         fontWeight: appTokens.fontWeight.semibold,
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         color: appTokens.color.textMuted,
+        lineHeight: 1.2,
     },
     dropdownMeta: {
+        display: 'block',
         fontSize: appTokens.fontSize.xs,
         color: appTokens.color.textMuted,
+        lineHeight: 1.3,
     },
     allProjectsLink: {
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
         fontSize: appTokens.fontSize.xs,
         color: appTokens.color.brand,
         cursor: 'pointer',
+        whiteSpace: 'nowrap',
         ':hover': {
             textDecorationLine: 'underline',
         },
@@ -235,7 +251,7 @@ export function ProjectSelector({ projectName, expanded }: ProjectSelectorProps)
     const dropdown = (
         <PopoverSurface className={styles.dropdownSurface}>
             <div className={styles.dropdownHeader}>
-                <div>
+                <div className={styles.dropdownHeaderInfo}>
                     <Text className={styles.dropdownTitle}>Switch Project</Text>
                     <Text className={styles.dropdownMeta}>
                         {projects?.length ?? 0} project{projects?.length === 1 ? '' : 's'}

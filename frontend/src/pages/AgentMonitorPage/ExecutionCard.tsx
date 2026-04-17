@@ -30,7 +30,7 @@ import {
     DismissCircleFilled,
     CircleRegular,
 } from '@fluentui/react-icons'
-import type { AgentExecution, AgentInfo, WorkItem } from '../../models'
+import type { AgentExecution, WorkItem } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 import { appTokens } from '../../styles/appTokens'
@@ -38,16 +38,12 @@ import { InfoBadge } from '../../components/shared/InfoBadge'
 import { FleetRocketLogo } from '../../components/shared'
 import { useState } from 'react'
 import { getNextSubFlowExpansionState, isSubFlowExpandedByDefault } from './subFlowExpansion'
-
-type ExecutionStepStatus = AgentInfo['status'] | 'paused' | 'queued'
-type DisplayAgentInfo = Omit<AgentInfo, 'status'> & { status: ExecutionStepStatus }
-type PlannedSubFlowStep = {
-    workItemNumber: number
-    title: string
-    status: ExecutionStepStatus
-    currentTask: string
-    progress: number
-}
+import {
+    buildPipelineDisplaySteps,
+    type ExecutionStepStatus,
+    type DisplayAgentInfo,
+    type PlannedSubFlowStep,
+} from './pipelineDisplay'
 
 const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
     'In-PR',
@@ -827,6 +823,11 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
     const displayedSubFlowCount = execution.executionMode === 'orchestration'
         ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
         : 0
+    const pipelineDisplaySteps = buildPipelineDisplaySteps(
+        execution.executionMode,
+        agents,
+        plannedSubFlowSteps,
+    )
     const executionMetaParts = [
         activePhaseLabel,
         runModeLabel,
@@ -991,14 +992,14 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
             </div>
 
             <div className={styles.pipeline}>
-                {agents.map((agent, i) => {
+                {pipelineDisplaySteps.map((step, i) => {
                     const isFirst = i === 0
-                    const isLast = i === agents.length - 1
-                    const isRunning = agent.status === 'running'
-                    const previousStatus = isFirst ? null : agents[i - 1].status
+                    const isLast = i === pipelineDisplaySteps.length - 1
+                    const isRunning = step.status === 'running'
+                    const previousStatus = isFirst ? null : pipelineDisplaySteps[i - 1].status
 
                     return (
-                        <div key={agent.role} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
+                        <div key={step.key} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
                             <div className={mergeClasses(styles.stepGutter, isCompact && styles.stepGutterCompact)}>
                                 {!isFirst && (
                                     <div
@@ -1027,7 +1028,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                                     weight="semibold"
                                     className={mergeClasses(styles.roleName, isCompact && styles.roleNameCompact)}
                                 >
-                                    {agent.role}
+                                    {step.title}
                                 </Text>
                                 <Caption1
                                     className={mergeClasses(
@@ -1036,12 +1037,12 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                                         isMobile && styles.taskCaptionMobile,
                                     )}
                                 >
-                                    {agent.currentTask}
+                                    {step.currentTask}
                                 </Caption1>
-                                {isRunning && agent.progress > 0 && (
+                                {isRunning && step.progress > 0 && (
                                     <ProgressBar
                                         className={mergeClasses(styles.stepProgress, isCompact && styles.stepProgressCompact)}
-                                        value={agent.progress}
+                                        value={step.progress}
                                         thickness="medium"
                                         color="brand"
                                     />
@@ -1049,75 +1050,9 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                             </div>
 
                             <div className={styles.stepTrailing}>
-                                {isRunning && agent.progress > 0 && agent.progress < 1 && (
+                                {isRunning && step.progress > 0 && step.progress < 1 && (
                                     <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
-                                        {formatRunningProgressPercent(agent.progress)}
-                                    </Text>
-                                )}
-                            </div>
-                        </div>
-                    )
-                })}
-                {execution.executionMode === 'orchestration' && plannedSubFlowSteps.map((subFlowStep, index) => {
-                    const isRunning = subFlowStep.status === 'running'
-                    const previousStatus = index === 0
-                        ? (agents.length > 0 ? agents[agents.length - 1].status : null)
-                        : plannedSubFlowSteps[index - 1].status
-                    const isLast = index === plannedSubFlowSteps.length - 1
-
-                    return (
-                        <div key={`subflow-${subFlowStep.workItemNumber}`} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
-                            <div className={mergeClasses(styles.stepGutter, isCompact && styles.stepGutterCompact)}>
-                                <div
-                                    className={mergeClasses(
-                                        styles.connectorSegment,
-                                        styles.connectorTop,
-                                        previousStatus ? getConnectorToneClass(previousStatus) : undefined,
-                                    )}
-                                />
-                                {!isLast && (
-                                    <div
-                                        className={mergeClasses(
-                                            styles.connectorSegment,
-                                            styles.connectorBottom,
-                                            getConnectorToneClass(subFlowStep.status),
-                                        )}
-                                    />
-                                )}
-                                <AgentStepIcon status={subFlowStep.status} isCompact={isCompact} />
-                            </div>
-
-                            <div className={styles.stepBody}>
-                                <Text
-                                    size={200}
-                                    weight="semibold"
-                                    className={mergeClasses(styles.roleName, isCompact && styles.roleNameCompact)}
-                                >
-                                    Sub-flow #{subFlowStep.workItemNumber}
-                                </Text>
-                                <Caption1
-                                    className={mergeClasses(
-                                        isRunning ? styles.taskCaptionRunning : styles.taskCaption,
-                                        isCompact && styles.taskCaptionCompact,
-                                        isMobile && styles.taskCaptionMobile,
-                                    )}
-                                >
-                                    {subFlowStep.currentTask}
-                                </Caption1>
-                                {isRunning && subFlowStep.progress > 0 && (
-                                    <ProgressBar
-                                        className={mergeClasses(styles.stepProgress, isCompact && styles.stepProgressCompact)}
-                                        value={subFlowStep.progress}
-                                        thickness="medium"
-                                        color="brand"
-                                    />
-                                )}
-                            </div>
-
-                            <div className={styles.stepTrailing}>
-                                {isRunning && subFlowStep.progress > 0 && subFlowStep.progress < 1 && (
-                                    <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
-                                        {formatRunningProgressPercent(subFlowStep.progress)}
+                                        {formatRunningProgressPercent(step.progress)}
                                     </Text>
                                 )}
                             </div>
