@@ -3,33 +3,11 @@ import {
     makeStyles,
     mergeClasses,
     Button,
-    Input,
-    Tab,
-    TabList,
-    Toolbar,
-    ToolbarButton,
-    ToolbarDivider,
     Spinner,
-    Popover,
-    PopoverTrigger,
-    PopoverSurface,
-    Checkbox,
-    Text,
-    Divider,
-    Dropdown,
-    Option,
 } from '@fluentui/react-components'
 import {
-    SearchRegular,
-    FilterRegular,
     BoardRegular,
-    TextBulletListLtrRegular,
-    TextBulletListTreeRegular,
     AddRegular,
-    DismissRegular,
-    ArrowUploadRegular,
-    ArrowDownloadRegular,
-    DeleteRegular,
 } from '@fluentui/react-icons'
 import { EmptyState, PageHeader } from '../../components/shared'
 import { KanbanColumn, BacklogTreeTable, BacklogList, CreateWorkItemDialog, WorkItemDetailDialog, ManageLevelsDialog } from './'
@@ -44,36 +22,24 @@ import {
 } from '../../proxies'
 import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnection } from '../../hooks'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import type { WorkItem, WorkItemLevel, WorkItemState } from '../../models'
+import type { WorkItem, WorkItemState } from '../../models'
 import type { UpdateWorkItemRequest } from '../../proxies'
-import {
-    DEFAULT_WORK_ITEM_COLUMN_WIDTHS,
-    MIN_WORK_ITEM_COLUMN_WIDTHS,
-    WORK_ITEM_TABLE_COLUMNS,
-    type WorkItemTableColumnKey,
-} from './workItemTableColumns'
 import { appTokens } from '../../styles/appTokens'
 import {
-    WORK_ITEM_ASSIGNMENT_OPTION_LABELS,
     getWorkItemAssignmentSettings,
 } from './workItemAssignmentOptions'
 import { collectDescendantWorkItemNumbers } from './workItemSelection'
-
-const BOARD_STATES = ['New', 'Active', 'In Progress', 'In PR', 'Resolved', 'Closed']
-
-function getBoardColumns(items: WorkItem[]) {
-    return BOARD_STATES.map((state) => ({
-        state,
-        items: items.filter((item) => {
-            if (state === 'In Progress') {
-                return item.state === 'Planning (AI)' || item.state === 'In Progress' || item.state === 'In Progress (AI)'
-            }
-            if (state === 'In PR') return item.state === 'In-PR' || item.state === 'In-PR (AI)'
-            if (state === 'Resolved') return item.state === 'Resolved' || item.state === 'Resolved (AI)'
-            return item.state === state
-        }),
-    }))
-}
+import { WorkItemsHeaderActions } from './WorkItemsHeaderActions'
+import { WorkItemsToolbar, type WorkItemsViewMode } from './WorkItemsToolbar'
+import {
+    EMPTY_WORK_ITEM_FILTERS,
+    buildLevelMap,
+    filterWorkItems,
+    getBoardColumns,
+    sortWorkItemLevels,
+    type WorkItemFilters,
+} from './workItemFilters'
+import { useWorkItemColumnPreferences } from './useWorkItemColumnPreferences'
 
 const useStyles = makeStyles({
     root: {
@@ -307,79 +273,7 @@ const useStyles = makeStyles({
     },
 })
 
-const ALL_STATES: WorkItemState[] = ['New', 'Active', 'Planning (AI)', 'In Progress', 'In Progress (AI)', 'In-PR', 'In-PR (AI)', 'Resolved', 'Resolved (AI)', 'Closed']
-const ALL_PRIORITIES = [1, 2, 3, 4] as const
-const COLUMN_PREFS_STORAGE_PREFIX = 'fleet.work-items.columns.v1'
-
-interface StoredColumnPreferences {
-    collapsedColumns?: WorkItemTableColumnKey[]
-    columnWidths?: Partial<Record<WorkItemTableColumnKey, number>>
-}
-
-function getColumnPrefsStorageKey(projectId?: string): string {
-    return `${COLUMN_PREFS_STORAGE_PREFIX}:${projectId ?? 'global'}`
-}
-
-function sanitizeCollapsedColumns(
-    value: unknown,
-): Set<WorkItemTableColumnKey> {
-    if (!Array.isArray(value)) {
-        return new Set()
-    }
-
-    const allowed = new Set(WORK_ITEM_TABLE_COLUMNS.map((column) => column.key))
-    const next = new Set<WorkItemTableColumnKey>()
-    for (const item of value) {
-        if (typeof item !== 'string') {
-            continue
-        }
-
-        if (allowed.has(item as WorkItemTableColumnKey)) {
-            next.add(item as WorkItemTableColumnKey)
-        }
-    }
-
-    return next
-}
-
-function sanitizeColumnWidths(
-    value: unknown,
-): Record<WorkItemTableColumnKey, number> {
-    const next = { ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS }
-    if (!value || typeof value !== 'object') {
-        return next
-    }
-
-    for (const column of WORK_ITEM_TABLE_COLUMNS) {
-        const key = column.key
-        const rawWidth = (value as Partial<Record<WorkItemTableColumnKey, unknown>>)[key]
-        if (typeof rawWidth !== 'number' || Number.isNaN(rawWidth) || !Number.isFinite(rawWidth)) {
-            continue
-        }
-
-        next[key] = Math.max(
-            MIN_WORK_ITEM_COLUMN_WIDTHS[key],
-            Math.round(rawWidth),
-        )
-    }
-
-    return next
-}
-
-interface WorkItemFilters {
-    states: Set<WorkItemState>
-    priorities: Set<number>
-    levelKeys: Set<string>
-    aiOnly: boolean | null
-}
-
-const NO_TYPE_FILTER_KEY = '__none__'
-const EMPTY_FILTERS: WorkItemFilters = { states: new Set(), priorities: new Set(), levelKeys: new Set(), aiOnly: null }
 const WORK_ITEMS_FALLBACK_POLL_MS = 15000
-
-function isFiltered(filters: WorkItemFilters): boolean {
-    return filters.states.size > 0 || filters.priorities.size > 0 || filters.levelKeys.size > 0 || filters.aiOnly !== null
-}
 
 export function WorkItemsPage() {
     const styles = useStyles()
@@ -398,19 +292,22 @@ export function WorkItemsPage() {
         pollingInterval: workItemsPollingInterval,
     })
     const { data: levels } = useWorkItemLevels(projectId)
-    const [viewMode, setViewMode] = useState<'backlog' | 'list' | 'board'>('backlog')
+    const [viewMode, setViewMode] = useState<WorkItemsViewMode>('backlog')
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [manageLevelsOpen, setManageLevelsOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null)
-    const [filters, setFilters] = useState<WorkItemFilters>(EMPTY_FILTERS)
+    const [filters, setFilters] = useState<WorkItemFilters>(EMPTY_WORK_ITEM_FILTERS)
     const [selectedWorkItemNumbers, setSelectedWorkItemNumbers] = useState<Set<number>>(new Set())
     const [bulkState, setBulkState] = useState<WorkItemState | ''>('')
     const [bulkAssignmentLabel, setBulkAssignmentLabel] = useState('')
-    const [collapsedColumns, setCollapsedColumns] = useState<Set<WorkItemTableColumnKey>>(() => new Set())
-    const [columnWidths, setColumnWidths] = useState<Record<WorkItemTableColumnKey, number>>(
-        () => ({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS }),
-    )
+    const {
+        collapsedColumns,
+        columnWidths,
+        toggleColumnVisibility: handleToggleColumnVisibility,
+        resizeColumn: handleResizeColumn,
+        resetColumns: handleResetColumns,
+    } = useWorkItemColumnPreferences(projectId)
 
     const updateMutation = useUpdateWorkItem(projectId)
     const bulkUpdateMutation = useBulkUpdateWorkItems(projectId)
@@ -446,45 +343,6 @@ export function WorkItemsPage() {
         })
     }, [workItems])
 
-    useEffect(() => {
-        if (typeof window === 'undefined') {
-            return
-        }
-
-        try {
-            const raw = window.localStorage.getItem(getColumnPrefsStorageKey(projectId))
-            if (!raw) {
-                setCollapsedColumns(new Set())
-                setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
-                return
-            }
-
-            const parsed = JSON.parse(raw) as StoredColumnPreferences
-            setCollapsedColumns(sanitizeCollapsedColumns(parsed.collapsedColumns))
-            setColumnWidths(sanitizeColumnWidths(parsed.columnWidths))
-        } catch {
-            setCollapsedColumns(new Set())
-            setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
-        }
-    }, [projectId])
-
-    useEffect(() => {
-        if (typeof window === 'undefined') {
-            return
-        }
-
-        const payload: StoredColumnPreferences = {
-            collapsedColumns: Array.from(collapsedColumns),
-            columnWidths,
-        }
-
-        try {
-            window.localStorage.setItem(getColumnPrefsStorageKey(projectId), JSON.stringify(payload))
-        } catch {
-            // Ignore storage errors (for example private mode quota restrictions).
-        }
-    }, [collapsedColumns, columnWidths, projectId])
-
     const toggleSelection = useCallback((itemNumber: number, selected: boolean) => {
         setSelectedWorkItemNumbers((previous) => {
             const next = new Set(previous)
@@ -515,39 +373,6 @@ export function WorkItemsPage() {
 
     const clearSelection = useCallback(() => {
         setSelectedWorkItemNumbers(new Set())
-    }, [])
-
-    const handleToggleColumnVisibility = useCallback((column: WorkItemTableColumnKey, visible: boolean) => {
-        setCollapsedColumns((previous) => {
-            const next = new Set(previous)
-            if (visible) {
-                next.delete(column)
-            } else {
-                const definition = WORK_ITEM_TABLE_COLUMNS.find((entry) => entry.key === column)
-                if (definition?.collapsible) {
-                    next.add(column)
-                }
-            }
-            return next
-        })
-    }, [])
-
-    const handleResizeColumn = useCallback((column: WorkItemTableColumnKey, width: number) => {
-        setColumnWidths((previous) => {
-            const nextWidth = Math.max(
-                MIN_WORK_ITEM_COLUMN_WIDTHS[column],
-                Math.round(width),
-            )
-            if (previous[column] === nextWidth) {
-                return previous
-            }
-            return { ...previous, [column]: nextWidth }
-        })
-    }, [])
-
-    const handleResetColumns = useCallback(() => {
-        setCollapsedColumns(new Set())
-        setColumnWidths({ ...DEFAULT_WORK_ITEM_COLUMN_WIDTHS })
     }, [])
 
     const handleExportWorkItems = useCallback(async () => {
@@ -587,54 +412,9 @@ export function WorkItemsPage() {
         }
     }, [importWorkItemsMutation])
 
-    const levelMap = useMemo(() => {
-        const map = new Map<number, WorkItemLevel>()
-        for (const level of levels ?? []) {
-            map.set(level.id, level)
-        }
-        return map
-    }, [levels])
-    const sortedLevels = useMemo(
-        () => [...(levels ?? [])].sort((a, b) => a.ordinal - b.ordinal || a.name.localeCompare(b.name)),
-        [levels],
-    )
-
-    const items = useMemo(() => {
-        let all = workItems ?? []
-
-        // Apply filters
-        if (filters.states.size > 0) {
-            all = all.filter((wi) => filters.states.has(wi.state))
-        }
-        if (filters.priorities.size > 0) {
-            all = all.filter((wi) => filters.priorities.has(wi.priority))
-        }
-        if (filters.levelKeys.size > 0) {
-            all = all.filter((wi) => {
-                const key = wi.levelId == null ? NO_TYPE_FILTER_KEY : wi.levelId.toString()
-                return filters.levelKeys.has(key)
-            })
-        }
-        if (filters.aiOnly === true) {
-            all = all.filter((wi) => wi.isAI)
-        } else if (filters.aiOnly === false) {
-            all = all.filter((wi) => !wi.isAI)
-        }
-
-        // Apply text search
-        if (searchQuery) {
-            const q = searchQuery.toLowerCase()
-            all = all.filter(
-                (wi) =>
-                    wi.title.toLowerCase().includes(q) ||
-                    wi.description.toLowerCase().includes(q) ||
-                    wi.assignedTo.toLowerCase().includes(q) ||
-                    wi.tags.some((t) => t.toLowerCase().includes(q)),
-            )
-        }
-
-        return all
-    }, [workItems, searchQuery, filters])
+    const levelMap = useMemo(() => buildLevelMap(levels), [levels])
+    const sortedLevels = useMemo(() => sortWorkItemLevels(levels), [levels])
+    const items = useMemo(() => filterWorkItems(workItems ?? [], filters, searchQuery), [workItems, searchQuery, filters])
     const totalWorkItemCount = workItems?.length ?? 0
 
     const boardColumns = useMemo(() => getBoardColumns(items), [items])
@@ -744,302 +524,49 @@ export function WorkItemsPage() {
                     title="Work Items"
                     subtitle="Shape the backlog, filter what matters, and keep execution-ready work easy to act on."
                     actions={
-                        <div className={mergeClasses(styles.headerActions, isMobile && styles.headerActionsMobile)}>
-                            <input
-                                ref={importFileInputRef}
-                                type="file"
-                                accept=".json,application/json"
-                                style={{ display: 'none' }}
-                                onChange={handleImportFileChange}
-                            />
-                            <Button
-                                appearance="secondary"
-                                icon={<ArrowUploadRegular />}
-                                onClick={handleImportClick}
-                                disabled={importWorkItemsMutation.isPending}
-                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
-                            >
-                                Import
-                            </Button>
-                            <Button
-                                appearance="secondary"
-                                icon={<ArrowDownloadRegular />}
-                                onClick={() => void handleExportWorkItems()}
-                                disabled={exportWorkItemsMutation.isPending || !projectId}
-                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
-                            >
-                                Export
-                            </Button>
-                            <Button
-                                appearance="primary"
-                                icon={<AddRegular />}
-                                onClick={() => setCreateDialogOpen(true)}
-                                className={mergeClasses(isMobile && styles.headerActionButtonMobile)}
-                            >
-                                New Work Item
-                            </Button>
-                        </div>
+                        <WorkItemsHeaderActions
+                            isMobile={isMobile}
+                            importFileInputRef={importFileInputRef}
+                            onImportFileChange={handleImportFileChange}
+                            onImportClick={handleImportClick}
+                            onExport={() => void handleExportWorkItems()}
+                            onCreate={() => setCreateDialogOpen(true)}
+                            importPending={importWorkItemsMutation.isPending}
+                            exportPending={exportWorkItemsMutation.isPending}
+                            canExport={Boolean(projectId)}
+                        />
                     }
                 />
-
-                <div className={mergeClasses(styles.toolbarRow, isMobile && styles.toolbarRowMobile)}>
-                    <div className={mergeClasses(styles.toolbarLeft, isMobile && styles.toolbarLeftMobile)}>
-                        <TabList
-                            className={mergeClasses(isMobile && styles.viewTabsMobile)}
-                            selectedValue={viewMode}
-                            onTabSelect={(_e, data) => setViewMode(data.value as 'backlog' | 'list' | 'board')}
-                            size="small"
-                        >
-                            <Tab value="backlog" icon={<TextBulletListTreeRegular />}>Backlog</Tab>
-                            <Tab value="list" icon={<TextBulletListLtrRegular />}>List</Tab>
-                            <Tab value="board" icon={<BoardRegular />}>Board</Tab>
-                        </TabList>
-                        <Toolbar className={mergeClasses(styles.inlineToolbar, isMobile && styles.inlineToolbarMobile)}>
-                            <Input
-                                className={mergeClasses(styles.searchInput, isMobile && styles.searchInputMobile)}
-                                placeholder="Search work items..."
-                                size="small"
-                                appearance="underline"
-                                value={searchQuery}
-                                onChange={(_e, data) => setSearchQuery(data.value)}
-                                contentBefore={<SearchRegular />}
-                            />
-                            <Popover withArrow>
-                                <PopoverTrigger disableButtonEnhancement>
-                                    <ToolbarButton
-                                        className={mergeClasses(
-                                            styles.filterTriggerButton,
-                                            isFiltered(filters) && styles.filterTriggerActive,
-                                        )}
-                                        icon={<FilterRegular />}
-                                        appearance="transparent"
-                                        aria-label={isFiltered(filters) ? 'Filters active' : 'Filters'}
-                                        title={isFiltered(filters) ? 'Filters active' : 'Filters'}
-                                    />
-                                </PopoverTrigger>
-                                <PopoverSurface className={mergeClasses(styles.filterSurface, isMobile && styles.filterSurfaceMobile)}>
-                                    <div className={styles.filterHeader}>
-                                        <Text weight="semibold" size={300}>Filters</Text>
-                                        {isFiltered(filters) && (
-                                            <Button
-                                                appearance="subtle"
-                                                size="small"
-                                                icon={<DismissRegular />}
-                                                onClick={() => setFilters(EMPTY_FILTERS)}
-                                            >
-                                                Clear
-                                            </Button>
-                                        )}
-                                    </div>
-                                    <Divider />
-                                    <div className={styles.filterSection}>
-                                        <Text size={200} weight="semibold">State</Text>
-                                        {ALL_STATES.map((state) => (
-                                            <Checkbox
-                                                key={state}
-                                                label={state}
-                                                size="medium"
-                                                checked={filters.states.has(state)}
-                                                onChange={(_e, data) => {
-                                                    setFilters((prev) => {
-                                                        const next = new Set(prev.states)
-                                                        if (data.checked) next.add(state); else next.delete(state)
-                                                        return { ...prev, states: next }
-                                                    })
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                    <Divider />
-                                    <div className={styles.filterSection}>
-                                        <Text size={200} weight="semibold">Priority</Text>
-                                        {ALL_PRIORITIES.map((p) => (
-                                            <Checkbox
-                                                key={p}
-                                                label={`Priority ${p}`}
-                                                size="medium"
-                                                checked={filters.priorities.has(p)}
-                                                onChange={(_e, data) => {
-                                                    setFilters((prev) => {
-                                                        const next = new Set(prev.priorities)
-                                                        if (data.checked) next.add(p); else next.delete(p)
-                                                        return { ...prev, priorities: next }
-                                                    })
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                    <Divider />
-                                    <div className={styles.filterSection}>
-                                        <Text size={200} weight="semibold">Type</Text>
-                                        <Checkbox
-                                            label="No type"
-                                            size="medium"
-                                            checked={filters.levelKeys.has(NO_TYPE_FILTER_KEY)}
-                                            onChange={(_e, data) => {
-                                                setFilters((prev) => {
-                                                    const next = new Set(prev.levelKeys)
-                                                    if (data.checked) next.add(NO_TYPE_FILTER_KEY); else next.delete(NO_TYPE_FILTER_KEY)
-                                                    return { ...prev, levelKeys: next }
-                                                })
-                                            }}
-                                        />
-                                        {sortedLevels.map((level) => {
-                                            const key = level.id.toString()
-                                            return (
-                                                <Checkbox
-                                                    key={level.id}
-                                                    label={level.name}
-                                                    size="medium"
-                                                    checked={filters.levelKeys.has(key)}
-                                                    onChange={(_e, data) => {
-                                                        setFilters((prev) => {
-                                                            const next = new Set(prev.levelKeys)
-                                                            if (data.checked) next.add(key); else next.delete(key)
-                                                            return { ...prev, levelKeys: next }
-                                                        })
-                                                    }}
-                                                />
-                                            )
-                                        })}
-                                    </div>
-                                    <Divider />
-                                    <div className={styles.filterSection}>
-                                        <Text size={200} weight="semibold">AI</Text>
-                                        <Checkbox
-                                            label="AI-assigned only"
-                                            size="medium"
-                                            checked={filters.aiOnly === true}
-                                            onChange={(_e, data) => setFilters((prev) => ({ ...prev, aiOnly: data.checked ? true : null }))}
-                                        />
-                                        <Checkbox
-                                            label="Human-assigned only"
-                                            size="medium"
-                                            checked={filters.aiOnly === false}
-                                            onChange={(_e, data) => setFilters((prev) => ({ ...prev, aiOnly: data.checked ? false : null }))}
-                                        />
-                                    </div>
-                                </PopoverSurface>
-                            </Popover>
-                            <Popover withArrow>
-                                <PopoverTrigger disableButtonEnhancement>
-                                    <ToolbarButton>Columns</ToolbarButton>
-                                </PopoverTrigger>
-                                <PopoverSurface className={mergeClasses(styles.columnSurface, isMobile && styles.columnSurfaceMobile)}>
-                                    <div className={styles.columnHeader}>
-                                        <Text weight="semibold" size={300}>Columns</Text>
-                                        <Button
-                                            appearance="subtle"
-                                            size="small"
-                                            icon={<DismissRegular />}
-                                            onClick={handleResetColumns}
-                                        >
-                                            Reset
-                                        </Button>
-                                    </div>
-                                    <Divider />
-                                    <Text className={styles.columnHint}>
-                                        Toggle visibility here. Drag table header separators to resize.
-                                    </Text>
-                                    {WORK_ITEM_TABLE_COLUMNS.map((column) => {
-                                        const visible = !collapsedColumns.has(column.key)
-                                        return (
-                                            <Checkbox
-                                                key={column.key}
-                                                label={column.label}
-                                                checked={visible}
-                                                disabled={!column.collapsible}
-                                                onChange={(_event, data) => {
-                                                    handleToggleColumnVisibility(column.key, data.checked === true)
-                                                }}
-                                            />
-                                        )
-                                    })}
-                                </PopoverSurface>
-                            </Popover>
-                            <ToolbarDivider />
-                            <ToolbarButton onClick={() => setManageLevelsOpen(true)}>Levels</ToolbarButton>
-                            {selectedCount > 0 && (
-                                <>
-                                    <ToolbarDivider />
-                                    <div className={mergeClasses(styles.bulkActions, isMobile && styles.bulkActionsMobile)}>
-                                        <Text size={200} className={styles.bulkLabel}>
-                                            {selectedCount} selected
-                                        </Text>
-                                        <Dropdown
-                                            className={mergeClasses(styles.bulkStateDropdown, isMobile && styles.bulkStateDropdownMobile)}
-                                            size="small"
-                                            placeholder="State"
-                                            selectedOptions={bulkState ? [bulkState] : []}
-                                            onOptionSelect={(_event, data) => {
-                                                setBulkState((data.optionValue as WorkItemState | undefined) ?? '')
-                                            }}
-                                        >
-                                            <Option value="">No state change</Option>
-                                            {ALL_STATES.map((state) => (
-                                                <Option key={state} value={state}>{state}</Option>
-                                            ))}
-                                        </Dropdown>
-                                        <Dropdown
-                                            className={mergeClasses(styles.bulkAssignmentDropdown, isMobile && styles.bulkAssignmentDropdownMobile)}
-                                            size="small"
-                                            placeholder="Assignment"
-                                            selectedOptions={bulkAssignmentLabel ? [bulkAssignmentLabel] : []}
-                                            value={bulkAssignmentLabel}
-                                            onOptionSelect={(_event, data) => {
-                                                setBulkAssignmentLabel((data.optionValue as string | undefined) ?? '')
-                                            }}
-                                        >
-                                            <Option value="">No assignment change</Option>
-                                            {WORK_ITEM_ASSIGNMENT_OPTION_LABELS.map((label) => (
-                                                <Option key={label} value={label}>{label}</Option>
-                                            ))}
-                                        </Dropdown>
-                                        <Button
-                                            appearance="secondary"
-                                            size="small"
-                                            disabled={descendantSelection.length === 0}
-                                            onClick={handleSelectDescendants}
-                                        >
-                                            {descendantSelection.length > 0
-                                                ? `Select Descendants (${descendantSelection.length})`
-                                                : 'Select Descendants'}
-                                        </Button>
-                                        <Button
-                                            appearance="primary"
-                                            size="small"
-                                            disabled={!canApplyBulkChanges || bulkUpdateMutation.isPending}
-                                            onClick={handleApplyBulkChanges}
-                                        >
-                                            Apply
-                                        </Button>
-                                        <Button
-                                            appearance="subtle"
-                                            size="small"
-                                            icon={<DeleteRegular />}
-                                            disabled={bulkDeleteMutation.isPending || bulkUpdateMutation.isPending}
-                                            onClick={handleDeleteSelected}
-                                        >
-                                            Delete Selected
-                                        </Button>
-                                        <Button
-                                            appearance="subtle"
-                                            size="small"
-                                            disabled={bulkDeleteMutation.isPending || bulkUpdateMutation.isPending}
-                                            onClick={() => {
-                                                clearSelection()
-                                                setBulkState('')
-                                                setBulkAssignmentLabel('')
-                                            }}
-                                        >
-                                            Clear Selection
-                                        </Button>
-                                    </div>
-                                </>
-                            )}
-                        </Toolbar>
-                    </div>
-                </div>
+                <WorkItemsToolbar
+                    isMobile={isMobile}
+                    viewMode={viewMode}
+                    searchQuery={searchQuery}
+                    filters={filters}
+                    levels={sortedLevels}
+                    collapsedColumns={collapsedColumns}
+                    selectedCount={selectedCount}
+                    bulkState={bulkState}
+                    bulkAssignmentLabel={bulkAssignmentLabel}
+                    descendantSelectionCount={descendantSelection.length}
+                    canApplyBulkChanges={canApplyBulkChanges}
+                    isMutatingBulkActions={bulkDeleteMutation.isPending || bulkUpdateMutation.isPending}
+                    onViewModeChange={setViewMode}
+                    onSearchQueryChange={setSearchQuery}
+                    onFiltersChange={setFilters}
+                    onToggleColumnVisibility={handleToggleColumnVisibility}
+                    onResetColumns={handleResetColumns}
+                    onManageLevels={() => setManageLevelsOpen(true)}
+                    onBulkStateChange={setBulkState}
+                    onBulkAssignmentChange={setBulkAssignmentLabel}
+                    onSelectDescendants={handleSelectDescendants}
+                    onApplyBulkChanges={handleApplyBulkChanges}
+                    onDeleteSelected={handleDeleteSelected}
+                    onClearSelection={() => {
+                        clearSelection()
+                        setBulkState('')
+                        setBulkAssignmentLabel('')
+                    }}
+                />
 
                 {items.length === 0 ? (
                     <EmptyState
@@ -1057,7 +584,7 @@ export function WorkItemsPage() {
                                 appearance="secondary"
                                 onClick={() => {
                                     setSearchQuery('')
-                                    setFilters(EMPTY_FILTERS)
+                                    setFilters(EMPTY_WORK_ITEM_FILTERS)
                                 }}
                             >
                                 Clear Filters

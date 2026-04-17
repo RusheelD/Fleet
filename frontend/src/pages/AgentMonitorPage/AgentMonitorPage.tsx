@@ -33,7 +33,8 @@ import { useCurrentProject, usePreferences, useIsMobile, useServerEventConnectio
 import { hasExecutionDocumentation } from './executionDocs'
 import { appTokens, APP_NARROW_LAYOUT_MEDIA_QUERY } from '../../styles/appTokens'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
-import { executionTreeHasAnyStatus, findExecutionInCollection, flattenExecutionCollection } from '../../models/executionTree'
+import { executionTreeHasAnyStatus, findExecutionInCollection } from '../../models/executionTree'
+import { countActiveAgents, countActiveFlows } from './monitorSummary'
 
 const LIVE_FALLBACK_POLL_MS = 5000
 const IDLE_FALLBACK_POLL_MS = 15000
@@ -298,11 +299,11 @@ export function AgentMonitorPage() {
 
     const allExecutions = useMemo(() => executions ?? [], [executions])
     const allLogs = useMemo(() => logs ?? [], [logs])
-    const flattenedExecutions = useMemo(() => flattenExecutionCollection(allExecutions), [allExecutions])
     const active = useMemo(
         () => allExecutions.filter((execution) => executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES)),
         [allExecutions],
     )
+    const activeFlowCount = useMemo(() => countActiveFlows(allExecutions), [allExecutions])
     const paused = useMemo(
         () => allExecutions.filter((execution) =>
             !executionTreeHasAnyStatus(execution, ACTIVE_EXECUTION_STATUSES) &&
@@ -312,13 +313,7 @@ export function AgentMonitorPage() {
     const completed = useMemo(() => allExecutions.filter((e) => e.status === 'completed'), [allExecutions])
     const failed = useMemo(() => allExecutions.filter((e) => e.status === 'failed'), [allExecutions])
     const cancelled = useMemo(() => allExecutions.filter((e) => e.status === 'cancelled'), [allExecutions])
-    const activeAgentCount = useMemo(
-        () => flattenedExecutions.reduce(
-            (count, execution) => count + execution.agents.filter((agent) => agent.status === 'running').length,
-            0,
-        ),
-        [flattenedExecutions],
-    )
+    const activeAgentCount = useMemo(() => countActiveAgents(allExecutions), [allExecutions])
 
     const filteredByTab =
         tab === 'active' ? active :
@@ -656,7 +651,7 @@ export function AgentMonitorPage() {
                 <SummaryCard
                     icon={<PlayRegular />}
                     iconClassName={styles.summaryIconWarning}
-                    value={active.length}
+                    value={activeFlowCount}
                     label="Active Flows"
                     onClick={() => setTab('active')}
                     isActive={tab === 'active'}

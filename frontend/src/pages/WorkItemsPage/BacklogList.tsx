@@ -19,11 +19,11 @@ import { StateDot } from './StateDot'
 import { formatWorkItemState } from './stateLabel'
 import {
     buildWorkItemGridTemplateColumns,
-    MIN_WORK_ITEM_COLUMN_WIDTHS,
     type WorkItemTableColumnKey,
 } from './workItemTableColumns'
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
+import { useResizableWorkItemColumns } from './useResizableWorkItemColumns'
 
 /* ── Sortable columns ─────────────────────────────────────── */
 type SortKey = 'type' | 'title' | 'state' | 'id' | 'difficulty' | 'assignedTo' | 'priority'
@@ -296,11 +296,6 @@ export function BacklogList({
         () => buildWorkItemGridTemplateColumns(columnWidths, collapsedColumns),
         [columnWidths, collapsedColumns],
     )
-    const activeResizeRef = useRef<{
-        column: WorkItemTableColumnKey
-        startX: number
-        startWidth: number
-    } | null>(null)
 
     const handleSort = useCallback((key: SortKey) => {
         setSortKey((prev) => {
@@ -313,40 +308,10 @@ export function BacklogList({
         })
     }, [])
 
-    const startResizingColumn = useCallback((event: React.MouseEvent, column: WorkItemTableColumnKey) => {
-        if (!onResizeColumn) {
-            return
-        }
-
-        event.preventDefault()
-        event.stopPropagation()
-
-        const startWidth = columnWidths[column]
-        activeResizeRef.current = { column, startX: event.clientX, startWidth }
-
-        const handleMouseMove = (moveEvent: MouseEvent) => {
-            const active = activeResizeRef.current
-            if (!active) {
-                return
-            }
-
-            const delta = moveEvent.clientX - active.startX
-            const nextWidth = Math.max(
-                MIN_WORK_ITEM_COLUMN_WIDTHS[active.column],
-                active.startWidth + delta,
-            )
-            onResizeColumn(active.column, nextWidth)
-        }
-
-        const handleMouseUp = () => {
-            activeResizeRef.current = null
-            window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('mouseup', handleMouseUp)
-        }
-
-        window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('mouseup', handleMouseUp)
-    }, [columnWidths, onResizeColumn])
+    const startResizingColumn = useResizableWorkItemColumns({
+        columnWidths,
+        onResizeColumn,
+    })
 
     const getLevel = useCallback(
         (item: WorkItem): WorkItemLevel | undefined =>

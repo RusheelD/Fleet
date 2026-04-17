@@ -424,9 +424,11 @@ public class ChatServiceTests
             .ReturnsAsync(new LLMResponse("Hi there!", null));
 
         var result = await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+        var assistantMessage = result.AssistantMessage;
 
         Assert.AreEqual(SessionId, result.SessionId);
-        Assert.AreEqual("Hi there!", result.AssistantMessage.Content);
+        Assert.IsNotNull(assistantMessage);
+        Assert.AreEqual("Hi there!", assistantMessage.Content);
         Assert.AreEqual(0, result.ToolEvents.Length);
         Assert.IsNull(result.Error);
     }
@@ -459,8 +461,10 @@ public class ChatServiceTests
             .ReturnsAsync(new LLMResponse(null, null));
 
         var result = await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+        var assistantMessage = result.AssistantMessage;
 
-        Assert.AreEqual("I wasn't able to generate a response.", result.AssistantMessage.Content);
+        Assert.IsNotNull(assistantMessage);
+        Assert.AreEqual("I wasn't able to generate a response.", assistantMessage.Content);
     }
 
     [TestMethod]
@@ -533,8 +537,10 @@ public class ChatServiceTests
             .ThrowsAsync(new Exception("RESOURCE_EXHAUSTED: quota exceeded"));
 
         var result = await _sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+        var assistantMessage = result.AssistantMessage;
 
-        Assert.IsTrue(result.AssistantMessage.Content.Contains("quota", StringComparison.OrdinalIgnoreCase));
+        Assert.IsNotNull(assistantMessage);
+        Assert.IsTrue(assistantMessage.Content.Contains("quota", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -585,11 +591,13 @@ public class ChatServiceTests
             });
 
         var result = await sut.SendMessageAsync(ProjectId, SessionId, "Hello");
+        var assistantMessage = result.AssistantMessage;
 
         Assert.AreEqual(1, result.ToolEvents.Length);
         Assert.AreEqual("test_tool", result.ToolEvents[0].ToolName);
         Assert.AreEqual("Tool result", result.ToolEvents[0].Result);
-        Assert.AreEqual("Here's what I found", result.AssistantMessage.Content);
+        Assert.IsNotNull(assistantMessage);
+        Assert.AreEqual("Here's what I found", assistantMessage.Content);
     }
 
     [TestMethod]
@@ -673,9 +681,11 @@ public class ChatServiceTests
             .ReturnsAsync(() => responses.Dequeue());
 
         var result = await sut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+        var assistantMessage = result.AssistantMessage;
 
         Assert.AreEqual(1, writeTool.ExecuteCount);
-        Assert.AreEqual("Created work items", result.AssistantMessage.Content);
+        Assert.IsNotNull(assistantMessage);
+        Assert.AreEqual("Created work items", assistantMessage.Content);
         Assert.IsTrue(requests.Any(request =>
             request.Messages.Any(message =>
                 message.Content != null &&

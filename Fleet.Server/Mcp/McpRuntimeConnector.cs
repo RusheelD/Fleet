@@ -79,7 +79,7 @@ public class McpRuntimeConnector(
                 WorkingDirectory = string.IsNullOrWhiteSpace(server.WorkingDirectory) ? null : server.WorkingDirectory,
                 EnvironmentVariables = server.EnvironmentVariables
                     .Where(pair => pair.Value is not null)
-                    .ToDictionary(pair => pair.Key, pair => (string?)pair.Value!, StringComparer.OrdinalIgnoreCase),
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
                 StandardErrorLines = line =>
                 {
                     if (!string.IsNullOrWhiteSpace(line))

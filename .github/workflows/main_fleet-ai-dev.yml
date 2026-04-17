@@ -18,7 +18,7 @@ env:
   IMAGE_NAME: fleet-ai-dev
   IMAGE_TAG: ${{ github.sha }}
   DOTNET_VERSION: 10.0.x
-  NODE_VERSION: 20.x
+  NODE_VERSION: 20.16.0
   PUBLISH_DIR: publish
 
 jobs:

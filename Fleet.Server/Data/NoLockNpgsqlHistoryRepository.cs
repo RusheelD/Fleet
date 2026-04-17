@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+#pragma warning disable EF1001 // Intentional provider-specific history repository customization for migrations locking behavior.
 using Npgsql.EntityFrameworkCore.PostgreSQL.Migrations.Internal;
+#pragma warning restore EF1001
 
 namespace Fleet.Server.Data;
 
+#pragma warning disable EF1001 // Intentional provider-specific history repository customization for migrations locking behavior.
 internal sealed class NoLockNpgsqlHistoryRepository(HistoryRepositoryDependencies dependencies)
     : NpgsqlHistoryRepository(dependencies)
 {
@@ -161,3 +164,4 @@ internal sealed class NoLockNpgsqlHistoryRepository(HistoryRepositoryDependencie
             => Task.FromResult<IMigrationsDatabaseLock>(this);
     }
 }
+#pragma warning restore EF1001

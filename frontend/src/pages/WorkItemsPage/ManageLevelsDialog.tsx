@@ -2,8 +2,6 @@ import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
     makeStyles,
     Button,
-    Input,
-    Field,
     Dialog,
     DialogSurface,
     DialogTitle,
@@ -12,29 +10,19 @@ import {
     DialogActions,
     Text,
     Caption1,
-    Tooltip,
-    Dropdown,
-    Option,
 } from '@fluentui/react-components'
-import {
-    AddRegular,
-    DeleteRegular,
-    SaveRegular,
-    ArrowUpRegular,
-    ArrowDownRegular,
-    DismissRegular,
-    EditRegular,
-} from '@fluentui/react-icons'
+import { AddRegular } from '@fluentui/react-icons'
 import {
     useWorkItemLevels,
     useCreateWorkItemLevel,
     useUpdateWorkItemLevel,
     useDeleteWorkItemLevel,
-    resolveLevelIcon,
-    LEVEL_ICON_NAMES,
 } from '../../proxies'
 import type { WorkItemLevel } from '../../models'
 import { APP_MOBILE_MEDIA_QUERY, appTokens } from '../../styles/appTokens'
+import type { EditState } from './workItemLevelEditorTypes'
+import { WorkItemLevelEditForm } from './WorkItemLevelEditForm'
+import { WorkItemLevelRow } from './WorkItemLevelRow'
 
 const useStyles = makeStyles({
     dialogSurface: {
@@ -189,14 +177,6 @@ const useStyles = makeStyles({
 
 const DEFAULT_COLORS = appTokens.palette.workItemLevels
 
-interface EditState {
-    id: number | null // null = new level
-    name: string
-    iconName: string
-    color: string
-    ordinal: number
-}
-
 interface ManageLevelsDialogProps {
     projectId: string
     open: boolean
@@ -320,80 +300,52 @@ export function ManageLevelsDialog({ projectId, open, onOpenChange }: ManageLeve
                             <div className={styles.levelList}>
                                 {sorted.map((level, idx) =>
                                     editState?.id === level.id ? (
-                                        <LevelEditForm
+                                        <WorkItemLevelEditForm
                                             key={level.id}
                                             editState={editState}
                                             setEditState={setEditState}
                                             onSave={handleSave}
                                             onCancel={handleCancelEdit}
                                             isBusy={isBusy}
-                                            styles={styles}
+                                            defaultColors={DEFAULT_COLORS}
+                                            editFormClassName={styles.editForm}
+                                            editFormRowClassName={styles.editFormRow}
+                                            colorPreviewClassName={styles.colorPreview}
+                                            editActionsClassName={styles.editActions}
+                                            editActionButtonMobileClassName={styles.editActionButtonMobile}
                                         />
                                     ) : (
-                                        <div key={level.id} className={styles.levelRow}>
-                                            <span className={styles.levelIcon} style={{ color: level.color }}>
-                                                {resolveLevelIcon(level.iconName)}
-                                            </span>
-                                            <div className={styles.levelPreview}>
-                                                <Text weight="semibold" size={200}>{level.name}</Text>
-                                                {level.isDefault && (
-                                                    <Caption1>(default)</Caption1>
-                                                )}
-                                            </div>
-                                            <div className={styles.levelActions}>
-                                                <Tooltip content="Move up" relationship="label">
-                                                    <Button
-                                                        appearance="subtle"
-                                                        size="small"
-                                                        icon={<ArrowUpRegular />}
-                                                        disabled={idx === 0 || isBusy}
-                                                        onClick={() => handleMoveUp(level)}
-                                                        aria-label="Move up"
-                                                    />
-                                                </Tooltip>
-                                                <Tooltip content="Move down" relationship="label">
-                                                    <Button
-                                                        appearance="subtle"
-                                                        size="small"
-                                                        icon={<ArrowDownRegular />}
-                                                        disabled={idx === sorted.length - 1 || isBusy}
-                                                        onClick={() => handleMoveDown(level)}
-                                                        aria-label="Move down"
-                                                    />
-                                                </Tooltip>
-                                                <Tooltip content="Edit" relationship="label">
-                                                    <Button
-                                                        appearance="subtle"
-                                                        size="small"
-                                                        icon={<EditRegular />}
-                                                        disabled={isBusy}
-                                                        onClick={() => handleStartEdit(level)}
-                                                        aria-label="Edit"
-                                                    />
-                                                </Tooltip>
-                                                <Tooltip content="Delete" relationship="label">
-                                                    <Button
-                                                        appearance="subtle"
-                                                        size="small"
-                                                        icon={<DeleteRegular />}
-                                                        disabled={isBusy}
-                                                        onClick={() => handleDelete(level.id)}
-                                                        aria-label="Delete"
-                                                    />
-                                                </Tooltip>
-                                            </div>
-                                        </div>
+                                        <WorkItemLevelRow
+                                            key={level.id}
+                                            level={level}
+                                            index={idx}
+                                            totalCount={sorted.length}
+                                            isBusy={isBusy}
+                                            levelRowClassName={styles.levelRow}
+                                            levelIconClassName={styles.levelIcon}
+                                            levelPreviewClassName={styles.levelPreview}
+                                            levelActionsClassName={styles.levelActions}
+                                            onMoveUp={handleMoveUp}
+                                            onMoveDown={handleMoveDown}
+                                            onEdit={handleStartEdit}
+                                            onDelete={handleDelete}
+                                        />
                                     ),
                                 )}
 
                                 {editState?.id === null && (
-                                    <LevelEditForm
+                                    <WorkItemLevelEditForm
                                         editState={editState}
                                         setEditState={setEditState}
                                         onSave={handleSave}
                                         onCancel={handleCancelEdit}
                                         isBusy={isBusy}
-                                        styles={styles}
+                                        defaultColors={DEFAULT_COLORS}
+                                        editFormClassName={styles.editForm}
+                                        editFormRowClassName={styles.editFormRow}
+                                        colorPreviewClassName={styles.colorPreview}
+                                        editActionsClassName={styles.editActions}
+                                        editActionButtonMobileClassName={styles.editActionButtonMobile}
                                     />
                                 )}
                             </div>
@@ -418,92 +370,5 @@ export function ManageLevelsDialog({ projectId, open, onOpenChange }: ManageLeve
                 </DialogBody>
             </DialogSurface>
         </Dialog>
-    )
-}
-
-interface LevelEditFormProps {
-    editState: EditState
-    setEditState: (state: EditState | null) => void
-    onSave: () => void
-    onCancel: () => void
-    isBusy: boolean
-    styles: ReturnType<typeof useStyles>
-}
-
-function LevelEditForm({ editState, setEditState, onSave, onCancel, isBusy, styles }: LevelEditFormProps) {
-    return (
-        <div className={styles.editForm}>
-            <Field label="Name" required>
-                <Input
-                    value={editState.name}
-                    onChange={(_e, data) => setEditState({ ...editState, name: data.value })}
-                    placeholder="Level name"
-                />
-            </Field>
-            <div className={styles.editFormRow}>
-                <Field label="Icon">
-                    <Dropdown
-                        value={editState.iconName}
-                        onOptionSelect={(_e, data) => setEditState({ ...editState, iconName: data.optionValue ?? 'circle' })}
-                    >
-                        {LEVEL_ICON_NAMES.map((iconName) => (
-                            <Option key={iconName} value={iconName} text={iconName}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', color: editState.color }}>
-                                        {resolveLevelIcon(iconName)}
-                                    </span>
-                                    {iconName}
-                                </span>
-                            </Option>
-                        ))}
-                    </Dropdown>
-                </Field>
-                <Field label="Color">
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', paddingTop: '4px' }}>
-                        {DEFAULT_COLORS.map((c) => (
-                            <Tooltip key={c} content={c} relationship="label">
-                                <div
-                                    className={styles.colorPreview}
-                                    style={{
-                                        backgroundColor: c,
-                                        outline: editState.color === c ? `2px solid ${appTokens.color.brandStroke}` : undefined,
-                                        outlineOffset: '1px',
-                                    }}
-                                    onClick={() => setEditState({ ...editState, color: c })}
-                                />
-                            </Tooltip>
-                        ))}
-                        <input
-                            type="color"
-                            value={editState.color}
-                            onChange={(e) => setEditState({ ...editState, color: e.target.value })}
-                            style={{ width: '32px', height: '28px', padding: 0, border: 'none', cursor: 'pointer' }}
-                        />
-                    </div>
-                </Field>
-            </div>
-            <div className={styles.editActions}>
-                <Button
-                    appearance="subtle"
-                    icon={<DismissRegular />}
-                    onClick={onCancel}
-                    disabled={isBusy}
-                    size="small"
-                    className={styles.editActionButtonMobile}
-                >
-                    Cancel
-                </Button>
-                <Button
-                    appearance="primary"
-                    icon={<SaveRegular />}
-                    onClick={onSave}
-                    disabled={!editState.name.trim() || isBusy}
-                    size="small"
-                    className={styles.editActionButtonMobile}
-                >
-                    {editState.id === null ? 'Add' : 'Save'}
-                </Button>
-            </div>
-        </div>
     )
 }

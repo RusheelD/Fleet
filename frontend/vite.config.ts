@@ -105,8 +105,16 @@ export default defineConfig((config: ConfigEnv): UserConfig => {
               return
             }
 
-            if (normalizedId.includes('@fluentui') || normalizedId.includes('@griffel')) {
-              return 'fluentui'
+            if (normalizedId.includes('@fluentui/react-icons')) {
+              return 'fluentui-icons'
+            }
+
+            if (normalizedId.includes('@griffel')) {
+              return 'griffel'
+            }
+
+            if (normalizedId.includes('@fluentui')) {
+              return 'fluentui-components'
             }
 
             if (normalizedId.includes('@azure/msal')) {

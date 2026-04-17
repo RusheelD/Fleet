@@ -5,10 +5,8 @@ import {
     Text,
     Card,
     Button,
-    Badge,
     Divider,
     ProgressBar,
-    Spinner,
     Toast,
     ToastTitle,
     useToastController,
@@ -19,106 +17,27 @@ import {
     PauseRegular,
     StopRegular,
     ArrowClockwiseRegular,
-    ChevronDownRegular,
-    ChevronUpRegular,
     ClockRegular,
     CodeRegular,
     DocumentRegular,
     DeleteRegular,
     BranchRegular,
-    CheckmarkCircleFilled,
-    DismissCircleFilled,
-    CircleRegular,
 } from '@fluentui/react-icons'
 import type { AgentExecution, WorkItem } from '../../models'
 import { usePreferences, useIsMobile } from '../../hooks'
 import { openPullRequest, openPullRequestDiff } from './pullRequest'
 import { appTokens } from '../../styles/appTokens'
-import { InfoBadge } from '../../components/shared/InfoBadge'
-import { FleetRocketLogo } from '../../components/shared'
 import { useState } from 'react'
-import { getNextSubFlowExpansionState, isSubFlowExpandedByDefault } from './subFlowExpansion'
+import { getNextSubFlowExpansionState } from './subFlowExpansion'
+import { ExecutionPipeline } from './ExecutionPipeline'
+import { ExecutionStatusBadge } from './ExecutionStatusBadge'
+import { formatTimestamp } from './executionFormatting'
+import { buildPlannedSubFlowSteps } from './plannedSubFlows'
+import { SubFlowExecutionList } from './SubFlowExecutionList'
 import {
     buildPipelineDisplaySteps,
-    type ExecutionStepStatus,
     type DisplayAgentInfo,
-    type PlannedSubFlowStep,
 } from './pipelineDisplay'
-
-const NON_ACTIONABLE_SUBFLOW_STATES = new Set<WorkItem['state']>([
-    'In-PR',
-    'In-PR (AI)',
-    'Resolved',
-    'Resolved (AI)',
-    'Closed',
-])
-
-function getSubFlowDisplayPriority(status: ExecutionStepStatus): number {
-    switch (status) {
-        case 'completed':
-            return 0
-        case 'running':
-            return 1
-        case 'queued':
-        case 'paused':
-            return 2
-        case 'failed':
-        case 'cancelled':
-            return 3
-        default:
-            return 2
-    }
-}
-
-function comparePlannedSubFlowSteps(left: PlannedSubFlowStep, right: PlannedSubFlowStep): number {
-    const statusPriorityDifference = getSubFlowDisplayPriority(left.status) - getSubFlowDisplayPriority(right.status)
-    if (statusPriorityDifference !== 0) {
-        return statusPriorityDifference
-    }
-
-    if (left.workItemNumber !== right.workItemNumber) {
-        return left.workItemNumber - right.workItemNumber
-    }
-
-    return left.title.localeCompare(right.title)
-}
-
-const STATUS_COLORS: Record<string, 'success' | 'warning' | 'danger' | 'subtle'> = {
-    running: 'warning',
-    completed: 'success',
-    failed: 'danger',
-    cancelled: 'danger',
-    idle: 'subtle',
-}
-
-function formatTimestamp(iso: string): string {
-    try {
-        const date = new Date(iso)
-        const now = new Date()
-        const diffMs = now.getTime() - date.getTime()
-        const diffMin = Math.floor(diffMs / 60_000)
-        if (diffMin < 1) return 'just now'
-        if (diffMin < 60) return `${diffMin}m ago`
-        const diffHr = Math.floor(diffMin / 60)
-        if (diffHr < 24) return `${diffHr}h ago`
-        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    } catch {
-        return iso
-    }
-}
-
-function formatRunningProgressPercent(progress: number): string {
-    const clampedPercent = Math.min(99.95, Math.max(0, progress * 100))
-    const precision = clampedPercent < 1 ? 2 : 1
-    const multiplier = precision === 2 ? 100 : 10
-    const flooredPercent = Math.floor(clampedPercent * multiplier) / multiplier
-
-    if (Math.abs(flooredPercent - Math.round(flooredPercent)) < 0.001) {
-        return `${Math.round(flooredPercent)}%`
-    }
-
-    return `${flooredPercent.toFixed(precision)}%`
-}
 
 const useStyles = makeStyles({
     executionCard: {
@@ -407,96 +326,6 @@ const useStyles = makeStyles({
         marginTop: '2px',
         marginBottom: '2px',
     },
-    subFlowSection: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.sm,
-        minHeight: 0,
-    },
-    subFlowHeader: {
-        color: appTokens.color.textSecondary,
-    },
-    subFlowPipeline: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0px',
-    },
-    subFlowList: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.sm,
-        maxHeight: 'none',
-        overflowY: 'visible',
-        overscrollBehavior: 'auto',
-        paddingRight: 0,
-    },
-    subFlowListCompact: {
-        maxHeight: 'none',
-    },
-    subFlowListMobile: {
-        maxHeight: 'none',
-        overflowY: 'visible',
-        paddingRight: 0,
-    },
-    subFlowMobileList: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.sm,
-    },
-    subFlowSummaryCard: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.sm,
-        paddingTop: appTokens.space.sm,
-        paddingBottom: appTokens.space.sm,
-        paddingLeft: appTokens.space.sm,
-        paddingRight: appTokens.space.sm,
-        borderRadius: appTokens.radius.md,
-        border: appTokens.border.subtle,
-        backgroundColor: appTokens.color.surfaceRaised,
-        boxShadow: 'none',
-    },
-    subFlowSummaryCardActive: {
-        borderTopColor: appTokens.color.brandStroke,
-        borderRightColor: appTokens.color.brandStroke,
-        borderBottomColor: appTokens.color.brandStroke,
-        borderLeftColor: appTokens.color.brandStroke,
-        backgroundColor: appTokens.color.surfaceSelected,
-    },
-    subFlowSummaryHeader: {
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: appTokens.space.sm,
-    },
-    subFlowSummaryTitle: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xxxs,
-        minWidth: 0,
-        flex: 1,
-    },
-    subFlowSummaryDetails: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.xxxs,
-    },
-    subFlowSummaryProgress: {
-        marginTop: appTokens.space.xxxs,
-    },
-    subFlowSummaryExpandButton: {
-        alignSelf: 'flex-start',
-    },
-    subFlowExpandedContainer: {
-        paddingLeft: appTokens.space.sm,
-        borderLeft: `2px solid ${appTokens.color.border}`,
-    },
-    subFlowSummaryMeta: {
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: appTokens.space.xs,
-        color: appTokens.color.textTertiary,
-    },
 })
 
 interface ExecutionCardProps {
@@ -509,75 +338,6 @@ interface ExecutionCardProps {
     onDelete?: (executionId: string) => void
     onViewDocs?: (executionId: string) => void
     nested?: boolean
-}
-
-function AgentStepIcon({ status, isCompact }: { status: ExecutionStepStatus; isCompact: boolean }) {
-    const styles = useStyles()
-    const shellClassName = mergeClasses(
-        styles.stepIconShell,
-        isCompact && styles.stepIconShellCompact,
-    )
-
-    switch (status) {
-        case 'completed':
-            return (
-                <div className={shellClassName}>
-                    <CheckmarkCircleFilled className={mergeClasses(styles.stepIcon, styles.stepIconCompleted)} />
-                </div>
-            )
-        case 'running':
-            return (
-                <div className={shellClassName}>
-                    <Spinner size="extra-tiny" />
-                </div>
-            )
-        case 'paused':
-            return (
-                <div className={shellClassName}>
-                    <PauseRegular className={mergeClasses(styles.stepIcon, styles.stepIconPaused)} />
-                </div>
-            )
-        case 'queued':
-            return (
-                <div className={shellClassName}>
-                    <FleetRocketLogo size={isCompact ? 14 : 16} title="Queued sub-flow" variant="outline" className={mergeClasses(styles.stepIcon, styles.stepIconQueued)} />
-                </div>
-            )
-        case 'failed':
-            return (
-                <div className={shellClassName}>
-                    <DismissCircleFilled className={mergeClasses(styles.stepIcon, styles.stepIconFailed)} />
-                </div>
-            )
-        case 'cancelled':
-            return (
-                <div className={shellClassName}>
-                    <StopRegular className={mergeClasses(styles.stepIcon, styles.stepIconCancelled)} />
-                </div>
-            )
-        default:
-            return (
-                <div className={shellClassName}>
-                    <CircleRegular className={mergeClasses(styles.stepIcon, styles.stepIconIdle)} />
-                </div>
-            )
-    }
-}
-
-function renderExecutionStatusBadge(status: AgentExecution['status']) {
-    if (status === 'paused' || status === 'queued') {
-        return (
-            <InfoBadge appearance="filled" size="small">
-                {status}
-            </InfoBadge>
-        )
-    }
-
-    return (
-        <Badge appearance="filled" color={STATUS_COLORS[status] ?? 'subtle'} size="small">
-            {status}
-        </Badge>
-    )
 }
 
 export function ExecutionCard({ execution, workItems, onPause, onCancel, onResume, onRetry, onDelete, onViewDocs, nested = false }: ExecutionCardProps) {
@@ -696,130 +456,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
         }
     })
 
-    const getConnectorToneClass = (status: ExecutionStepStatus) => {
-        switch (status) {
-            case 'completed':
-                return styles.connectorCompleted
-            case 'running':
-                return styles.connectorRunning
-            case 'paused':
-                return styles.connectorPaused
-            case 'queued':
-                return styles.connectorQueued
-            case 'failed':
-                return styles.connectorFailed
-            default:
-                return undefined
-        }
-    }
-
-    const workItemsByNumber = new Map((workItems ?? []).map((workItem) => [workItem.workItemNumber, workItem]))
-    const parentWorkItem = workItemsByNumber.get(execution.workItemId)
-    const subFlowByWorkItemNumber = new Map(subFlows.map((subFlow) => [subFlow.workItemId, subFlow]))
-
-    const mapExecutionStatusToStepStatus = (status: AgentExecution['status']): ExecutionStepStatus => {
-        switch (status) {
-            case 'running':
-            case 'completed':
-            case 'failed':
-            case 'cancelled':
-            case 'paused':
-            case 'queued':
-                return status
-            default:
-                return 'queued'
-        }
-    }
-
-    const plannedSubFlowSteps: PlannedSubFlowStep[] = (() => {
-        const plannedChildren = (parentWorkItem?.childWorkItemNumbers ?? [])
-            .map((childNumber) => workItemsByNumber.get(childNumber))
-            .filter((child): child is WorkItem => Boolean(child))
-            .filter((child) => !NON_ACTIONABLE_SUBFLOW_STATES.has(child.state))
-            .sort((left, right) => left.workItemNumber - right.workItemNumber)
-
-        const steps: PlannedSubFlowStep[] = plannedChildren.map((child): PlannedSubFlowStep => {
-            const liveExecution = subFlowByWorkItemNumber.get(child.workItemNumber)
-            if (liveExecution) {
-                const liveStatus = mapExecutionStatusToStepStatus(liveExecution.status)
-                return {
-                    workItemNumber: child.workItemNumber,
-                    title: child.title,
-                    status: liveStatus,
-                    currentTask: liveExecution.currentPhase
-                        ? `${child.title} - ${liveExecution.currentPhase}`
-                        : child.title,
-                    progress: liveExecution.status === 'completed'
-                        ? 1
-                        : Math.max(0, Math.min(liveExecution.progress ?? 0, 1)),
-                }
-            }
-
-            if (execution.status === 'completed') {
-                return {
-                    workItemNumber: child.workItemNumber,
-                    title: child.title,
-                    status: 'completed',
-                    currentTask: `${child.title} - Completed`,
-                    progress: 1,
-                }
-            }
-
-            if (execution.status === 'paused') {
-                return {
-                    workItemNumber: child.workItemNumber,
-                    title: child.title,
-                    status: 'paused',
-                    currentTask: `${child.title} - Paused`,
-                    progress: 0,
-                }
-            }
-
-            if (execution.status === 'failed') {
-                return {
-                    workItemNumber: child.workItemNumber,
-                    title: child.title,
-                    status: 'failed',
-                    currentTask: `${child.title} - Blocked by parent flow failure`,
-                    progress: 0,
-                }
-            }
-
-            if (execution.status === 'cancelled') {
-                return {
-                    workItemNumber: child.workItemNumber,
-                    title: child.title,
-                    status: 'cancelled',
-                    currentTask: `${child.title} - Cancelled`,
-                    progress: 0,
-                }
-            }
-
-            return {
-                workItemNumber: child.workItemNumber,
-                title: child.title,
-                status: 'queued',
-                currentTask: `${child.title} - Queued sub-flow`,
-                progress: 0,
-            }
-        })
-
-        const orphanLiveSteps: PlannedSubFlowStep[] = subFlows
-            .filter((subFlow) => !plannedChildren.some((child) => child.workItemNumber === subFlow.workItemId))
-            .map((subFlow): PlannedSubFlowStep => ({
-                workItemNumber: subFlow.workItemId,
-                title: subFlow.workItemTitle,
-                status: mapExecutionStatusToStepStatus(subFlow.status),
-                currentTask: subFlow.currentPhase
-                    ? `${subFlow.workItemTitle} - ${subFlow.currentPhase}`
-                    : subFlow.workItemTitle,
-                progress: subFlow.status === 'completed'
-                    ? 1
-                    : Math.max(0, Math.min(subFlow.progress ?? 0, 1)),
-            }))
-
-        return [...steps, ...orphanLiveSteps].sort(comparePlannedSubFlowSteps)
-    })()
+    const plannedSubFlowSteps = buildPlannedSubFlowSteps(execution, workItems)
     const displayedSubFlowCount = execution.executionMode === 'orchestration'
         ? (plannedSubFlowSteps.length > 0 ? plannedSubFlowSteps.length : subFlows.length)
         : 0
@@ -845,84 +482,6 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
         }))
     }
 
-    const renderSubFlowSummaryCard = (subFlow: AgentExecution) => {
-        const isExpanded = expandedSubFlowIds[subFlow.id] ?? isSubFlowExpandedByDefault(subFlow)
-        const isActiveSubFlow =
-            subFlow.status === 'running' ||
-            subFlow.status === 'paused' ||
-            subFlow.status === 'failed'
-
-        return (
-            <div
-                key={subFlow.id}
-                className={mergeClasses(
-                    styles.subFlowSummaryCard,
-                    isActiveSubFlow && styles.subFlowSummaryCardActive,
-                )}
-            >
-                <div className={styles.subFlowSummaryHeader}>
-                    <div className={styles.subFlowSummaryTitle}>
-                        <div className={styles.flexRowGap}>
-                            <Text weight="semibold">#{subFlow.workItemId}</Text>
-                            {renderExecutionStatusBadge(subFlow.status)}
-                        </div>
-                        <Text
-                            weight="semibold"
-                            className={mergeClasses(styles.titleText, styles.titleTextMobile)}
-                        >
-                            {subFlow.workItemTitle}
-                        </Text>
-                    </div>
-                    <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-                        onClick={() => toggleSubFlowExpansion(subFlow)}
-                    >
-                        {isExpanded ? 'Hide' : 'Show'}
-                    </Button>
-                </div>
-                <div className={styles.subFlowSummaryDetails}>
-                    <Caption1 className={styles.taskCaption}>
-                        {subFlow.currentPhase || 'Waiting on sub-flow execution'}
-                    </Caption1>
-                    <Caption1 className={styles.subFlowSummaryMeta}>
-                        {[
-                            `Started ${formatTimestamp(subFlow.startedAt)}`,
-                            subFlow.duration,
-                            subFlow.branchName || null,
-                        ]
-                            .filter((value): value is string => Boolean(value))
-                            .join(' | ')}
-                    </Caption1>
-                    {subFlow.status === 'running' && subFlow.progress > 0 && (
-                        <ProgressBar
-                            className={styles.subFlowSummaryProgress}
-                            value={Math.max(0, Math.min(subFlow.progress, 1))}
-                            thickness="medium"
-                            color="brand"
-                        />
-                    )}
-                </div>
-                {isExpanded && (
-                    <div className={styles.subFlowExpandedContainer}>
-                        <ExecutionCard
-                            execution={subFlow}
-                            workItems={workItems}
-                            onPause={onPause}
-                            onCancel={onCancel}
-                            onResume={onResume}
-                            onRetry={onRetry}
-                            onDelete={onDelete}
-                            onViewDocs={onViewDocs}
-                            nested
-                        />
-                    </div>
-                )}
-            </div>
-        )
-    }
-
     return (
         <Card className={mergeClasses(styles.executionCard, isCompact && styles.executionCardCompact, isMobile && styles.executionCardMobile, isNested && styles.executionCardNested)}>
             <Toaster toasterId={toasterId} />
@@ -931,7 +490,7 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                 <div className={mergeClasses(styles.executionTitle, isCompact && styles.executionTitleCompact)}>
                     <div className={mergeClasses(styles.flexRowGap, isCompact && styles.flexRowGapCompact)}>
                         <Text weight="semibold">#{execution.workItemId}</Text>
-                        {renderExecutionStatusBadge(execution.status)}
+                        <ExecutionStatusBadge status={execution.status} />
                     </div>
                     <Text
                         weight="semibold"
@@ -991,75 +550,11 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                 <Text weight="semibold" className={styles.sectionHeaderLabel}>Pipeline</Text>
             </div>
 
-            <div className={styles.pipeline}>
-                {pipelineDisplaySteps.map((step, i) => {
-                    const isFirst = i === 0
-                    const isLast = i === pipelineDisplaySteps.length - 1
-                    const isRunning = step.status === 'running'
-                    const previousStatus = isFirst ? null : pipelineDisplaySteps[i - 1].status
-
-                    return (
-                        <div key={step.key} className={mergeClasses(styles.agentStep, isCompact && styles.agentStepCompact)}>
-                            <div className={mergeClasses(styles.stepGutter, isCompact && styles.stepGutterCompact)}>
-                                {!isFirst && (
-                                    <div
-                                        className={mergeClasses(
-                                            styles.connectorSegment,
-                                            styles.connectorTop,
-                                            previousStatus ? getConnectorToneClass(previousStatus) : undefined,
-                                        )}
-                                    />
-                                )}
-                                {!isLast && (
-                                    <div
-                                        className={mergeClasses(
-                                            styles.connectorSegment,
-                                            styles.connectorBottom,
-                                            getConnectorToneClass(step.status),
-                                        )}
-                                    />
-                                )}
-                                <AgentStepIcon status={step.status} isCompact={isCompact} />
-                            </div>
-
-                            <div className={styles.stepBody}>
-                                <Text
-                                    size={200}
-                                    weight="semibold"
-                                    className={mergeClasses(styles.roleName, isCompact && styles.roleNameCompact)}
-                                >
-                                    {step.title}
-                                </Text>
-                                <Caption1
-                                    className={mergeClasses(
-                                        isRunning ? styles.taskCaptionRunning : styles.taskCaption,
-                                        isCompact && styles.taskCaptionCompact,
-                                        isMobile && styles.taskCaptionMobile,
-                                    )}
-                                >
-                                    {step.currentTask}
-                                </Caption1>
-                                {isRunning && step.progress > 0 && (
-                                    <ProgressBar
-                                        className={mergeClasses(styles.stepProgress, isCompact && styles.stepProgressCompact)}
-                                        value={step.progress}
-                                        thickness="medium"
-                                        color="brand"
-                                    />
-                                )}
-                            </div>
-
-                            <div className={styles.stepTrailing}>
-                                {isRunning && step.progress > 0 && step.progress < 1 && (
-                                    <Text className={mergeClasses(styles.progressPercent, isCompact && styles.progressPercentCompact)}>
-                                        {formatRunningProgressPercent(step.progress)}
-                                    </Text>
-                                )}
-                            </div>
-                        </div>
-                    )
-                })}
-            </div>
+            <ExecutionPipeline
+                steps={pipelineDisplaySteps}
+                isCompact={isCompact}
+                isMobile={isMobile}
+            />
 
             {(execution.status === 'paused' || execution.status === 'failed') && (onResume || onRetry || onDelete) && (
                 <div className={mergeClasses(styles.runActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
@@ -1142,21 +637,26 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
                 </div>
             )}
 
-            {subFlows.length > 0 && (
-                <div className={styles.subFlowSection}>
-                    <Divider className={isCompact ? styles.compactDivider : undefined} />
-                    <div className={styles.sectionHeaderRow}>
-                        <Text weight="semibold" className={styles.subFlowHeader}>
-                            Sub-flows
-                        </Text>
-                    </div>
-                    <div className={mergeClasses(styles.subFlowList, isCompact && styles.subFlowListCompact, isMobile && styles.subFlowListMobile)}>
-                        <div className={styles.subFlowMobileList}>
-                            {subFlows.map(renderSubFlowSummaryCard)}
-                        </div>
-                    </div>
-                </div>
-            )}
+            <SubFlowExecutionList
+                subFlows={subFlows}
+                expandedSubFlowIds={expandedSubFlowIds}
+                isCompact={isCompact}
+                isMobile={isMobile}
+                onToggleSubFlow={toggleSubFlowExpansion}
+                renderNestedExecution={(subFlow) => (
+                    <ExecutionCard
+                        execution={subFlow}
+                        workItems={workItems}
+                        onPause={onPause}
+                        onCancel={onCancel}
+                        onResume={onResume}
+                        onRetry={onRetry}
+                        onDelete={onDelete}
+                        onViewDocs={onViewDocs}
+                        nested
+                    />
+                )}
+            />
         </Card>
     )
 }
