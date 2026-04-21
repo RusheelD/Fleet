@@ -15,6 +15,9 @@ public class ChatSession
     public string? GenerationStatus { get; set; }
     public DateTime? GenerationUpdatedAtUtc { get; set; }
     public string RecentActivityJson { get; set; } = "[]";
+    public bool IsDynamicIterationEnabled { get; set; }
+    public string? DynamicIterationBranch { get; set; }
+    public string? DynamicIterationPolicyJson { get; set; }
 
     // Foreign key (null for global chat sessions)
     public string? ProjectId { get; set; }

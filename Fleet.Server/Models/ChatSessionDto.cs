@@ -10,5 +10,8 @@ public record ChatSessionDto(
     string GenerationState = ChatGenerationStates.Idle,
     string? GenerationStatus = null,
     string? GenerationUpdatedAtUtc = null,
-    ChatSessionActivityDto[]? RecentActivity = null
+    ChatSessionActivityDto[]? RecentActivity = null,
+    bool IsDynamicIterationEnabled = false,
+    string? DynamicIterationBranch = null,
+    string? DynamicIterationPolicyJson = null
 );

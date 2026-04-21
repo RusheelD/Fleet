@@ -4,6 +4,7 @@ using Fleet.Server.Models;
 using Fleet.Server.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace Fleet.Server.Controllers;
 
@@ -105,6 +106,58 @@ public class ChatsController(
                 new { projectId, sessionId });
         }
         return renamed ? NoContent() : NotFound();
+    }
+
+    [HttpPut("sessions/{sessionId}/dynamic-iteration")]
+    public async Task<IActionResult> UpdateSessionDynamicIteration(
+        string projectId,
+        string sessionId,
+        [FromBody] UpdateSessionDynamicIterationRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.DynamicIterationPolicyJson))
+        {
+            try
+            {
+                JsonDocument.Parse(request.DynamicIterationPolicyJson);
+            }
+            catch (JsonException)
+            {
+                return BadRequest("Dynamic iteration policy must be valid JSON.");
+            }
+        }
+
+        bool updated;
+        try
+        {
+            updated = await chatService.UpdateSessionDynamicIterationAsync(
+                projectId,
+                sessionId,
+                request.IsDynamicIterationEnabled,
+                request.DynamicIterationBranch,
+                request.DynamicIterationPolicyJson);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = ex.Message,
+                Status = StatusCodes.Status400BadRequest,
+                Instance = HttpContext?.Request?.Path.ToString() ?? $"/api/projects/{projectId}/chat",
+            });
+        }
+
+        if (updated)
+        {
+            var userId = await authService.GetCurrentUserIdAsync();
+            await eventPublisher.PublishProjectEventAsync(
+                userId,
+                projectId,
+                ServerEventTopics.ChatUpdated,
+                new { projectId, sessionId });
+        }
+
+        return updated ? NoContent() : NotFound();
     }
 
     [HttpPost("sessions/{sessionId}/messages")]
