@@ -10,5 +10,8 @@ public record ChatSessionDto(
     string GenerationState = ChatGenerationStates.Idle,
     string? GenerationStatus = null,
     string? GenerationUpdatedAtUtc = null,
-    ChatSessionActivityDto[]? RecentActivity = null
+    ChatSessionActivityDto[]? RecentActivity = null,
+    string BranchStrategy = ChatSessionBranchStrategy.AutoFromProjectPattern,
+    string? SessionPinnedBranch = null,
+    bool InheritParentBranchForSubFlows = true
 );

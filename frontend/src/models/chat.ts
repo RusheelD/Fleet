@@ -35,6 +35,9 @@ export interface ChatSessionData {
   generationStatus: string | null
   generationUpdatedAtUtc: string | null
   recentActivity: ChatSessionActivity[]
+  branchStrategy: 'SessionPinnedBranch' | 'PerWorkItemPattern' | 'AutoFromProjectPattern'
+  sessionPinnedBranch: string | null
+  inheritParentBranchForSubFlows: boolean
 }
 
 export interface ChatData {

@@ -13,6 +13,7 @@ public class AgentsControllerTests
 {
     private Mock<IAgentService> _agentService = null!;
     private Mock<IAgentOrchestrationService> _orchestrationService = null!;
+    private Mock<IAgentExecutionDispatcher> _executionDispatcher = null!;
     private Mock<IAuthService> _authService = null!;
     private Mock<IServerEventPublisher> _eventPublisher = null!;
     private AgentsController _sut = null!;
@@ -25,12 +26,14 @@ public class AgentsControllerTests
     {
         _agentService = new Mock<IAgentService>();
         _orchestrationService = new Mock<IAgentOrchestrationService>();
+        _executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         _authService = new Mock<IAuthService>();
         _eventPublisher = new Mock<IServerEventPublisher>();
         _authService.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(UserId);
         _sut = new AgentsController(
             _agentService.Object,
             _orchestrationService.Object,
+            _executionDispatcher.Object,
             _authService.Object,
             _eventPublisher.Object);
     }
@@ -60,8 +63,8 @@ public class AgentsControllerTests
     [TestMethod]
     public async Task StartExecution_ReturnsAccepted()
     {
-        _orchestrationService
-            .Setup(s => s.StartExecutionAsync(ProjectId, 1, UserId, "release/v1", It.IsAny<CancellationToken>()))
+        _executionDispatcher
+            .Setup(s => s.DispatchWorkItemAsync(ProjectId, 1, UserId, "release/v1", null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-123");
 
         var result = await _sut.StartExecution(ProjectId, new StartExecutionRequest(1, "release/v1"));
@@ -69,8 +72,8 @@ public class AgentsControllerTests
         var accepted = result as AcceptedResult;
         Assert.IsNotNull(accepted);
         Assert.AreEqual(202, accepted.StatusCode);
-        _orchestrationService.Verify(
-            s => s.StartExecutionAsync(ProjectId, 1, UserId, "release/v1", It.IsAny<CancellationToken>()),
+        _executionDispatcher.Verify(
+            s => s.DispatchWorkItemAsync(ProjectId, 1, UserId, "release/v1", null, null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

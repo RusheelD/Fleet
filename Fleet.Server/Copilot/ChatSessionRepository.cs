@@ -48,7 +48,10 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
                 s.GenerationState,
                 s.GenerationStatus,
                 s.GenerationUpdatedAtUtc?.ToString("O"),
-                DeserializeRecentActivity(s.RecentActivityJson)))
+                DeserializeRecentActivity(s.RecentActivityJson),
+                ChatSessionBranchStrategy.Normalize(s.BranchStrategy),
+                string.IsNullOrWhiteSpace(s.SessionPinnedBranch) ? null : s.SessionPinnedBranch.Trim(),
+                s.InheritParentBranchForSubFlows))
             .ToList();
     }
 
@@ -140,7 +143,10 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             entity.GenerationState,
             entity.GenerationStatus,
             entity.GenerationUpdatedAtUtc?.ToString("O"),
-            DeserializeRecentActivity(entity.RecentActivityJson));
+            DeserializeRecentActivity(entity.RecentActivityJson),
+            ChatSessionBranchStrategy.Normalize(entity.BranchStrategy),
+            string.IsNullOrWhiteSpace(entity.SessionPinnedBranch) ? null : entity.SessionPinnedBranch.Trim(),
+            entity.InheritParentBranchForSubFlows);
     }
 
     public Task<bool> RenameSessionAsync(string sessionId, string title)
