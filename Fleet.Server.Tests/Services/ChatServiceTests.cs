@@ -75,10 +75,14 @@ public class ChatServiceTests
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.MarkStaleGeneratingSessionsAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync(0);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(It.IsAny<string>()))
+            .ReturnsAsync(Array.Empty<ChatSessionDto>());
         _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
+                It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<IReadOnlyList<ToolEventDto>>(),
+                It.IsAny<string?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DynamicIterationDispatchResult.Empty);
@@ -710,7 +714,7 @@ public class ChatServiceTests
     }
 
     [TestMethod]
-    public async Task SendMessageAsync_GenerateMode_AppendsDispatchActivity_WhenDispatchFindsCandidates()
+    public async Task SendMessageAsync_DynamicIteration_AppendsDispatchActivity_WhenDispatchFindsCandidates()
     {
         var writeTool = new TestChatTool(
             name: "bulk_create_work_items",
@@ -744,9 +748,11 @@ public class ChatServiceTests
 
         _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
                 ProjectId,
+                SessionId,
                 UserId,
                 It.IsAny<IReadOnlyList<ToolEventDto>>(),
-                null,
+                "feature/auth",
+                "parallel",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, []));
 
@@ -757,6 +763,80 @@ public class ChatServiceTests
 
         var responses = new Queue<LLMResponse>(new[]
         {
+            new LLMResponse("Auth backlog", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Created work items", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(
+            ProjectId,
+            SessionId,
+            "Build auth",
+            new ChatSendOptions(
+                GenerateWorkItems: true,
+                DynamicIteration: new DynamicIterationOptionsRequest(
+                    Enabled: true,
+                    ExecutionPolicy: "parallel",
+                    TargetBranch: "feature/auth")));
+
+        Assert.IsNotNull(result.AssistantMessage);
+        _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
+            ProjectId,
+            SessionId,
+            UserId,
+            It.IsAny<IReadOnlyList<ToolEventDto>>(),
+            "feature/auth",
+            "parallel",
+            It.IsAny<CancellationToken>()), Times.Once);
+        _chatRepo.Verify(r => r.AppendSessionActivityAsync(
+            ProjectId,
+            SessionId,
+            It.Is<ChatSessionActivityDto>(activity => activity.ToolName == "dynamic_iteration_dispatch"),
+            It.IsAny<string?>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_DoesNotDispatch_WhenDynamicIterationDisabled()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 101, \"Title\": \"Create auth endpoint\" }] }");
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Created work items", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Create auth endpoint\"}]}")
+        };
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Auth backlog", null),
             new LLMResponse(null, toolCalls),
             new LLMResponse("Created work items", null),
         });
@@ -767,11 +847,14 @@ public class ChatServiceTests
         var result = await sut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
 
         Assert.IsNotNull(result.AssistantMessage);
-        _chatRepo.Verify(r => r.AppendSessionActivityAsync(
-            ProjectId,
-            SessionId,
-            It.Is<ChatSessionActivityDto>(activity => activity.Kind == "dispatch"),
-            It.IsAny<string?>()), Times.Once);
+        _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            It.IsAny<IReadOnlyList<ToolEventDto>>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -1019,7 +1102,7 @@ public class ChatServiceTests
         await cancellationTriggered.Task.WaitAsync(TimeSpan.FromSeconds(2));
         cts.Cancel();
 
-        await Assert.ThrowsExceptionAsync<OperationCanceledException>(() => sendTask);
+        await Assert.ThrowsExceptionAsync<TaskCanceledException>(() => sendTask);
         _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
             ProjectId,
             SessionId,

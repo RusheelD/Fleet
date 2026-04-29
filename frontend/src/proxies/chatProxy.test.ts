@@ -7,6 +7,7 @@ import {
   buildDeleteAttachmentPath,
   buildDeleteSessionPath,
   buildRenameSessionPath,
+  buildUpdateSessionDynamicIterationPath,
 } from './chatProxy'
 
 describe('chat proxy scoped paths', () => {
@@ -46,5 +47,12 @@ describe('chat proxy scoped paths', () => {
       .toBe('/api/projects/proj-1/chat/sessions/sess-9/cancel-generation')
     expect(buildCancelGenerationPath(undefined, 'sess-9'))
       .toBe('/api/chat/sessions/sess-9/cancel-generation')
+  })
+
+  it('builds dynamic iteration settings endpoints for both scopes', () => {
+    expect(buildUpdateSessionDynamicIterationPath('proj-1', 'sess-9'))
+      .toBe('/api/projects/proj-1/chat/sessions/sess-9/dynamic-iteration')
+    expect(buildUpdateSessionDynamicIterationPath(undefined, 'sess-9'))
+      .toBe('/api/chat/sessions/sess-9/dynamic-iteration')
   })
 })

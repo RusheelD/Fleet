@@ -15,11 +15,13 @@ public interface IAgentAutoExecutionDispatcher
         string sessionId,
         int userId,
         IReadOnlyCollection<int> candidateWorkItemNumbers,
+        string? targetBranch = null,
+        string? executionPolicy = null,
         CancellationToken cancellationToken = default);
 }
 
 public sealed class AgentAutoExecutionDispatcher(
-    IAgentOrchestrationService orchestrationService,
+    IAgentExecutionDispatcher executionDispatcher,
     IAgentService agentService,
     IWorkItemService workItemService,
     IWorkItemLevelService workItemLevelService,
@@ -32,6 +34,11 @@ public sealed class AgentAutoExecutionDispatcher(
     private static readonly Counter<long> StartedCounter = Meter.CreateCounter<long>("fleet.agent_auto_dispatch.started");
     private static readonly Counter<long> SkippedPolicyCounter = Meter.CreateCounter<long>("fleet.agent_auto_dispatch.skipped_policy");
     private static readonly Counter<long> FailedStartCounter = Meter.CreateCounter<long>("fleet.agent_auto_dispatch.failed_start");
+    private static readonly HashSet<string> DispatchableStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "New",
+        "Active",
+    };
 
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> ActiveExecutionIdsBySession = new(StringComparer.Ordinal);
 
@@ -40,11 +47,15 @@ public sealed class AgentAutoExecutionDispatcher(
         string sessionId,
         int userId,
         IReadOnlyCollection<int> candidateWorkItemNumbers,
+        string? targetBranch = null,
+        string? executionPolicy = null,
         CancellationToken cancellationToken = default)
     {
         var policy = policyOptions.Value;
         if (candidateWorkItemNumbers.Count == 0)
             return AgentAutoExecutionDispatchResult.Empty;
+
+        var maxAutoStartPerMessage = ResolveMaxAutoStartPerMessage(policy, executionPolicy);
 
         var normalizedAllowedLevels = new HashSet<string>(
             policy.AllowedLevels
@@ -66,8 +77,20 @@ public sealed class AgentAutoExecutionDispatcher(
                 .Where(execution => string.Equals(execution.Status, "running", StringComparison.OrdinalIgnoreCase) ||
                                     string.Equals(execution.Status, "queued", StringComparison.OrdinalIgnoreCase))
                 .Select(execution => execution.WorkItemId));
+        var activeExecutionIds = new HashSet<string>(
+            activeExecutions
+                .Where(execution => string.Equals(execution.Status, "running", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(execution.Status, "queued", StringComparison.OrdinalIgnoreCase))
+                .Select(execution => execution.Id),
+            StringComparer.Ordinal);
 
-        var sessionActiveExecutionIds = GetOrCreateSessionExecutionSet(sessionId);
+        var sessionActiveExecutionIds = GetOrCreateSessionExecutionSet(projectId, sessionId);
+        foreach (var executionId in sessionActiveExecutionIds.Keys)
+        {
+            if (!activeExecutionIds.Contains(executionId))
+                sessionActiveExecutionIds.TryRemove(executionId, out _);
+        }
+
         var results = new List<AgentAutoExecutionWorkItemResult>(uniqueCandidates.Length);
         var startedExecutionIds = new List<string>();
         var startedCount = 0;
@@ -78,6 +101,16 @@ public sealed class AgentAutoExecutionDispatcher(
             if (workItem is null)
             {
                 results.Add(new AgentAutoExecutionWorkItemResult(workItemNumber, "skipped", "Work item was not found."));
+                SkippedPolicyCounter.Add(1);
+                continue;
+            }
+
+            if (!DispatchableStates.Contains(workItem.State))
+            {
+                results.Add(new AgentAutoExecutionWorkItemResult(
+                    workItemNumber,
+                    "skipped",
+                    $"Skipped by policy: state '{workItem.State}' is not eligible for auto-start."));
                 SkippedPolicyCounter.Add(1);
                 continue;
             }
@@ -102,8 +135,9 @@ public sealed class AgentAutoExecutionDispatcher(
             {
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
-                    "queued",
+                    "skipped",
                     "Skipped start: execution already running or queued for this work item."));
+                SkippedPolicyCounter.Add(1);
                 continue;
             }
 
@@ -118,12 +152,12 @@ public sealed class AgentAutoExecutionDispatcher(
                 continue;
             }
 
-            if (policy.MaxAutoStartPerMessage > 0 && startedCount >= policy.MaxAutoStartPerMessage)
+            if (maxAutoStartPerMessage > 0 && startedCount >= maxAutoStartPerMessage)
             {
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
                     "skipped",
-                    $"Skipped by policy: message auto-start limit reached ({policy.MaxAutoStartPerMessage})."));
+                    $"Skipped by policy: message auto-start limit reached ({maxAutoStartPerMessage})."));
                 SkippedPolicyCounter.Add(1);
                 continue;
             }
@@ -133,11 +167,13 @@ public sealed class AgentAutoExecutionDispatcher(
 
             try
             {
-                var executionId = await orchestrationService.StartExecutionAsync(
+                var executionId = await executionDispatcher.DispatchWorkItemAsync(
                     projectId,
                     workItemNumber,
                     userId,
-                    cancellationToken);
+                    targetBranch,
+                    sessionId,
+                    cancellationToken: cancellationToken);
 
                 startedCount++;
                 startedExecutionIds.Add(executionId);
@@ -157,8 +193,12 @@ public sealed class AgentAutoExecutionDispatcher(
                 FailedStartCounter.Add(1);
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
-                    "queued",
+                    "skipped",
                     $"Skipped start due to orchestration limits: {ex.Message}"));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -178,8 +218,20 @@ public sealed class AgentAutoExecutionDispatcher(
         return new AgentAutoExecutionDispatchResult(startedExecutionIds, results);
     }
 
-    private static ConcurrentDictionary<string, byte> GetOrCreateSessionExecutionSet(string sessionId)
-        => ActiveExecutionIdsBySession.GetOrAdd(sessionId, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+    private static int ResolveMaxAutoStartPerMessage(
+        AgentAutoExecutionDispatchPolicyOptions policy,
+        string? executionPolicy)
+    {
+        if (string.Equals(executionPolicy, "sequential", StringComparison.OrdinalIgnoreCase))
+            return 1;
+
+        return policy.MaxAutoStartPerMessage;
+    }
+
+    private static ConcurrentDictionary<string, byte> GetOrCreateSessionExecutionSet(string projectId, string sessionId)
+        => ActiveExecutionIdsBySession.GetOrAdd(
+            $"{projectId}::{sessionId}",
+            _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
 }
 
 public sealed record AgentAutoExecutionDispatchResult(

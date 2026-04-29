@@ -27,6 +27,8 @@ export interface ChatDynamicOptions {
 
 export interface ChatDynamicPolicy {
   autoStartLimit?: number | null
+  executionPolicy?: ChatDynamicStrategy | null
+  strategy?: ChatDynamicStrategy | null
 }
 
 export interface ChatMessageData {
@@ -53,6 +55,9 @@ export interface ChatSessionData {
   branchStrategy: 'SessionPinnedBranch' | 'PerWorkItemPattern' | 'AutoFromProjectPattern'
   sessionPinnedBranch: string | null
   inheritParentBranchForSubFlows: boolean
+  isDynamicIterationEnabled: boolean
+  dynamicIterationBranch: string | null
+  dynamicIterationPolicyJson: string | null
 }
 
 export interface ChatData {

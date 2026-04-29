@@ -14,13 +14,15 @@ public class AgentAutoExecutionDispatcherTests
     [TestMethod]
     public async Task DispatchAsync_StartsOnlyAllowedLevelsWithinMessageLimit()
     {
-        var orchestrationService = new Mock<IAgentOrchestrationService>();
-        orchestrationService
-            .Setup(service => service.StartExecutionAsync("p1", 11, 7, It.IsAny<CancellationToken>()))
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 11, 7, null, "s1", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-11");
 
         var agentService = new Mock<IAgentService>();
-        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+        agentService.SetupSequence(service => service.GetExecutionsAsync("p1"))
+            .ReturnsAsync(Array.Empty<AgentExecutionDto>())
+            .ReturnsAsync([CreateExecution("exec-11", 11)]);
 
         var workItemService = new Mock<IWorkItemService>();
         workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 11)).ReturnsAsync(CreateWorkItem(11, levelId: 1));
@@ -34,7 +36,7 @@ public class AgentAutoExecutionDispatcherTests
         ]);
 
         var dispatcher = CreateDispatcher(
-            orchestrationService,
+            executionDispatcher,
             agentService,
             workItemService,
             levelService,
@@ -46,20 +48,22 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.StartedExecutionIds.Count);
         Assert.AreEqual("exec-11", result.StartedExecutionIds[0]);
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
-        Assert.AreEqual(0, result.WorkItems.Count(item => item.WorkItemNumber == 12));
-        orchestrationService.Verify(service => service.StartExecutionAsync("p1", 11, 7, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 12 && item.Status == "skipped"));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 11, 7, null, "s1", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]
     public async Task DispatchAsync_SkipsWhenSessionActiveExecutionLimitReached()
     {
-        var orchestrationService = new Mock<IAgentOrchestrationService>();
-        orchestrationService
-            .Setup(service => service.StartExecutionAsync("p1", 11, 7, It.IsAny<CancellationToken>()))
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 11, 7, null, "s2", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-11");
 
         var agentService = new Mock<IAgentService>();
-        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+        agentService.SetupSequence(service => service.GetExecutionsAsync("p1"))
+            .ReturnsAsync(Array.Empty<AgentExecutionDto>())
+            .ReturnsAsync([CreateExecution("exec-11", 11)]);
 
         var workItemService = new Mock<IWorkItemService>();
         workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 11)).ReturnsAsync(CreateWorkItem(11, levelId: 1));
@@ -69,7 +73,7 @@ public class AgentAutoExecutionDispatcherTests
         levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([new WorkItemLevelDto(1, "Bug", "bug", "#f00", 0, true)]);
 
         var dispatcher = CreateDispatcher(
-            orchestrationService,
+            executionDispatcher,
             agentService,
             workItemService,
             levelService,
@@ -81,11 +85,11 @@ public class AgentAutoExecutionDispatcherTests
 
         Assert.AreEqual(1, secondResult.WorkItems.Count(item => item.Status == "skipped"));
         StringAssert.Contains(secondResult.WorkItems[0].Reason, "session already has");
-        orchestrationService.Verify(service => service.StartExecutionAsync("p1", 12, 7, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 12, 7, null, "s2", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static AgentAutoExecutionDispatcher CreateDispatcher(
-        Mock<IAgentOrchestrationService> orchestrationService,
+        Mock<IAgentExecutionDispatcher> executionDispatcher,
         Mock<IAgentService> agentService,
         Mock<IWorkItemService> workItemService,
         Mock<IWorkItemLevelService> levelService,
@@ -100,7 +104,7 @@ public class AgentAutoExecutionDispatcherTests
         });
 
         return new AgentAutoExecutionDispatcher(
-            orchestrationService.Object,
+            executionDispatcher.Object,
             agentService.Object,
             workItemService.Object,
             levelService.Object,
@@ -123,4 +127,16 @@ public class AgentAutoExecutionDispatcherTests
             ParentWorkItemNumber: null,
             ChildWorkItemNumbers: [],
             LevelId: levelId);
+
+    private static AgentExecutionDto CreateExecution(string executionId, int workItemNumber)
+        => new(
+            Id: executionId,
+            WorkItemId: workItemNumber,
+            WorkItemTitle: $"Work item {workItemNumber}",
+            ExecutionMode: "full",
+            Status: "running",
+            Agents: [],
+            StartedAt: "now",
+            Duration: string.Empty,
+            Progress: 0);
 }

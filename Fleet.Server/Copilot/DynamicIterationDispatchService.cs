@@ -1,39 +1,29 @@
-using Fleet.Server.Agents;
-using Fleet.Server.Auth;
-using Fleet.Server.Data;
 using Fleet.Server.Models;
-using Fleet.Server.WorkItems;
-using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace Fleet.Server.Copilot;
 
 public class DynamicIterationDispatchService(
-    IWorkItemService workItemService,
-    IWorkItemLevelService workItemLevelService,
-    IAgentOrchestrationService agentOrchestrationService,
-    FleetDbContext db,
+    IAgentAutoExecutionDispatcher autoExecutionDispatcher,
     ILogger<DynamicIterationDispatchService> logger) : IDynamicIterationDispatchService
 {
     private static readonly HashSet<string> SupportedMutationTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "create_work_item",
         "update_work_item",
+        "try_update_work_item",
         "bulk_create_work_items",
         "bulk_update_work_items",
-    };
-
-    private static readonly HashSet<string> DispatchableStates = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "New",
-        "Active",
+        "try_bulk_update_work_items",
     };
 
     public async Task<DynamicIterationDispatchResult> DispatchFromToolEventsAsync(
         string projectId,
+        string sessionId,
         int userId,
         IReadOnlyList<ToolEventDto> toolEvents,
         string? targetBranch,
+        string? executionPolicy,
         CancellationToken cancellationToken = default)
     {
         if (toolEvents.Count == 0)
@@ -43,104 +33,39 @@ public class DynamicIterationDispatchService(
         if (candidateIds.Count == 0)
             return DynamicIterationDispatchResult.Empty;
 
-        var workItems = await workItemService.GetByProjectIdAsync(projectId);
-        var byNumber = workItems.ToDictionary(item => item.WorkItemNumber);
-        var levels = await workItemLevelService.GetByProjectIdAsync(projectId);
-        var levelNameById = levels.ToDictionary(level => level.Id, level => level.Name);
-
-        var userRole = await db.UserProfiles
-            .AsNoTracking()
-            .Where(profile => profile.Id == userId)
-            .Select(profile => profile.Role)
-            .FirstOrDefaultAsync(cancellationToken);
-        var tierPolicy = TierPolicyCatalog.Get(userRole);
-        var activeExecutions = await db.AgentExecutions
-            .AsNoTracking()
-            .CountAsync(
-                execution => execution.UserId == userId.ToString() &&
-                             execution.ParentExecutionId == null &&
-                             execution.Status == "running",
+        try
+        {
+            var dispatchResult = await autoExecutionDispatcher.DispatchAsync(
+                projectId,
+                sessionId,
+                userId,
+                candidateIds,
+                targetBranch,
+                executionPolicy,
                 cancellationToken);
-        var remainingCapacity = Math.Max(0, tierPolicy.MaxActiveAgentExecutions - activeExecutions);
 
-        var accepted = new List<int>();
-        var notes = new List<string>();
-
-        foreach (var candidateId in candidateIds)
-        {
-            if (!byNumber.TryGetValue(candidateId, out var workItem))
-            {
-                notes.Add($"#{candidateId} skipped: no longer exists.");
-                continue;
-            }
-
-            if (!DispatchableStates.Contains(workItem.State))
-            {
-                notes.Add($"#{candidateId} skipped: state '{workItem.State}' is not dispatchable.");
-                continue;
-            }
-
-            if (workItem.ChildWorkItemNumbers.Length > 0)
-            {
-                notes.Add($"#{candidateId} skipped: only leaf items are auto-dispatched.");
-                continue;
-            }
-
-            if (workItem.ParentWorkItemNumber is null)
-            {
-                notes.Add($"#{candidateId} skipped: parent is required for auto-dispatch.");
-                continue;
-            }
-
-            if (!levelNameById.TryGetValue(workItem.LevelId ?? 0, out var levelName) || !string.Equals(levelName, "Task", StringComparison.OrdinalIgnoreCase))
-            {
-                notes.Add($"#{candidateId} skipped: level must be Task.");
-                continue;
-            }
-
-            accepted.Add(candidateId);
+            return DynamicIterationDispatchResult.FromAutoDispatch(candidateIds.Count, dispatchResult);
         }
-
-        var started = 0;
-        var failed = 0;
-        foreach (var workItemNumber in accepted.Take(remainingCapacity))
+        catch (OperationCanceledException)
         {
-            try
-            {
-                await agentOrchestrationService.StartExecutionAsync(
-                    projectId,
-                    workItemNumber,
-                    userId,
-                    targetBranch,
-                    cancellationToken);
-                started++;
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                notes.Add($"#{workItemNumber} failed: {ex.Message}");
-                logger.LogWarning(
-                    ex,
-                    "Dynamic dispatch failed for work item #{WorkItemNumber} in project {ProjectId}",
-                    workItemNumber,
-                    projectId);
-            }
+            throw;
         }
-
-        if (accepted.Count > remainingCapacity)
+        catch (Exception ex)
         {
-            var skippedByCapacity = accepted.Count - remainingCapacity;
-            notes.Add($"{skippedByCapacity} candidate(s) skipped: active execution capacity reached.");
-        }
+            logger.LogWarning(
+                ex,
+                "Dynamic iteration dispatch failed for session {SessionId} in project {ProjectId}.",
+                sessionId,
+                projectId);
 
-        var skipped = Math.Max(0, candidateIds.Count - started - failed);
-        return new DynamicIterationDispatchResult(
-            candidateIds.Count,
-            accepted.Count,
-            started,
-            skipped,
-            failed,
-            notes);
+            return new DynamicIterationDispatchResult(
+                candidateIds.Count,
+                0,
+                0,
+                candidateIds.Count,
+                1,
+                ["Dynamic iteration dispatch failed before executions could be started."]);
+        }
     }
 
     private static List<int> CollectCandidateIds(IReadOnlyList<ToolEventDto> toolEvents)
@@ -155,22 +80,7 @@ public class DynamicIterationDispatchService(
             try
             {
                 using var document = JsonDocument.Parse(toolEvent.Result);
-                var root = document.RootElement;
-
-                if (root.TryGetProperty("Id", out var idProperty) && idProperty.TryGetInt32(out var directId) && directId > 0)
-                    ids.Add(directId);
-
-                if (!root.TryGetProperty("Results", out var resultsProperty) || resultsProperty.ValueKind != JsonValueKind.Array)
-                    continue;
-
-                foreach (var result in resultsProperty.EnumerateArray())
-                {
-                    if (result.TryGetProperty("Error", out _))
-                        continue;
-
-                    if (result.TryGetProperty("Id", out var nestedIdProperty) && nestedIdProperty.TryGetInt32(out var nestedId) && nestedId > 0)
-                        ids.Add(nestedId);
-                }
+                CollectWorkItemIds(document.RootElement, ids);
             }
             catch
             {
@@ -180,4 +90,39 @@ public class DynamicIterationDispatchService(
 
         return [.. ids.OrderBy(id => id)];
     }
+
+    private static void CollectWorkItemIds(JsonElement element, ISet<int> ids)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (HasProperty(element, "error"))
+                    return;
+
+                foreach (var property in element.EnumerateObject())
+                {
+                    if ((string.Equals(property.Name, "id", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(property.Name, "workItemNumber", StringComparison.OrdinalIgnoreCase)) &&
+                        property.Value.ValueKind == JsonValueKind.Number &&
+                        property.Value.TryGetInt32(out var id) &&
+                        id > 0)
+                    {
+                        ids.Add(id);
+                        continue;
+                    }
+
+                    CollectWorkItemIds(property.Value, ids);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectWorkItemIds(item, ids);
+                }
+                break;
+        }
+    }
+
+    private static bool HasProperty(JsonElement element, string propertyName)
+        => element.EnumerateObject().Any(property => string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase));
 }

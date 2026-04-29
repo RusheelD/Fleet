@@ -36,4 +36,26 @@ describe('sendChatMessage', () => {
     expect(postMock.mock.calls[0]?.[0]).toBe('/api/chat/sessions/sess-9/messages')
     expect(postMock.mock.calls[0]?.[1]).toEqual({ content: 'Hello', generateWorkItems: false })
   })
+
+  it('posts dynamic iteration options with generate payloads', async () => {
+    await sendChatMessage('proj-1', 'sess-9', {
+      content: 'Fix the auth bug',
+      generateWorkItems: true,
+      dynamicOptions: {
+        enabled: true,
+        branchName: 'feature/auth',
+        strategy: 'parallel',
+      },
+    })
+
+    expect(postMock.mock.calls[0]?.[1]).toEqual({
+      content: 'Fix the auth bug',
+      generateWorkItems: true,
+      dynamicIteration: {
+        enabled: true,
+        executionPolicy: 'parallel',
+        targetBranch: 'feature/auth',
+      },
+    })
+  })
 })

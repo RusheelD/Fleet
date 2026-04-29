@@ -6,9 +6,11 @@ public interface IDynamicIterationDispatchService
 {
     Task<DynamicIterationDispatchResult> DispatchFromToolEventsAsync(
         string projectId,
+        string sessionId,
         int userId,
         IReadOnlyList<ToolEventDto> toolEvents,
         string? targetBranch,
+        string? executionPolicy,
         CancellationToken cancellationToken = default);
 }
 
@@ -22,9 +24,11 @@ public sealed class NoOpDynamicIterationDispatchService : IDynamicIterationDispa
 
     public Task<DynamicIterationDispatchResult> DispatchFromToolEventsAsync(
         string projectId,
+        string sessionId,
         int userId,
         IReadOnlyList<ToolEventDto> toolEvents,
         string? targetBranch,
+        string? executionPolicy,
         CancellationToken cancellationToken = default)
         => Task.FromResult(DynamicIterationDispatchResult.Empty);
 }

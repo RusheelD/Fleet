@@ -199,6 +199,9 @@ function resolveDynamicIterationState(
         if (message.includes('running')) {
             return 'running'
         }
+        if (message.includes('started')) {
+            return 'running'
+        }
         if (message.includes('queued')) {
             return 'queued'
         }

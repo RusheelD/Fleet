@@ -43,7 +43,8 @@ export {
   getExecutionDocumentation,
 } from './agentsProxy'
 export type { ExecutionStatus, ExecutionDocumentation } from './agentsProxy'
-export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession, cancelChatGeneration, cancelChatSessionRequests } from './chatProxy'
+export { getChatData, getMessages, createChatSession, sendChatMessage, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession, cancelChatGeneration, cancelChatSessionRequests, updateChatSessionDynamicIteration } from './chatProxy'
+export type { UpdateSessionDynamicIterationRequest } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
 export {
@@ -171,6 +172,7 @@ export {
   useDeleteAttachment,
   useDeleteSession,
   useRenameSession,
+  useUpdateSessionDynamicIteration,
   useNotifications,
   useMarkNotificationAsRead,
   useMarkAllNotificationsAsRead,

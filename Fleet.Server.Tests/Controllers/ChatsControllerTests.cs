@@ -177,7 +177,7 @@ public class ChatsControllerTests
     {
         var msg = new ChatMessageDto("m1", "assistant", "Hi", "2025-01-01");
         var response = new SendMessageResponseDto(SessionId, msg, [], null);
-        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && !o.GenerateWorkItems && o.DynamicIteration is null))).ReturnsAsync(response);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && !o.GenerateWorkItems && o.DynamicIteration == null))).ReturnsAsync(response);
 
         var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello"));
 
@@ -190,7 +190,7 @@ public class ChatsControllerTests
     public async Task SendMessage_GenerateModeStarted_ReturnsAccepted()
     {
         var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
-        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && o.GenerateWorkItems && o.DynamicIteration is null))).ReturnsAsync(response);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && o.GenerateWorkItems && o.DynamicIteration == null))).ReturnsAsync(response);
 
         var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello", true));
 

@@ -36,7 +36,6 @@ public class ChatService(
     ToolLifecycleRunner? lifecycleRunner = null,
     ToolResultStore? toolResultStore = null,
     PromptBlockCache? promptBlockCache = null,
-    IAgentAutoExecutionDispatcher? autoExecutionDispatcher = null,
     IDynamicIterationDispatchService? dynamicIterationDispatchService = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
@@ -47,7 +46,6 @@ public class ChatService(
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
-    private readonly IAgentAutoExecutionDispatcher? _autoExecutionDispatcher = autoExecutionDispatcher;
     private readonly IDynamicIterationDispatchService _dynamicIterationDispatchService = dynamicIterationDispatchService ?? NoOpDynamicIterationDispatchService.Instance;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
@@ -87,7 +85,16 @@ public class ChatService(
         int UserId,
         string RequestKey,
         bool ChargedWorkItemRun,
-        IReadOnlyList<ChatAttachmentDto> CurrentMessageAttachments);
+        IReadOnlyList<ChatAttachmentDto> CurrentMessageAttachments,
+        DynamicIterationRuntimeOptions DynamicIteration);
+
+    internal sealed record DynamicIterationRuntimeOptions(
+        bool Enabled,
+        string? TargetBranch = null,
+        string? ExecutionPolicy = null)
+    {
+        public static readonly DynamicIterationRuntimeOptions Disabled = new(false);
+    }
 
     internal static Task RunBackgroundMemoryExtractionDetachedAsync(
         IServiceScopeFactory serviceScopeFactory,
@@ -292,9 +299,14 @@ public class ChatService(
             throw new InvalidOperationException("Work-item generation is only available in project-scoped chat sessions.");
 
         logger.CopilotMessageSending(projectId.SanitizeForLogging(), sessionId.SanitizeForLogging(), generateWorkItems);
+        var dynamicIteration = await ResolveDynamicIterationOptionsAsync(
+            projectId,
+            sessionId,
+            generateWorkItems,
+            resolvedOptions.DynamicIteration);
 
         if (generateWorkItems && _serviceScopeFactory is not null)
-            return await StartDeferredGenerateWorkItemsAsync(projectId, sessionId, content);
+            return await StartDeferredGenerateWorkItemsAsync(projectId, sessionId, content, dynamicIteration);
 
         if (generateWorkItems && _serviceScopeFactory is null)
         {
@@ -303,7 +315,7 @@ public class ChatService(
                 sessionId.SanitizeForLogging());
         }
 
-        return await SendMessageInlineAsync(projectId, sessionId, content, generateWorkItems, cancellationToken);
+        return await SendMessageInlineAsync(projectId, sessionId, content, generateWorkItems, dynamicIteration, cancellationToken);
     }
 
 
@@ -332,8 +344,10 @@ public class ChatService(
         string sessionId,
         string content,
         bool generateWorkItems = false,
+        DynamicIterationRuntimeOptions? dynamicIteration = null,
         CancellationToken cancellationToken = default)
     {
+        dynamicIteration ??= DynamicIterationRuntimeOptions.Disabled;
         var config = llmOptions.Value;
         var timeoutSeconds = generateWorkItems ? config.GenerateTimeoutSeconds : config.TimeoutSeconds;
         var maxLoops = generateWorkItems ? config.GenerateMaxToolLoops : config.MaxToolLoops;
@@ -420,7 +434,8 @@ public class ChatService(
                 content,
                 requestCancellation,
                 conversationHistory: llmMessages,
-                generateWorkItems: generateWorkItems);
+                generateWorkItems: generateWorkItems,
+                dynamicIteration: dynamicIteration);
 
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
@@ -447,7 +462,6 @@ public class ChatService(
             var toolContext = new ChatToolContext(projectId, userId.ToString(), messageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
-            var autoDispatchCandidateWorkItems = new HashSet<int>();
 
             var outputTokenCap = AdaptiveTokenCap.DefaultCap;
             var errorRecovery = new ErrorRecoveryLadder();
@@ -599,7 +613,6 @@ public class ChatService(
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                         {
                             performedWorkItemMutation = true;
-                            TrackAutoDispatchCandidates(toolCall.Name, toolResult, autoDispatchCandidateWorkItems);
                         }
                     }
 
@@ -658,17 +671,10 @@ public class ChatService(
                     sessionId,
                     userId,
                     toolEvents,
+                    dynamicIteration,
                     requestCancellation);
                 var assistantMessage = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantContent);
-                await PublishAutoDispatchSummaryAsync(
-                    projectId,
-                    sessionId,
-                    userId,
-                    generateWorkItems,
-                    performedWorkItemMutation,
-                    autoDispatchCandidateWorkItems,
-                    requestCancellation);
 
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
@@ -738,6 +744,8 @@ public class ChatService(
         }
         catch (OperationCanceledException) when (sessionCts.IsCancellationRequested || cancellationToken.IsCancellationRequested)
         {
+            SetGenerationProgress(progress, false, ChatGenerationStates.Canceled, "Generation canceled.");
+            await HandleCanceledRequestAsync(projectId, sessionId, generateWorkItems, chargedWorkItemRun, userId, requestKey, sessionCts);
             throw;
         }
         catch (Exception ex)
@@ -799,7 +807,8 @@ public class ChatService(
     private async Task<SendMessageResponseDto> StartDeferredGenerateWorkItemsAsync(
         string projectId,
         string sessionId,
-        string content)
+        string content,
+        DynamicIterationRuntimeOptions dynamicIteration)
     {
         var requestKey = BuildSessionRequestKey(projectId, sessionId);
         CancellationTokenSource? sessionCts = null;
@@ -841,7 +850,8 @@ public class ChatService(
                 userId,
                 requestKey,
                 chargedWorkItemRun,
-                messageAttachments);
+                messageAttachments,
+                dynamicIteration);
             _ = Task.Run(
                 () => RunDeferredGenerateWorkItemsDetachedAsync(
                     _serviceScopeFactory!,
@@ -885,7 +895,8 @@ public class ChatService(
         string requestKey,
         CancellationTokenSource sessionCts,
         bool chargedWorkItemRun,
-        IReadOnlyList<ChatAttachmentDto> currentMessageAttachments)
+        IReadOnlyList<ChatAttachmentDto> currentMessageAttachments,
+        DynamicIterationRuntimeOptions dynamicIteration)
     {
         var ownerId = userId.ToString();
         logger.LogInformation(
@@ -935,7 +946,8 @@ public class ChatService(
                 requestCancellation,
                 ownerId,
                 conversationHistory: llmMessages,
-                generateWorkItems: true);
+                generateWorkItems: true,
+                dynamicIteration: dynamicIteration);
             var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems: true, requestCancellation);
             await using var mcpToolSession = tooling.Session;
             var toolDefs = tooling.Definitions;
@@ -954,7 +966,6 @@ public class ChatService(
             var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
-            var autoDispatchCandidateWorkItems = new HashSet<int>();
             var toolEvents = new List<ToolEventDto>();
 
             for (var loop = 0; loop < maxLoops; loop++)
@@ -1033,7 +1044,6 @@ public class ChatService(
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                         {
                             performedWorkItemMutation = true;
-                            TrackAutoDispatchCandidates(toolCall.Name, toolResult, autoDispatchCandidateWorkItems);
                         }
                     }
 
@@ -1068,18 +1078,10 @@ public class ChatService(
                     sessionId,
                     userId,
                     toolEvents,
+                    dynamicIteration,
                     requestCancellation,
                     ownerId);
                 await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent, ownerId);
-                await PublishAutoDispatchSummaryAsync(
-                    projectId,
-                    sessionId,
-                    userId,
-                    generateWorkItems: true,
-                    performedWorkItemMutation,
-                    autoDispatchCandidateWorkItems,
-                    requestCancellation,
-                    ownerId);
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
                 SetGenerationProgress(
@@ -1206,6 +1208,84 @@ public class ChatService(
         var userMessage = await chatSessionRepository.AddMessageAsync(projectId, sessionId, "user", content);
         await chatSessionRepository.AssignPendingAttachmentsToMessageAsync(projectId, sessionId, userMessage.Id);
         return await chatSessionRepository.GetAttachmentsByMessageIdAsync(projectId, userMessage.Id);
+    }
+
+    private async Task<DynamicIterationRuntimeOptions> ResolveDynamicIterationOptionsAsync(
+        string projectId,
+        string sessionId,
+        bool generateWorkItems,
+        DynamicIterationOptionsRequest? requestOptions)
+    {
+        if (!generateWorkItems || IsGlobalScope(projectId))
+            return DynamicIterationRuntimeOptions.Disabled;
+
+        var session = await TryGetSessionAsync(projectId, sessionId);
+        var enabled = requestOptions?.Enabled ?? session?.IsDynamicIterationEnabled ?? false;
+        if (!enabled)
+            return DynamicIterationRuntimeOptions.Disabled;
+
+        var targetBranch = NormalizeNullableString(requestOptions?.TargetBranch)
+            ?? NormalizeNullableString(session?.DynamicIterationBranch);
+        var executionPolicy = NormalizeExecutionPolicy(requestOptions?.ExecutionPolicy)
+            ?? ResolveExecutionPolicyFromPolicyJson(session?.DynamicIterationPolicyJson)
+            ?? "balanced";
+
+        return new DynamicIterationRuntimeOptions(true, targetBranch, executionPolicy);
+    }
+
+    private async Task<ChatSessionDto?> TryGetSessionAsync(string projectId, string sessionId)
+    {
+        var sessions = await chatSessionRepository.GetSessionsByProjectIdAsync(projectId);
+        return sessions.FirstOrDefault(session => string.Equals(session.Id, sessionId, StringComparison.Ordinal));
+    }
+
+    private static string? ResolveExecutionPolicyFromPolicyJson(string? policyJson)
+    {
+        if (string.IsNullOrWhiteSpace(policyJson))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(policyJson);
+            if (TryGetPolicyString(document.RootElement, "executionPolicy", out var executionPolicy))
+                return NormalizeExecutionPolicy(executionPolicy);
+            if (TryGetPolicyString(document.RootElement, "strategy", out var strategy))
+                return NormalizeExecutionPolicy(strategy);
+        }
+        catch (JsonException)
+        {
+            // Session policy is validated on write. Ignore stale malformed values defensively.
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPolicyString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return true;
+    }
+
+    private static string? NormalizeExecutionPolicy(string? executionPolicy)
+    {
+        var normalized = NormalizeNullableString(executionPolicy)?.ToLowerInvariant();
+        return normalized is "balanced" or "parallel" or "sequential"
+            ? normalized
+            : null;
+    }
+
+    private static string? NormalizeNullableString(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     private async Task HandleDeferredGenerationFailureAsync(
@@ -1421,7 +1501,8 @@ public class ChatService(
                 request.RequestKey,
                 sessionCts,
                 request.ChargedWorkItemRun,
-                request.CurrentMessageAttachments);
+                request.CurrentMessageAttachments,
+                request.DynamicIteration);
         }
         catch (OperationCanceledException)
         {
@@ -1624,7 +1705,7 @@ public class ChatService(
     private static ChatSessionActivityDto BuildDispatchActivity(DynamicIterationDispatchResult result)
         => new(
             Guid.NewGuid().ToString(),
-            "dispatch",
+            "status",
             result.BuildSummaryMessage(),
             DateTime.UtcNow.ToString("O"),
             "dynamic_iteration_dispatch",
@@ -1711,121 +1792,27 @@ public class ChatService(
             ? "Generation stopped due to quota limits."
             : "Generation failed. Please try again.";
 
-    private static readonly HashSet<string> AutoDispatchMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "create_work_item",
-        "update_work_item",
-        "try_update_work_item",
-        "bulk_create_work_items",
-        "bulk_update_work_items",
-        "try_bulk_update_work_items",
-    };
-
-    private static void TrackAutoDispatchCandidates(string toolName, string toolResult, ISet<int> candidates)
-    {
-        if (!AutoDispatchMutationToolNames.Contains(toolName) ||
-            string.IsNullOrWhiteSpace(toolResult) ||
-            toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(toolResult);
-            CollectWorkItemIds(doc.RootElement, candidates);
-        }
-        catch (JsonException)
-        {
-            // Ignore non-JSON tool outputs.
-        }
-    }
-
-    private static void CollectWorkItemIds(JsonElement element, ISet<int> candidates)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var property in element.EnumerateObject())
-                {
-                    if (string.Equals(property.Name, "id", StringComparison.OrdinalIgnoreCase) &&
-                        property.Value.ValueKind == JsonValueKind.Number &&
-                        property.Value.TryGetInt32(out var id) &&
-                        id > 0)
-                    {
-                        candidates.Add(id);
-                        continue;
-                    }
-
-                    CollectWorkItemIds(property.Value, candidates);
-                }
-                break;
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
-                {
-                    CollectWorkItemIds(item, candidates);
-                }
-                break;
-        }
-    }
-
-    private async Task PublishAutoDispatchSummaryAsync(
-        string projectId,
-        string sessionId,
-        int userId,
-        bool generateWorkItems,
-        bool performedWorkItemMutation,
-        IReadOnlyCollection<int> candidateWorkItems,
-        CancellationToken cancellationToken,
-        string? ownerId = null)
-    {
-        if (!generateWorkItems ||
-            !performedWorkItemMutation ||
-            candidateWorkItems.Count == 0 ||
-            _autoExecutionDispatcher is null)
-        {
-            return;
-        }
-
-        var dispatchResult = await _autoExecutionDispatcher.DispatchAsync(
-            projectId,
-            sessionId,
-            userId,
-            candidateWorkItems,
-            cancellationToken);
-        if (!dispatchResult.HasOutcome)
-            return;
-
-        await chatSessionRepository.AppendSessionActivityAsync(
-            projectId,
-            sessionId,
-            BuildStatusActivity(dispatchResult.BuildSummary()),
-            ownerId);
-        await PublishChatSessionEventAsync(
-            userId,
-            projectId,
-            sessionId,
-            true,
-            ChatGenerationStates.Running,
-            dispatchResult.BuildSummary());
-        await PublishChatUpdatedAsync(userId, projectId, sessionId);
-    }
-
     private async Task AppendDynamicDispatchActivityAsync(
         string projectId,
         string sessionId,
         int userId,
         IReadOnlyList<ToolEventDto> toolEvents,
+        DynamicIterationRuntimeOptions dynamicIteration,
         CancellationToken cancellationToken,
         string? ownerId = null)
     {
+        if (!dynamicIteration.Enabled)
+            return;
+
         try
         {
             var dispatchResult = await _dynamicIterationDispatchService.DispatchFromToolEventsAsync(
                 projectId,
+                sessionId,
                 userId,
                 toolEvents,
-                targetBranch: null,
+                dynamicIteration.TargetBranch,
+                dynamicIteration.ExecutionPolicy,
                 cancellationToken);
             if (!dispatchResult.HasOutcome)
                 return;
@@ -1841,6 +1828,10 @@ public class ChatService(
                 generationStatus: dispatchResult.BuildSummaryMessage(),
                 activity);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -2199,6 +2190,10 @@ public class ChatService(
 
                 return await RunAfterHookAsync(toolCall, context, result, ct);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 logger.CopilotToolExecutionFailed(ex, toolCall.Name.SanitizeForLogging());
@@ -2232,6 +2227,10 @@ public class ChatService(
 
             return await RunAfterHookAsync(toolCall, context, result, ct);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger.CopilotToolExecutionFailed(ex, toolCall.Name.SanitizeForLogging());
@@ -2263,8 +2262,10 @@ public class ChatService(
         CancellationToken cancellationToken = default,
         string? ownerId = null,
         IReadOnlyList<LLMMessage>? conversationHistory = null,
-        bool generateWorkItems = false)
+        bool generateWorkItems = false,
+        DynamicIterationRuntimeOptions? dynamicIteration = null)
     {
+        dynamicIteration ??= DynamicIterationRuntimeOptions.Disabled;
         var scopePrompt = IsGlobalScope(projectId)
             ? """
             ## Scope
@@ -2295,6 +2296,27 @@ public class ChatService(
                 Stay focused on project analysis and backlog mutation. Ignore unrelated automation or non-backlog write tasks.
                 """
             );
+        }
+
+        if (dynamicIteration.Enabled)
+        {
+            var targetBranch = string.IsNullOrWhiteSpace(dynamicIteration.TargetBranch)
+                ? "the project's default branch strategy"
+                : $"'{dynamicIteration.TargetBranch}'";
+            var executionPolicy = string.IsNullOrWhiteSpace(dynamicIteration.ExecutionPolicy)
+                ? "balanced"
+                : dynamicIteration.ExecutionPolicy;
+
+            builder.AppendLine();
+            builder.AppendLine();
+            builder.AppendLine($"""
+                ## Dynamic Iteration
+                Dynamic Iteration is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
+                Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request.
+                Prefer actionable leaf work items that can be executed independently. Keep parent/child relationships intact when the request needs a larger feature breakdown.
+                Fleet will automatically start eligible work items after your tool calls complete. Target branch: {targetBranch}. Dispatch strategy: {executionPolicy}.
+                After persisting the work items, summarize what was queued and call out anything that still needs user clarification.
+                """);
         }
 
         var memoryPrompt = await _promptBlockCache.GetMemoryBlockAsync(

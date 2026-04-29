@@ -14,7 +14,8 @@ import type { CreateWorkItemLevelRequest, UpdateWorkItemLevelRequest } from './l
 import {
   getExecutions, getLogs, clearLogs, clearExecutionLogs, startExecution, cancelExecution, pauseExecution, resumeExecution, retryExecution, deleteExecution, getExecutionDocumentation,
 } from './agentsProxy'
-import { getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession } from './chatProxy'
+import { getChatData, getMessages, createChatSession, sendChatMessage, cancelChatGeneration, getAttachments, uploadAttachment, deleteAttachment, deleteChatSession, renameChatSession, updateChatSessionDynamicIteration } from './chatProxy'
+import type { UpdateSessionDynamicIterationRequest } from './chatProxy'
 import { search } from './searchProxy'
 import { getSubscription } from './subscriptionProxy'
 import {
@@ -1059,6 +1060,17 @@ export function useRenameSession(projectId: string | undefined) {
   return useMutation({
     mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
       renameChatSession(projectId, sessionId, title),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
+    },
+  })
+}
+
+export function useUpdateSessionDynamicIteration(projectId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, data }: { sessionId: string; data: UpdateSessionDynamicIterationRequest }) =>
+      updateChatSessionDynamicIteration(projectId, sessionId, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
     },

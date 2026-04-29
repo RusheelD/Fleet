@@ -254,6 +254,7 @@ interface ChatInputProps {
     canceling?: boolean
     statusMessage?: string | null
     statusState?: 'idle' | 'running' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
+    dynamicIterationActive?: boolean
 }
 
 export function ChatInput({
@@ -271,6 +272,7 @@ export function ChatInput({
     canceling = false,
     statusMessage,
     statusState = 'idle',
+    dynamicIterationActive = false,
 }: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
@@ -284,6 +286,14 @@ export function ChatInput({
     const canGenerate = allowGenerate && typeof onGenerate === 'function'
     const showCancelButton = isGenerating || canceling
     const showStatus = Boolean(statusMessage)
+    const primaryAction = dynamicIterationActive ? onGenerate : onSend
+    const primaryLabel = isGenerating
+        ? 'Generating...'
+        : dynamicIterationActive
+            ? 'Iterate'
+            : hasText
+                ? 'Send'
+                : 'Generate'
 
     const statusIconClassName = (() => {
         switch (statusState) {
@@ -377,13 +387,13 @@ export function ChatInput({
                                 <div className={mergeClasses(styles.sendGroup, shouldStackLayout && styles.sendGroupMobile)}>
                                     <Button
                                         appearance="primary"
-                                        icon={isGenerating ? <TaskListAddRegular /> : hasText ? <SendRegular /> : <TaskListAddRegular />}
+                                        icon={isGenerating || dynamicIterationActive || !hasText ? <TaskListAddRegular /> : <SendRegular />}
                                         disabled={disabled}
                                         className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
                                         size={isCompact ? 'small' : 'medium'}
-                                        onClick={hasText ? onSend : onGenerate}
+                                        onClick={hasText || dynamicIterationActive ? primaryAction : onGenerate}
                                     >
-                                        {isGenerating ? 'Generating...' : hasText ? 'Send' : 'Generate'}
+                                        {primaryLabel}
                                     </Button>
                                     <Menu>
                                         <MenuTrigger disableButtonEnhancement>

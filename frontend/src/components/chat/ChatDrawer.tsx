@@ -17,6 +17,7 @@ import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatI
 import {
     useChatData, useChatMessages, useCreateChatSession,
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession, useCancelChatGeneration,
+    useUpdateSessionDynamicIteration,
 } from '../../proxies/dataClient'
 import { cancelChatSessionRequests, sendChatMessage } from '../../proxies/chatProxy'
 import { getApiErrorMessage } from '../../proxies/proxy'
@@ -32,6 +33,7 @@ import type {
     ChatDynamicStrategy,
     ChatGenerationState,
     ChatMessageData,
+    ChatSessionData,
 } from '../../models'
 import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
@@ -187,6 +189,7 @@ export function ChatDrawer({
     const createSessionMutation = useCreateChatSession(projectId)
     const deleteSessionMutation = useDeleteSession(projectId)
     const renameSessionMutation = useRenameSession(projectId)
+    const updateDynamicIterationMutation = useUpdateSessionDynamicIteration(projectId)
     const cancelGenerationMutation = useCancelChatGeneration(projectId)
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId)
@@ -230,6 +233,10 @@ export function ChatDrawer({
         () => sessions.find(s => s.id === activeSession),
         [sessions, activeSession]
     )
+    const activeSessionDynamicOptions = useMemo(
+        () => resolveSessionDynamicOptions(activeSessionData),
+        [activeSessionData],
+    )
     const activeSessionIsSending = Boolean(activeSession && pendingMessageSessionIds.includes(activeSession))
     const activeSessionIsGenerating = Boolean(activeSession && activeSessionData?.isGenerating)
     const activeSessionIsBusy = activeSessionIsSending || activeSessionIsGenerating
@@ -241,11 +248,11 @@ export function ChatDrawer({
     )
 
     useEffect(() => {
-        const options = activeSessionData?.dynamicOptions
+        const options = activeSessionDynamicOptions
         setDynamicIterationEnabled(Boolean(options?.enabled))
         setDynamicBranchName(options?.branchName ?? '')
         setDynamicStrategy(options?.strategy ?? 'balanced')
-    }, [activeSessionData?.id, activeSessionData?.dynamicOptions])
+    }, [activeSessionDynamicOptions])
 
     const displayMessages = useMemo(
         () => reconcileDisplayMessages(serverMessages, optimisticMessages),
@@ -500,6 +507,26 @@ export function ChatDrawer({
         renameSessionMutation.mutate({ sessionId, title })
     }
 
+    const persistDynamicIterationOptions = (
+        isEnabled: boolean,
+        branchName: string,
+        strategy: ChatDynamicStrategy,
+    ) => {
+        if (!activeSession || !allowGenerateWorkItems) {
+            return
+        }
+
+        const normalizedBranch = branchName.trim()
+        updateDynamicIterationMutation.mutate({
+            sessionId: activeSession,
+            data: {
+                isDynamicIterationEnabled: isEnabled,
+                dynamicIterationBranch: isEnabled && normalizedBranch.length > 0 ? normalizedBranch : null,
+                dynamicIterationPolicyJson: isEnabled ? JSON.stringify({ executionPolicy: strategy }) : null,
+            },
+        })
+    }
+
     const handleCancelGeneration = (sessionId?: string) => {
         const resolvedSessionId = sessionId ?? activeSession
         if (!resolvedSessionId) {
@@ -527,15 +554,18 @@ export function ChatDrawer({
         }),
         [dynamicIterationEnabled, dynamicBranchName, dynamicStrategy],
     )
-    const controlsDisabled = activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession
+    const dynamicIterationActive = allowGenerateWorkItems && dynamicIterationEnabled
+    const controlsDisabled = activeSessionIsBusy || createSessionMutation.isPending || updateDynamicIterationMutation.isPending || isCancelingActiveSession
+    const activeDynamicPolicy = activeSessionData?.dynamicPolicy
+        ?? parseDynamicPolicy(activeSessionData?.dynamicIterationPolicyJson)
     const policyBadges = useMemo(() => {
-        const autoStartLimit = activeSessionData?.dynamicPolicy?.autoStartLimit
+        const autoStartLimit = activeDynamicPolicy?.autoStartLimit
         if (typeof autoStartLimit !== 'number' || autoStartLimit <= 0) {
             return []
         }
 
         return [`Auto-start limit ${autoStartLimit}`]
-    }, [activeSessionData?.dynamicPolicy?.autoStartLimit])
+    }, [activeDynamicPolicy?.autoStartLimit])
     const timelineItems = useMemo(
         () => buildChatTimeline(displayMessages, visibleActivity, {
             isBusy: activeSessionIsBusy,
@@ -668,7 +698,11 @@ export function ChatDrawer({
                     <Switch
                         label="Dynamic iteration"
                         checked={dynamicIterationEnabled}
-                        onChange={(_event, data) => setDynamicIterationEnabled(Boolean(data.checked))}
+                        onChange={(_event, data) => {
+                            const isEnabled = Boolean(data.checked)
+                            setDynamicIterationEnabled(isEnabled)
+                            persistDynamicIterationOptions(isEnabled, dynamicBranchName, dynamicStrategy)
+                        }}
                         disabled={controlsDisabled}
                     />
                     {dynamicIterationEnabled && (
@@ -681,6 +715,7 @@ export function ChatDrawer({
                                 <Input
                                     value={dynamicBranchName}
                                     onChange={(_event, data) => setDynamicBranchName(data.value)}
+                                    onBlur={() => persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, dynamicStrategy)}
                                     placeholder="main"
                                     disabled={controlsDisabled}
                                 />
@@ -693,6 +728,7 @@ export function ChatDrawer({
                                         const selected = data.optionValue
                                         if (selected === 'balanced' || selected === 'parallel' || selected === 'sequential') {
                                             setDynamicStrategy(selected)
+                                            persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, selected)
                                         }
                                     }}
                                     disabled={controlsDisabled}
@@ -726,7 +762,7 @@ export function ChatDrawer({
             <ChatInput
                 value={message}
                 onChange={setMessage}
-                onSend={() => handleSend(false)}
+                onSend={() => handleSend(dynamicIterationActive)}
                 onGenerate={allowGenerateWorkItems ? () => handleSend(true) : undefined}
                 onCancelGeneration={activeSessionIsGenerating ? () => handleCancelGeneration(activeSession) : undefined}
                 onFileSelect={handleFileSelect}
@@ -738,9 +774,52 @@ export function ChatDrawer({
                 canceling={isCancelingActiveSession}
                 statusMessage={activeSessionStatusMessage}
                 statusState={activeSessionStatusState}
+                dynamicIterationActive={dynamicIterationActive}
             />
         </div>
     )
+}
+
+function resolveSessionDynamicOptions(session: ChatSessionData | undefined): ChatDynamicOptions | null {
+    if (!session) {
+        return null
+    }
+
+    if (session.dynamicOptions) {
+        return session.dynamicOptions
+    }
+
+    const policy = parseDynamicPolicy(session.dynamicIterationPolicyJson)
+    const strategy = normalizeDynamicStrategy(policy?.executionPolicy)
+        ?? normalizeDynamicStrategy(policy?.strategy)
+        ?? 'balanced'
+    return {
+        enabled: session.isDynamicIterationEnabled,
+        branchName: session.dynamicIterationBranch,
+        strategy,
+    }
+}
+
+function parseDynamicPolicy(policyJson: string | null | undefined) {
+    if (!policyJson) {
+        return null
+    }
+
+    try {
+        return JSON.parse(policyJson) as {
+            executionPolicy?: ChatDynamicStrategy | null
+            strategy?: ChatDynamicStrategy | null
+            autoStartLimit?: number | null
+        }
+    } catch {
+        return null
+    }
+}
+
+function normalizeDynamicStrategy(value: unknown): ChatDynamicStrategy | null {
+    return value === 'balanced' || value === 'parallel' || value === 'sequential'
+        ? value
+        : null
 }
 
 function getVisibleSessionStatus(

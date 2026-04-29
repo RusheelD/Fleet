@@ -51,6 +51,10 @@ export function buildCancelGenerationPath(projectId: string | undefined, session
   return `${chatBase(projectId)}/sessions/${sessionId}/cancel-generation`
 }
 
+export function buildUpdateSessionDynamicIterationPath(projectId: string | undefined, sessionId: string): string {
+  return `${chatBase(projectId)}/sessions/${sessionId}/dynamic-iteration`
+}
+
 function buildSessionRequestKey(projectId: string | undefined, sessionId: string): string {
   return `${projectId?.trim() ?? '__global__'}::${sessionId}`
 }
@@ -129,6 +133,20 @@ export function renameChatSession(projectId: string | undefined, sessionId: stri
 export function cancelChatGeneration(projectId: string | undefined, sessionId: string): Promise<void> {
   cancelChatSessionRequests(projectId, sessionId)
   return post<void>(buildCancelGenerationPath(projectId, sessionId))
+}
+
+export interface UpdateSessionDynamicIterationRequest {
+  isDynamicIterationEnabled: boolean
+  dynamicIterationBranch?: string | null
+  dynamicIterationPolicyJson?: string | null
+}
+
+export function updateChatSessionDynamicIteration(
+  projectId: string | undefined,
+  sessionId: string,
+  request: UpdateSessionDynamicIterationRequest,
+): Promise<void> {
+  return put<void>(buildUpdateSessionDynamicIterationPath(projectId, sessionId), request)
 }
 
 export function cancelChatSessionRequests(projectId: string | undefined, sessionId: string): void {
