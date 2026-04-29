@@ -33,7 +33,24 @@ public class GlobalChatsControllerTests
 
         Assert.IsInstanceOfType<BadRequestObjectResult>(result);
         _chatService.Verify(
-            service => service.SendMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()),
+            service => service.SendMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ChatSendOptions?>()),
+            Times.Never);
+    }
+
+
+    [TestMethod]
+    public async Task SendMessage_WithDynamicIterationRequested_ReturnsBadRequest()
+    {
+        var request = new SendMessageRequest(
+            "hello",
+            false,
+            new DynamicIterationOptionsRequest(true, "parallel", "main"));
+
+        var result = await _sut.SendMessage("sess-1", request);
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+        _chatService.Verify(
+            service => service.SendMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ChatSendOptions?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -43,7 +60,7 @@ public class GlobalChatsControllerTests
         var assistantMessage = new ChatMessageDto("m1", "assistant", "hi", "now");
         var response = new SendMessageResponseDto("sess-1", assistantMessage, [], null);
         _chatService
-            .Setup(service => service.SendMessageAsync("", "sess-1", "hello", false))
+            .Setup(service => service.SendMessageAsync("", "sess-1", "hello", It.Is<ChatSendOptions?>(o => o != null && !o.GenerateWorkItems)))
             .ReturnsAsync(response);
 
         var result = await _sut.SendMessage("sess-1", new SendMessageRequest("hello", false));

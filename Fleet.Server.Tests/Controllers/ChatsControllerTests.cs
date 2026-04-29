@@ -151,7 +151,7 @@ public class ChatsControllerTests
     {
         var msg = new ChatMessageDto("m1", "assistant", "Hi", "2025-01-01");
         var response = new SendMessageResponseDto(SessionId, msg, [], null);
-        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", false)).ReturnsAsync(response);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && !o.GenerateWorkItems && o.DynamicIteration is null))).ReturnsAsync(response);
 
         var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello"));
 
@@ -164,7 +164,7 @@ public class ChatsControllerTests
     public async Task SendMessage_GenerateModeStarted_ReturnsAccepted()
     {
         var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
-        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", true)).ReturnsAsync(response);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && o.GenerateWorkItems && o.DynamicIteration is null))).ReturnsAsync(response);
 
         var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello", true));
 
@@ -172,6 +172,51 @@ public class ChatsControllerTests
         Assert.IsNotNull(accepted);
         Assert.AreSame(response, accepted.Value);
     }
+
+    [TestMethod]
+    public async Task SendMessage_WithDynamicIterationOptions_PassesOptionsToService()
+    {
+        var request = new SendMessageRequest(
+            "hello",
+            true,
+            new DynamicIterationOptionsRequest(true, "parallel", "release/v1"));
+        var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
+        _chatService
+            .Setup(s => s.SendMessageAsync(
+                ProjectId,
+                SessionId,
+                "hello",
+                It.Is<ChatSendOptions?>(o =>
+                    o != null
+                    && o.GenerateWorkItems
+                    && o.DynamicIteration != null
+                    && o.DynamicIteration.Enabled == true
+                    && o.DynamicIteration.ExecutionPolicy == "parallel"
+                    && o.DynamicIteration.TargetBranch == "release/v1"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        var result = await _sut.SendMessage(ProjectId, SessionId, request);
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+    }
+
+    [TestMethod]
+    public async Task SendMessage_WithDynamicIterationButNoGenerateWorkItems_ReturnsBadRequest()
+    {
+        var request = new SendMessageRequest(
+            "hello",
+            false,
+            new DynamicIterationOptionsRequest(true, "parallel", "release/v1"));
+
+        var result = await _sut.SendMessage(ProjectId, SessionId, request);
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+        _chatService.Verify(
+            service => service.SendMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ChatSendOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
 
     // ── GetAttachments ───────────────────────────────────
 

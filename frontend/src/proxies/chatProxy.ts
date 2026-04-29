@@ -1,5 +1,5 @@
 import { get, post, put, del, postForm } from './proxy'
-import type { ChatData, ChatMessageData, ChatSessionData, SendMessageResponse, ChatAttachment } from '../models'
+import type { ChatAttachment, ChatData, ChatMessageData, ChatSessionData, SendMessageOptions, SendMessageResponse } from '../models'
 
 const GLOBAL_CHAT_BASE = '/api/chat'
 const activeChatRequests = new Map<string, AbortController>()
@@ -64,7 +64,7 @@ export async function sendChatMessage(
   projectId: string | undefined,
   sessionId: string,
   content: string,
-  generateWorkItems = false,
+  options?: SendMessageOptions,
 ): Promise<SendMessageResponse> {
   const requestKey = buildSessionRequestKey(projectId, sessionId)
   const controller = new AbortController()
@@ -73,7 +73,7 @@ export async function sendChatMessage(
   try {
     return await post<SendMessageResponse>(
       buildChatMessagesPath(projectId, sessionId),
-      { content, generateWorkItems },
+      { content, generateWorkItems: options?.generateWorkItems ?? false, dynamicIteration: options?.dynamicIteration },
       { signal: controller.signal },
     )
   } finally {

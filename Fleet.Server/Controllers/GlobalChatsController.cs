@@ -86,13 +86,16 @@ public class GlobalChatsController(
     {
         if (request.GenerateWorkItems)
         {
-            return BadRequest(new ProblemDetails
-            {
-                Title = "Bad Request",
-                Detail = "Work-item generation is only available when a project is open.",
-                Status = StatusCodes.Status400BadRequest,
-                Instance = HttpContext?.Request?.Path.ToString() ?? "/api/chat",
-            });
+            return BadRequest(CreateProjectScopeProblemDetails(
+                "Bad Request",
+                "Work-item generation is only available when a project is open."));
+        }
+
+        if (request.DynamicIteration is not null)
+        {
+            return BadRequest(CreateProjectScopeProblemDetails(
+                "Bad Request",
+                "Dynamic iteration overrides are only available when a project is open."));
         }
 
         SendMessageResponseDto response;
@@ -102,7 +105,7 @@ public class GlobalChatsController(
                 GlobalProjectScope,
                 sessionId,
                 request.Content,
-                false,
+                new ChatSendOptions(),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -118,6 +121,17 @@ public class GlobalChatsController(
 
         return Ok(response);
     }
+
+
+    private ProblemDetails CreateProjectScopeProblemDetails(string title, string detail)
+        => new()
+        {
+            Title = title,
+            Detail = detail,
+            Status = StatusCodes.Status400BadRequest,
+            Instance = HttpContext?.Request?.Path.ToString() ?? "/api/chat",
+        };
+
 
     [HttpGet("sessions/{sessionId}/attachments")]
     public async Task<IActionResult> GetAttachments(string sessionId)

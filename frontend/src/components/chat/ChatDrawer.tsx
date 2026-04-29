@@ -339,7 +339,7 @@ export function ChatDrawer({
 
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
-        sendChatMessage(projectId, sessionId, contentToSend, generateWorkItems)
+        sendChatMessage(projectId, sessionId, contentToSend, { generateWorkItems })
             .then(async (response) => {
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })

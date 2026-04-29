@@ -10,6 +10,8 @@ export type {
   ChatSessionActivity,
   ChatMessageData,
   ChatSessionData,
+  SendMessageDynamicIterationOptions,
+  SendMessageOptions,
   SendMessageResponse,
   ToolEvent,
 } from './chat'
