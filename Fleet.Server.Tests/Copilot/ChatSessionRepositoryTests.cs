@@ -181,6 +181,43 @@ public class ChatSessionRepositoryTests
         Assert.AreEqual(string.Empty, activity.TimestampUtc);
     }
 
+    [TestMethod]
+    public async Task UpdateDynamicIterationAsync_ProjectScope_UpdatesSessionAndDtoFields()
+    {
+        await using var context = CreateContext();
+        context.ChatSessions.Add(new ChatSession
+        {
+            Id = "session-6",
+            OwnerId = "42",
+            Title = "Dynamic iteration",
+            LastMessage = "",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            IsActive = true,
+            ProjectId = "proj-1",
+            RecentActivityJson = "[]",
+        });
+        await context.SaveChangesAsync();
+
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.GetCurrentUserIdAsync()).ReturnsAsync(42);
+        var sut = new ChatSessionRepository(context, auth.Object);
+
+        var updated = await sut.UpdateDynamicIterationAsync(
+            "proj-1",
+            "session-6",
+            true,
+            "feature/dynamic",
+            "{\"maxLoops\":4}");
+
+        var sessions = await sut.GetSessionsByProjectIdAsync("proj-1");
+
+        Assert.IsTrue(updated);
+        Assert.AreEqual(1, sessions.Count);
+        Assert.IsTrue(sessions[0].IsDynamicIterationEnabled);
+        Assert.AreEqual("feature/dynamic", sessions[0].DynamicIterationBranch);
+        Assert.AreEqual("{\"maxLoops\":4}", sessions[0].DynamicIterationPolicyJson);
+    }
+
     private static FleetDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<FleetDbContext>()
