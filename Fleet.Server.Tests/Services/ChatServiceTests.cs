@@ -160,6 +160,13 @@ public class ChatServiceTests
     }
 
     [TestMethod]
+    public async Task UpdateSessionDynamicIterationAsync_GlobalScopeEnabled_ThrowsInvalidOperationException()
+    {
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+            _sut.UpdateSessionDynamicIterationAsync(string.Empty, SessionId, true, "feature/foo", "{\"maxLoops\":4}"));
+    }
+
+    [TestMethod]
     public async Task GetChatDataAsync_SkipsStaleRepair_WhenSessionStillHasInFlightRequest()
     {
         var staleSession = new ChatSessionDto(

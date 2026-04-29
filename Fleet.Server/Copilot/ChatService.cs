@@ -167,6 +167,26 @@ public class ChatService(
         return await chatSessionRepository.RenameSessionAsync(projectId, sessionId, title);
     }
 
+    public async Task<bool> UpdateSessionDynamicIterationAsync(
+        string projectId,
+        string sessionId,
+        bool isEnabled,
+        string? branch,
+        string? policyJson)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["ProjectId"] = projectId,
+            ["SessionId"] = sessionId,
+            ["IsDynamicIterationEnabled"] = isEnabled
+        });
+
+        if (isEnabled && IsGlobalScope(projectId))
+            throw new InvalidOperationException("Dynamic iteration is only available in project-scoped chat sessions.");
+
+        return await chatSessionRepository.UpdateDynamicIterationAsync(projectId, sessionId, isEnabled, branch, policyJson);
+    }
+
     public async Task<bool> DeleteSessionAsync(string projectId, string sessionId)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object?>

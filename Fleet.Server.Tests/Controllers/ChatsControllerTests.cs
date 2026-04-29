@@ -144,6 +144,32 @@ public class ChatsControllerTests
         Assert.IsInstanceOfType<NotFoundResult>(result);
     }
 
+    [TestMethod]
+    public async Task UpdateSessionDynamicIteration_InvalidPolicyJson_ReturnsBadRequest()
+    {
+        var result = await _sut.UpdateSessionDynamicIteration(
+            ProjectId,
+            SessionId,
+            new UpdateSessionDynamicIterationRequest(true, "feature/foo", "not-json"));
+
+        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+    }
+
+    [TestMethod]
+    public async Task UpdateSessionDynamicIteration_Found_ReturnsNoContent()
+    {
+        _chatService
+            .Setup(s => s.UpdateSessionDynamicIterationAsync(ProjectId, SessionId, true, "feature/foo", "{\"maxLoops\":4}"))
+            .ReturnsAsync(true);
+
+        var result = await _sut.UpdateSessionDynamicIteration(
+            ProjectId,
+            SessionId,
+            new UpdateSessionDynamicIterationRequest(true, "feature/foo", "{\"maxLoops\":4}"));
+
+        Assert.IsInstanceOfType<NoContentResult>(result);
+    }
+
     // ── SendMessage ──────────────────────────────────────
 
     [TestMethod]
