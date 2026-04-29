@@ -35,7 +35,8 @@ public class ChatService(
     ITokenTracker? tokenTracker = null,
     ToolLifecycleRunner? lifecycleRunner = null,
     ToolResultStore? toolResultStore = null,
-    PromptBlockCache? promptBlockCache = null) : IChatService
+    PromptBlockCache? promptBlockCache = null,
+    IDynamicIterationDispatchService? dynamicIterationDispatchService = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
     private readonly IServerEventPublisher? _eventPublisher = eventPublisher;
@@ -45,6 +46,7 @@ public class ChatService(
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
+    private readonly IDynamicIterationDispatchService _dynamicIterationDispatchService = dynamicIterationDispatchService ?? NoOpDynamicIterationDispatchService.Instance;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -606,6 +608,12 @@ public class ChatService(
                 }
 
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
+                await AppendDynamicDispatchActivityAsync(
+                    projectId,
+                    sessionId,
+                    userId,
+                    toolEvents,
+                    requestCancellation);
                 var assistantMessage = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantContent);
 
@@ -893,6 +901,7 @@ public class ChatService(
             var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
+            var toolEvents = new List<ToolEventDto>();
 
             for (var loop = 0; loop < maxLoops; loop++)
             {
@@ -961,7 +970,7 @@ public class ChatService(
                             userId,
                             progress,
                             true,
-                            new List<ToolEventDto>(),
+                            toolEvents,
                             llmMessages,
                             mcpToolSession,
                             toolCall,
@@ -999,6 +1008,13 @@ public class ChatService(
                 }
 
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
+                await AppendDynamicDispatchActivityAsync(
+                    projectId,
+                    sessionId,
+                    userId,
+                    toolEvents,
+                    requestCancellation,
+                    ownerId);
                 await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent, ownerId);
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
@@ -1541,6 +1557,15 @@ public class ChatService(
             toolName,
             DidToolResultSucceed(toolResult));
 
+    private static ChatSessionActivityDto BuildDispatchActivity(DynamicIterationDispatchResult result)
+        => new(
+            Guid.NewGuid().ToString(),
+            "dispatch",
+            result.BuildSummaryMessage(),
+            DateTime.UtcNow.ToString("O"),
+            "dynamic_iteration_dispatch",
+            result.FailedCount == 0);
+
     private bool CountsTowardToolCallLimit(LLMToolCall toolCall, IMcpToolSession mcpToolSession)
         => !IsWriteToolCall(toolCall, mcpToolSession);
 
@@ -1621,6 +1646,46 @@ public class ChatService(
         => exception.Message.Contains("quota", StringComparison.OrdinalIgnoreCase)
             ? "Generation stopped due to quota limits."
             : "Generation failed. Please try again.";
+
+    private async Task AppendDynamicDispatchActivityAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        IReadOnlyList<ToolEventDto> toolEvents,
+        CancellationToken cancellationToken,
+        string? ownerId = null)
+    {
+        try
+        {
+            var dispatchResult = await _dynamicIterationDispatchService.DispatchFromToolEventsAsync(
+                projectId,
+                userId,
+                toolEvents,
+                targetBranch: null,
+                cancellationToken);
+            if (!dispatchResult.HasOutcome)
+                return;
+
+            var activity = BuildDispatchActivity(dispatchResult);
+            await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, activity, ownerId);
+            await PublishChatSessionEventAsync(
+                userId,
+                projectId,
+                sessionId,
+                isGenerating: true,
+                generationState: ChatGenerationStates.Running,
+                generationStatus: dispatchResult.BuildSummaryMessage(),
+                activity);
+            await PublishChatUpdatedAsync(userId, projectId, sessionId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to append dynamic dispatch activity for session {SessionId}",
+                sessionId.SanitizeForLogging());
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────
 
