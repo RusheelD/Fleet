@@ -85,7 +85,15 @@ export async function sendChatMessage(
   try {
     return await post<SendMessageResponse>(
       buildChatMessagesPath(projectId, sessionId),
-      payload,
+      {
+        content: payload.content,
+        generateWorkItems: payload.generateWorkItems ?? false,
+        dynamicIteration: payload.dynamicOptions ? {
+          enabled: payload.dynamicOptions.enabled,
+          executionPolicy: payload.dynamicOptions.strategy,
+          targetBranch: payload.dynamicOptions.branchName,
+        } : undefined,
+      },
       { signal: controller.signal },
     )
   } finally {

@@ -15,7 +15,7 @@ public interface IChatService
         string projectId,
         string sessionId,
         string content,
-        bool generateWorkItems = false,
+        ChatSendOptions? options = null,
         CancellationToken cancellationToken = default);
 
     // Attachments
