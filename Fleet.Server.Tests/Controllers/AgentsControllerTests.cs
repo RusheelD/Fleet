@@ -74,6 +74,23 @@ public class AgentsControllerTests
             Times.Once);
     }
 
+    [DataTestMethod]
+    [DataRow(5)]
+    [DataRow(23)]
+    public async Task StartExecution_DispatchesRequestedWorkItemNumber(int workItemNumber)
+    {
+        _orchestrationService
+            .Setup(s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync($"exec-{workItemNumber}");
+
+        var result = await _sut.StartExecution(ProjectId, new StartExecutionRequest(workItemNumber));
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+        _orchestrationService.Verify(
+            s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [TestMethod]
     public async Task GetExecutionStatus_Found_ReturnsOk()
     {

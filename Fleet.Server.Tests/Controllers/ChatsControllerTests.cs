@@ -173,6 +173,32 @@ public class ChatsControllerTests
         Assert.AreSame(response, accepted.Value);
     }
 
+    [TestMethod]
+    public async Task SendMessage_GenerateModeStarted_DoesNotPublishWorkItemEventsUntilCompletion()
+    {
+        var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", true)).ReturnsAsync(response);
+
+        var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello", true));
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+        _eventPublisher.Verify(
+            publisher => publisher.PublishProjectEventAsync(
+                It.IsAny<int>(),
+                ProjectId,
+                ServerEventTopics.WorkItemsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _eventPublisher.Verify(
+            publisher => publisher.PublishUserEventAsync(
+                It.IsAny<int>(),
+                ServerEventTopics.ProjectsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ── GetAttachments ───────────────────────────────────
 
     [TestMethod]

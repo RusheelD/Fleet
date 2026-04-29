@@ -82,6 +82,11 @@ type PendingAttachment = ChatAttachment & {
     isUploading: true
 }
 
+interface SessionOptimisticOptions {
+    optimisticGeneratingSessionIds: string[]
+    isCancelingSession: boolean
+}
+
 function buildAttachmentsQueryKey(projectId: string | undefined, sessionId: string) {
     return ['chat-attachments', JSON.stringify([sessionId, projectId])]
 }
@@ -92,6 +97,52 @@ function addSessionId(current: string[], sessionId: string): string[] {
 
 function removeSessionId(current: string[], sessionId: string): string[] {
     return current.filter((candidate) => candidate !== sessionId)
+}
+
+export function resolveContentToSend(userContent: string, generateWorkItems: boolean): string {
+    if (generateWorkItems && !userContent) {
+        return DEFAULT_GENERATE_MESSAGE
+    }
+
+    return userContent
+}
+
+export function applySessionOptimisticState<
+    TSession extends {
+        id: string
+        isGenerating: boolean
+        generationState: ChatGenerationState
+        generationStatus: string | null
+    },
+>(
+    session: TSession,
+    options: SessionOptimisticOptions,
+): TSession {
+    const isOptimisticGenerating = options.optimisticGeneratingSessionIds.includes(session.id)
+    const isCancelingSession = options.isCancelingSession
+
+    let generationState = session.generationState
+    let generationStatus = session.generationStatus
+    let isGenerating = session.isGenerating
+
+    if (isOptimisticGenerating && !session.isGenerating) {
+        isGenerating = true
+        generationState = 'running'
+        generationStatus = session.generationStatus ?? 'Preparing work-item generation...'
+    }
+
+    if (isCancelingSession) {
+        isGenerating = true
+        generationState = 'canceling'
+        generationStatus = 'Canceling generation...'
+    }
+
+    return {
+        ...session,
+        isGenerating,
+        generationState,
+        generationStatus,
+    }
 }
 
 export function ChatDrawer({
@@ -140,33 +191,17 @@ export function ChatDrawer({
     const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     const sessions = useMemo(
         () => serverSessions.map((session) => {
-            const isOptimisticGenerating = optimisticGeneratingSessionIds.includes(session.id)
             const isCancelingSession = Boolean(
                 cancelGenerationMutation.isPending
                 && cancelGenerationMutation.variables === session.id,
             )
-
-            let generationState = session.generationState
-            let generationStatus = session.generationStatus
-            let isGenerating = session.isGenerating
-
-            if (isOptimisticGenerating && !session.isGenerating) {
-                isGenerating = true
-                generationState = 'running'
-                generationStatus = session.generationStatus ?? 'Preparing work-item generation...'
-            }
-
-            if (isCancelingSession) {
-                isGenerating = true
-                generationState = 'canceling'
-                generationStatus = 'Canceling generation...'
-            }
+            const optimisticSession = applySessionOptimisticState(session, {
+                optimisticGeneratingSessionIds,
+                isCancelingSession,
+            })
 
             return {
-                ...session,
-                isGenerating,
-                generationState,
-                generationStatus,
+                ...optimisticSession,
                 recentActivity: normalizeChatSessionActivities(session.recentActivity),
             }
         }),
@@ -307,9 +342,7 @@ export function ChatDrawer({
         setMessage('')
 
         // If generating with no user input, use the default generate message
-        const contentToSend = generateWorkItems && !userContent
-            ? DEFAULT_GENERATE_MESSAGE
-            : userContent
+        const contentToSend = resolveContentToSend(userContent, generateWorkItems)
 
         const attachmentsQueryKey = buildAttachmentsQueryKey(projectId, sessionId)
         const previousAttachments = queryClient.getQueryData<ChatAttachment[]>(attachmentsQueryKey) ?? []
