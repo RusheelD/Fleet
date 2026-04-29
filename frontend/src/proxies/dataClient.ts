@@ -27,7 +27,7 @@ import {
   getMcpServers, getMcpServerTemplates, getSystemMcpServers, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
 } from './userProxy'
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
-import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
+import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, ChatDynamicPolicy, ChatDynamicStrategy, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
 import {
   findExecutionInCollection,
   patchExecutionCollection,
@@ -1071,10 +1071,77 @@ export function useUpdateSessionDynamicIteration(projectId: string | undefined) 
   return useMutation({
     mutationFn: ({ sessionId, data }: { sessionId: string; data: UpdateSessionDynamicIterationRequest }) =>
       updateChatSessionDynamicIteration(projectId, sessionId, data),
-    onSuccess: () => {
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: ['chat-data'] })
+
+      const previousChatData = queryClient.getQueriesData<ChatData>({ queryKey: ['chat-data'] })
+
+      queryClient.setQueriesData<ChatData>(
+        { queryKey: ['chat-data'] },
+        (current) => patchChatDataDynamicIteration(current, variables.sessionId, variables.data),
+      )
+
+      return { previousChatData }
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
     },
+    onError: (_error, _variables, context) => {
+      if (context?.previousChatData) {
+        for (const [queryKey, snapshot] of context.previousChatData) {
+          queryClient.setQueryData(queryKey, snapshot)
+        }
+      }
+    },
   })
+}
+
+function patchChatDataDynamicIteration(
+  current: ChatData | undefined,
+  sessionId: string,
+  data: UpdateSessionDynamicIterationRequest,
+): ChatData | undefined {
+  if (!current) return current
+
+  const policy = parseChatDynamicPolicy(data.dynamicIterationPolicyJson)
+  const strategy = normalizeChatDynamicStrategy(policy?.executionPolicy)
+    ?? normalizeChatDynamicStrategy(policy?.strategy)
+
+  return {
+    ...current,
+    sessions: current.sessions.map((session) =>
+      session.id === sessionId
+        ? {
+          ...session,
+          isDynamicIterationEnabled: data.isDynamicIterationEnabled,
+          dynamicIterationBranch: data.dynamicIterationBranch ?? null,
+          dynamicIterationPolicyJson: data.dynamicIterationPolicyJson ?? null,
+          dynamicOptions: {
+            enabled: data.isDynamicIterationEnabled,
+            branchName: data.dynamicIterationBranch ?? null,
+            strategy,
+          },
+          dynamicPolicy: policy,
+        }
+        : session,
+    ),
+  }
+}
+
+function parseChatDynamicPolicy(policyJson: string | null | undefined): ChatDynamicPolicy | null {
+  if (!policyJson) return null
+
+  try {
+    return JSON.parse(policyJson) as ChatDynamicPolicy
+  } catch {
+    return null
+  }
+}
+
+function normalizeChatDynamicStrategy(value: unknown): ChatDynamicStrategy | null {
+  return value === 'balanced' || value === 'parallel' || value === 'sequential'
+    ? value
+    : null
 }
 
 export function useCancelChatGeneration(projectId: string | undefined) {

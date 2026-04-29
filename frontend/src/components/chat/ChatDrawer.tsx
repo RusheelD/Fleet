@@ -39,7 +39,7 @@ import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
 import { buildChatTimeline } from './chatTimeline'
-import { resolveContentToSend, applySessionOptimisticState } from './chatDrawerHelpers'
+import { resolveContentToSend, applySessionOptimisticState, canSubmitChatMessage } from './chatDrawerHelpers'
 
 const useStyles = makeStyles({
     drawer: {
@@ -209,6 +209,7 @@ export function ChatDrawer({
             const optimisticSession = applySessionOptimisticState(session, {
                 optimisticGeneratingSessionIds,
                 isCancelingSession,
+                isDynamicIterationSession: Boolean(resolveSessionDynamicOptions(session)?.enabled),
             })
 
             return {
@@ -365,7 +366,8 @@ export function ChatDrawer({
         setMessage('')
 
         // If generating with no user input, use the default generate message
-        const contentToSend = resolveContentToSend(userContent, generateWorkItems)
+        const isDynamicIterationSend = Boolean(nextDynamicOptions?.enabled)
+        const contentToSend = resolveContentToSend(userContent, generateWorkItems, isDynamicIterationSend)
 
         const attachmentsQueryKey = buildAttachmentsQueryKey(projectId, sessionId)
         const previousAttachments = queryClient.getQueryData<ChatAttachment[]>(attachmentsQueryKey) ?? []
@@ -443,10 +445,11 @@ export function ChatDrawer({
 
     const handleSend = (generateWorkItems = false) => {
         const userContent = message.trim()
-        if (controlsDisabled) return
+        const isDynamicIterationSend = generateWorkItems && dynamicIterationEnabled
+        if (messageActionsDisabled) return
         if (hasUploadingAttachments) return
         if (generateWorkItems && !allowGenerateWorkItems) return
-        if (!userContent && !generateWorkItems) return
+        if (!canSubmitChatMessage(userContent, generateWorkItems, isDynamicIterationSend)) return
 
         const messageAttachments = attachmentsForNextMessage
         const nextDynamicOptions = generateWorkItems && allowGenerateWorkItems
@@ -542,7 +545,7 @@ export function ChatDrawer({
     }
 
     const activeSessionStatusState = activeSessionData?.generationState ?? 'idle'
-    const activeSessionStatusMessage = getVisibleSessionStatus(activeSessionData)
+    const activeSessionStatusMessage = getVisibleSessionStatus(activeSessionData, Boolean(activeSessionDynamicOptions?.enabled))
     const visibleActivity = useMemo(() => {
         return activeSessionData?.recentActivity ?? []
     }, [activeSessionData?.recentActivity])
@@ -555,7 +558,8 @@ export function ChatDrawer({
         [dynamicIterationEnabled, dynamicBranchName, dynamicStrategy],
     )
     const dynamicIterationActive = allowGenerateWorkItems && dynamicIterationEnabled
-    const controlsDisabled = activeSessionIsBusy || createSessionMutation.isPending || updateDynamicIterationMutation.isPending || isCancelingActiveSession
+    const messageActionsDisabled = activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession
+    const dynamicSettingsDisabled = messageActionsDisabled || updateDynamicIterationMutation.isPending
     const activeDynamicPolicy = activeSessionData?.dynamicPolicy
         ?? parseDynamicPolicy(activeSessionData?.dynamicIterationPolicyJson)
     const policyBadges = useMemo(() => {
@@ -569,9 +573,14 @@ export function ChatDrawer({
     const timelineItems = useMemo(
         () => buildChatTimeline(displayMessages, visibleActivity, {
             isBusy: activeSessionIsBusy,
-            statusMessage: activeSessionStatusMessage ?? (activeSessionIsGenerating ? 'Generating work items...' : 'Fleet AI is thinking...'),
+            statusMessage: activeSessionStatusMessage
+                ?? (activeSessionIsGenerating
+                    ? dynamicIterationActive
+                        ? 'Iterating on requested changes...'
+                        : 'Generating work items...'
+                    : 'Fleet AI is thinking...'),
         }),
-        [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating],
+        [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating, dynamicIterationActive],
     )
 
     const handleFileSelect = (files: File[]) => {
@@ -648,6 +657,7 @@ export function ChatDrawer({
                     || deleteSessionMutation.isPending
                     || renameSessionMutation.isPending
                     || activeSessionIsBusy
+                    || createSessionMutation.isPending
                     || isCancelingActiveSession
                 }
             />
@@ -703,7 +713,7 @@ export function ChatDrawer({
                             setDynamicIterationEnabled(isEnabled)
                             persistDynamicIterationOptions(isEnabled, dynamicBranchName, dynamicStrategy)
                         }}
-                        disabled={controlsDisabled}
+                        disabled={dynamicSettingsDisabled}
                     />
                     {dynamicIterationEnabled && (
                         <div className={mergeClasses(
@@ -717,7 +727,7 @@ export function ChatDrawer({
                                     onChange={(_event, data) => setDynamicBranchName(data.value)}
                                     onBlur={() => persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, dynamicStrategy)}
                                     placeholder="main"
-                                    disabled={controlsDisabled}
+                                    disabled={dynamicSettingsDisabled}
                                 />
                             </Field>
                             <Field label="Dispatch strategy">
@@ -731,7 +741,7 @@ export function ChatDrawer({
                                             persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, selected)
                                         }
                                     }}
-                                    disabled={controlsDisabled}
+                                    disabled={dynamicSettingsDisabled}
                                 >
                                     {DYNAMIC_STRATEGIES.map((option) => (
                                         <Option key={option.value} value={option.value}>
@@ -756,7 +766,7 @@ export function ChatDrawer({
             <AttachedFiles
                 attachments={displayAttachments}
                 onDelete={(id) => deleteMutation.mutate(id)}
-                deleting={deleteMutation.isPending || uploadMutation.isPending || controlsDisabled}
+                deleting={deleteMutation.isPending || uploadMutation.isPending || messageActionsDisabled}
             />
 
             <ChatInput
@@ -768,7 +778,7 @@ export function ChatDrawer({
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
                 forceStackedLayout={hasConstrainedPaneWidth}
-                disabled={controlsDisabled || hasUploadingAttachments}
+                disabled={messageActionsDisabled || hasUploadingAttachments}
                 uploading={uploadMutation.isPending}
                 isGenerating={activeSessionIsGenerating}
                 canceling={isCancelingActiveSession}
@@ -828,13 +838,15 @@ function getVisibleSessionStatus(
         generationState: ChatGenerationState
         generationStatus: string | null
     } | undefined,
+    isDynamicIterationSession = false,
 ): string | null {
     if (!session) {
         return null
     }
 
     if (session.isGenerating) {
-        return session.generationStatus ?? 'Generating work items...'
+        return session.generationStatus
+            ?? (isDynamicIterationSession ? 'Iterating on requested changes...' : 'Generating work items...')
     }
 
     switch (session.generationState) {

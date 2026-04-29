@@ -286,14 +286,27 @@ export function ChatInput({
     const canGenerate = allowGenerate && typeof onGenerate === 'function'
     const showCancelButton = isGenerating || canceling
     const showStatus = Boolean(statusMessage)
-    const primaryAction = dynamicIterationActive ? onGenerate : onSend
+    const primaryAction = dynamicIterationActive ? onGenerate : hasText ? onSend : onGenerate
+    const primaryActionAvailable = typeof primaryAction === 'function'
+    const primaryDisabled = Boolean(disabled)
+        || !primaryActionAvailable
+        || (dynamicIterationActive ? !hasText : !hasText && !canGenerate)
     const primaryLabel = isGenerating
-        ? 'Generating...'
+        ? dynamicIterationActive ? 'Iterating...' : 'Generating...'
         : dynamicIterationActive
             ? 'Iterate'
             : hasText
                 ? 'Send'
                 : 'Generate'
+    const primaryIcon = isGenerating || dynamicIterationActive || !hasText
+        ? <TaskListAddRegular />
+        : <SendRegular />
+    const inputPlaceholder = dynamicIterationActive
+        ? 'Describe the code change to iterate on...'
+        : 'Describe what you want to build...'
+    const inputHint = dynamicIterationActive
+        ? 'Enter adds a new line. Ctrl/Cmd+Enter iterates. Upload images, docs, or assets for Fleet to use.'
+        : 'Enter adds a new line. Ctrl/Cmd+Enter sends. Upload images, docs, or assets for Fleet to use.'
 
     const statusIconClassName = (() => {
         switch (statusState) {
@@ -367,7 +380,7 @@ export function ChatInput({
             <div className={mergeClasses(styles.inputRow, isCompact && styles.inputRowCompact, shouldStackLayout && styles.inputRowMobile)}>
                 <textarea
                     ref={textareaRef}
-                    placeholder="Describe what you want to build..."
+                    placeholder={inputPlaceholder}
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
                     rows={2}
@@ -376,7 +389,7 @@ export function ChatInput({
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                             e.preventDefault()
-                            if (hasText && onSend) onSend()
+                            if (!primaryDisabled) primaryAction?.()
                         }
                     }}
                 />
@@ -385,44 +398,60 @@ export function ChatInput({
                         {canGenerate ? (
                             <>
                                 <div className={mergeClasses(styles.sendGroup, shouldStackLayout && styles.sendGroupMobile)}>
-                                    <Button
-                                        appearance="primary"
-                                        icon={isGenerating || dynamicIterationActive || !hasText ? <TaskListAddRegular /> : <SendRegular />}
-                                        disabled={disabled}
-                                        className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
-                                        size={isCompact ? 'small' : 'medium'}
-                                        onClick={hasText || dynamicIterationActive ? primaryAction : onGenerate}
-                                    >
-                                        {primaryLabel}
-                                    </Button>
-                                    <Menu>
-                                        <MenuTrigger disableButtonEnhancement>
+                                    {dynamicIterationActive ? (
+                                        <Button
+                                            appearance="primary"
+                                            icon={primaryIcon}
+                                            disabled={primaryDisabled}
+                                            className={mergeClasses(shouldStackLayout && styles.sendButtonFlexible)}
+                                            size={isCompact ? 'small' : 'medium'}
+                                            onClick={() => primaryAction?.()}
+                                        >
+                                            {primaryLabel}
+                                        </Button>
+                                    ) : (
+                                        <>
                                             <Button
                                                 appearance="primary"
-                                                icon={<ChevronDownRegular />}
-                                                disabled={disabled}
-                                                className={styles.menuButton}
+                                                icon={primaryIcon}
+                                                disabled={primaryDisabled}
+                                                className={mergeClasses(styles.sendButton, shouldStackLayout && styles.sendButtonFlexible)}
                                                 size={isCompact ? 'small' : 'medium'}
-                                            />
-                                        </MenuTrigger>
-                                        <MenuPopover>
-                                            <MenuList>
-                                                <MenuItem
-                                                    icon={<SendRegular />}
-                                                    disabled={!hasText}
-                                                    onClick={onSend}
-                                                >
-                                                    Send
-                                                </MenuItem>
-                                                <MenuItem
-                                                    icon={<TaskListAddRegular />}
-                                                    onClick={onGenerate}
-                                                >
-                                                    {hasText ? 'Send & Generate' : 'Generate Work Items'}
-                                                </MenuItem>
-                                            </MenuList>
-                                        </MenuPopover>
-                                    </Menu>
+                                                onClick={() => primaryAction?.()}
+                                            >
+                                                {primaryLabel}
+                                            </Button>
+                                            <Menu>
+                                                <MenuTrigger disableButtonEnhancement>
+                                                    <Button
+                                                        appearance="primary"
+                                                        icon={<ChevronDownRegular />}
+                                                        disabled={disabled}
+                                                        className={styles.menuButton}
+                                                        size={isCompact ? 'small' : 'medium'}
+                                                    />
+                                                </MenuTrigger>
+                                                <MenuPopover>
+                                                    <MenuList>
+                                                        <MenuItem
+                                                            icon={<SendRegular />}
+                                                            disabled={!hasText || disabled}
+                                                            onClick={onSend}
+                                                        >
+                                                            Send
+                                                        </MenuItem>
+                                                        <MenuItem
+                                                            icon={<TaskListAddRegular />}
+                                                            disabled={disabled}
+                                                            onClick={onGenerate}
+                                                        >
+                                                            {hasText ? 'Send & Generate' : 'Generate Work Items'}
+                                                        </MenuItem>
+                                                    </MenuList>
+                                                </MenuPopover>
+                                            </Menu>
+                                        </>
+                                    )}
                                 </div>
                                 {showCancelButton && onCancelGeneration && (
                                     <Button
@@ -485,7 +514,7 @@ export function ChatInput({
                     </Button>
                 </div>
                 <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, shouldStackLayout && styles.inputHintMobile)}>
-                    Enter adds a new line. Ctrl/Cmd+Enter sends. Upload images, docs, or assets for Fleet to use.
+                    {inputHint}
                 </Caption1>
             </div>
         </div>

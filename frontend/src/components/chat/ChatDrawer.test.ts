@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applySessionOptimisticState, resolveContentToSend } from './chatDrawerHelpers'
+import { applySessionOptimisticState, canSubmitChatMessage, resolveContentToSend } from './chatDrawerHelpers'
 import type { ChatSessionData } from '../../models'
 
 function createSession(overrides: Partial<ChatSessionData> = {}): ChatSessionData {
@@ -31,8 +31,21 @@ describe('ChatDrawer mode helpers', () => {
     expect(content).toContain('Generate work-items based on provided context')
   })
 
+  it('does not substitute a backlog prompt for an empty dynamic iteration request', () => {
+    expect(resolveContentToSend('', true, true)).toBe('')
+  })
+
   it('preserves typed input in normal mode', () => {
     expect(resolveContentToSend('hello', false)).toBe('hello')
+  })
+
+  it('requires explicit user intent before submitting dynamic iteration', () => {
+    expect(canSubmitChatMessage('', true, true)).toBe(false)
+    expect(canSubmitChatMessage('Fix the auth retry bug', true, true)).toBe(true)
+  })
+
+  it('still allows empty backlog generation outside dynamic iteration', () => {
+    expect(canSubmitChatMessage('', true, false)).toBe(true)
   })
 })
 
@@ -48,6 +61,20 @@ describe('ChatDrawer optimistic generation status', () => {
     expect(updated.isGenerating).toBe(true)
     expect(updated.generationState).toBe('running')
     expect(updated.generationStatus).toBe('Preparing work-item generation...')
+  })
+
+  it('uses dynamic iteration language for optimistic dynamic runs', () => {
+    const session = createSession({ isDynamicIterationEnabled: true })
+
+    const updated = applySessionOptimisticState(session, {
+      optimisticGeneratingSessionIds: ['sess-1'],
+      isCancelingSession: false,
+      isDynamicIterationSession: true,
+    })
+
+    expect(updated.isGenerating).toBe(true)
+    expect(updated.generationState).toBe('running')
+    expect(updated.generationStatus).toBe('Preparing dynamic iteration...')
   })
 
   it('shows canceling status when cancel mutation is pending', () => {

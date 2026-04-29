@@ -6,10 +6,28 @@ const DEFAULT_GENERATE_MESSAGE =
 export interface SessionOptimisticOptions {
     optimisticGeneratingSessionIds: string[]
     isCancelingSession: boolean
+    isDynamicIterationSession?: boolean
 }
 
-export function resolveContentToSend(userContent: string, generateWorkItems: boolean): string {
-    if (generateWorkItems && !userContent) {
+export function canSubmitChatMessage(
+    userContent: string,
+    generateWorkItems: boolean,
+    isDynamicIterationSend: boolean,
+): boolean {
+    const hasContent = userContent.trim().length > 0
+    if (isDynamicIterationSend) {
+        return hasContent
+    }
+
+    return hasContent || generateWorkItems
+}
+
+export function resolveContentToSend(
+    userContent: string,
+    generateWorkItems: boolean,
+    isDynamicIterationSend = false,
+): string {
+    if (generateWorkItems && !isDynamicIterationSend && !userContent) {
         return DEFAULT_GENERATE_MESSAGE
     }
 
@@ -37,7 +55,8 @@ export function applySessionOptimisticState<
     if (isOptimisticGenerating && !session.isGenerating) {
         isGenerating = true
         generationState = 'running'
-        generationStatus = session.generationStatus ?? 'Preparing work-item generation...'
+        generationStatus = session.generationStatus
+            ?? (options.isDynamicIterationSession ? 'Preparing dynamic iteration...' : 'Preparing work-item generation...')
     }
 
     if (isCancelingSession) {

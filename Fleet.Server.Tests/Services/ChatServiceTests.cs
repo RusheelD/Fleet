@@ -796,6 +796,14 @@ public class ChatServiceTests
             SessionId,
             It.Is<ChatSessionActivityDto>(activity => activity.ToolName == "dynamic_iteration_dispatch"),
             It.IsAny<string?>()), Times.Once);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            ChatGenerationStates.Completed,
+            "Dynamic iteration started.",
+            It.IsAny<ChatSessionActivityDto?>(),
+            It.IsAny<string?>()), Times.Once);
     }
 
     [TestMethod]

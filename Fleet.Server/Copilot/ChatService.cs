@@ -383,7 +383,7 @@ public class ChatService(
                     progress,
                     isGenerating: true,
                     generationState: ChatGenerationStates.Running,
-                    generationStatus: "Preparing work-item generation...",
+                    generationStatus: BuildPreparingGenerationStatus(dynamicIteration),
                     publish: false);
                 heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
                 heartbeatTask = RunGenerationHeartbeatLoopAsync(projectId, sessionId, progress, heartbeatCts.Token);
@@ -411,7 +411,7 @@ public class ChatService(
                     progress,
                     isGenerating: true,
                     generationState: ChatGenerationStates.Running,
-                    generationStatus: "Loading chat context...");
+                    generationStatus: BuildLoadingContextStatus(dynamicIteration));
             }
             var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId);
             var llmMessages = history.Select(ToLLMMessage).ToList();
@@ -422,7 +422,7 @@ public class ChatService(
                 llmMessages.Add(new LLMMessage
                 {
                     Role = "user",
-                    Content = "Generate work-items based on provided context",
+                    Content = BuildGenerationTriggerMessage(dynamicIteration),
                 });
             }
 
@@ -454,7 +454,7 @@ public class ChatService(
                     progress,
                     isGenerating: true,
                     generationState: ChatGenerationStates.Running,
-                    generationStatus: "Naming and planning the backlog...");
+                    generationStatus: BuildPlanningGenerationStatus(dynamicIteration));
                 await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation);
             }
 
@@ -493,7 +493,7 @@ public class ChatService(
                             progress,
                             isGenerating: true,
                             generationState: ChatGenerationStates.Running,
-                            generationStatus: "Thinking through the next work-item changes...");
+                            generationStatus: BuildThinkingGenerationStatus(dynamicIteration));
                     }
                     response = await llmClient.CompleteAsync(request, requestCancellation);
                     tokenTracker?.Record(response.Usage);
@@ -656,17 +656,17 @@ public class ChatService(
                         progress,
                         isGenerating: true,
                         generationState: ChatGenerationStates.Running,
-                        generationStatus: "Refining the backlog before applying changes...");
+                        generationStatus: BuildRefiningGenerationStatus(dynamicIteration));
                     llmMessages.Add(new LLMMessage
                     {
                         Role = "user",
-                        Content = BuildMissingWorkItemMutationInstruction(),
+                        Content = BuildMissingWorkItemMutationInstruction(dynamicIteration),
                     });
                     continue;
                 }
 
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
-                await AppendDynamicDispatchActivityAsync(
+                var dynamicDispatchResult = await AppendDynamicDispatchActivityAsync(
                     projectId,
                     sessionId,
                     userId,
@@ -678,21 +678,21 @@ public class ChatService(
 
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
+                var completionStatus = BuildGenerationCompletionStatus(
+                    dynamicIteration,
+                    performedWorkItemMutation,
+                    dynamicDispatchResult);
                 SetGenerationProgress(
                     progress,
                     false,
                     ChatGenerationStates.Completed,
-                    performedWorkItemMutation
-                        ? "Work-item generation completed."
-                        : "Response completed.");
+                    completionStatus);
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
                     generateWorkItems,
                     ChatGenerationStates.Completed,
-                    performedWorkItemMutation
-                        ? "Work-item generation completed."
-                        : "Response completed.",
+                    completionStatus,
                     userId: userId,
                     publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
@@ -711,19 +711,19 @@ public class ChatService(
                     projectId,
                     sessionId,
                     "assistant",
-                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.");
-                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "No work-item mutation was completed.");
+                    BuildNoWorkItemMutationMessage(dynamicIteration));
+                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, BuildNoWorkItemMutationStatus(dynamicIteration));
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
                     generateWorkItems,
                     ChatGenerationStates.Failed,
-                    "No work-item mutation was completed.",
+                    BuildNoWorkItemMutationStatus(dynamicIteration),
                     userId: userId,
                     publishSessionEvent: true);
                 await PublishChatUpdatedAsync(userId, projectId, sessionId);
                 await RefundIfNeededAsync(generateWorkItems, chargedWorkItemRun, userId);
-                return new SendMessageResponseDto(sessionId, failureMsg, [.. toolEvents], "No work-item mutation was completed.");
+                return new SendMessageResponseDto(sessionId, failureMsg, [.. toolEvents], BuildNoWorkItemMutationStatus(dynamicIteration));
             }
 
             var fallbackMsg = await chatSessionRepository.AddMessageAsync(
@@ -821,13 +821,14 @@ public class ChatService(
             userId = await authService.GetCurrentUserIdAsync();
             sessionCts = RegisterInFlightRequest(requestKey);
             messageAttachments = await PersistUserMessageAsync(projectId, sessionId, content);
+            var queuedStatus = BuildQueuedGenerationStatus(dynamicIteration);
             await chatSessionRepository.UpdateSessionGenerationStateAsync(
                 projectId,
                 sessionId,
                 true,
                 ChatGenerationStates.Running,
-                "Queued work-item generation...",
-                BuildStatusActivity("Queued work-item generation..."));
+                queuedStatus,
+                BuildStatusActivity(queuedStatus));
             await _usageLedgerService.ChargeRunAsync(userId, MonthlyRunType.WorkItem);
             chargedWorkItemRun = true;
             await PublishChatSessionEventAsync(
@@ -836,7 +837,7 @@ public class ChatService(
                 sessionId,
                 true,
                 ChatGenerationStates.Running,
-                "Queued work-item generation...");
+                queuedStatus);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
             logger.LogInformation(
                 "Queued deferred work-item generation for session {SessionId} in project {ProjectId}",
@@ -911,7 +912,7 @@ public class ChatService(
         {
             IsGenerating = true,
             GenerationState = ChatGenerationStates.Running,
-            GenerationStatus = "Loading chat context...",
+            GenerationStatus = BuildLoadingContextStatus(dynamicIteration),
         };
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, sessionCts.Token);
@@ -928,21 +929,22 @@ public class ChatService(
                 progress,
                 isGenerating: true,
                 generationState: ChatGenerationStates.Running,
-                generationStatus: "Loading chat context...",
+                generationStatus: BuildLoadingContextStatus(dynamicIteration),
                 ownerId: ownerId);
             var history = await chatSessionRepository.GetMessagesBySessionIdAsync(projectId, sessionId, ownerId);
             var llmMessages = history.Select(ToLLMMessage).ToList();
+            var generationTrigger = BuildGenerationTriggerMessage(dynamicIteration);
             llmMessages.Add(new LLMMessage
             {
                 Role = "user",
-                Content = "Generate work-items based on provided context",
+                Content = generationTrigger,
             });
 
             var systemPrompt = await BuildSystemPromptAsync(
                 projectId,
                 sessionId,
                 userId,
-                "Generate work-items based on provided context",
+                generationTrigger,
                 requestCancellation,
                 ownerId,
                 conversationHistory: llmMessages,
@@ -959,7 +961,7 @@ public class ChatService(
                 progress,
                 isGenerating: true,
                 generationState: ChatGenerationStates.Running,
-                generationStatus: "Naming and planning the backlog...",
+                generationStatus: BuildPlanningGenerationStatus(dynamicIteration),
                 ownerId: ownerId);
             await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation, ownerId);
 
@@ -977,7 +979,7 @@ public class ChatService(
                     progress,
                     isGenerating: true,
                     generationState: ChatGenerationStates.Running,
-                    generationStatus: "Thinking through the next work-item changes...",
+                    generationStatus: BuildThinkingGenerationStatus(dynamicIteration),
                     ownerId: ownerId);
                 var request = new LLMRequest(systemPrompt, llmMessages, toolDefs, config.GenerateModel);
                 var response = await llmClient.CompleteAsync(request, requestCancellation);
@@ -1058,22 +1060,22 @@ public class ChatService(
                     await UpdateGenerationProgressAsync(
                         projectId,
                         sessionId,
-                    userId,
-                    progress,
-                    isGenerating: true,
-                    generationState: ChatGenerationStates.Running,
-                    generationStatus: "Refining the backlog before applying changes...",
-                    ownerId: ownerId);
+                        userId,
+                        progress,
+                        isGenerating: true,
+                        generationState: ChatGenerationStates.Running,
+                        generationStatus: BuildRefiningGenerationStatus(dynamicIteration),
+                        ownerId: ownerId);
                     llmMessages.Add(new LLMMessage
                     {
                         Role = "user",
-                        Content = BuildMissingWorkItemMutationInstruction(),
+                        Content = BuildMissingWorkItemMutationInstruction(dynamicIteration),
                     });
                     continue;
                 }
 
                 var assistantContent = response.Content ?? "I wasn't able to generate a response.";
-                await AppendDynamicDispatchActivityAsync(
+                var dynamicDispatchResult = await AppendDynamicDispatchActivityAsync(
                     projectId,
                     sessionId,
                     userId,
@@ -1084,21 +1086,21 @@ public class ChatService(
                 await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent, ownerId);
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
+                var completionStatus = BuildGenerationCompletionStatus(
+                    dynamicIteration,
+                    performedWorkItemMutation,
+                    dynamicDispatchResult);
                 SetGenerationProgress(
                     progress,
                     false,
                     ChatGenerationStates.Completed,
-                    performedWorkItemMutation
-                        ? "Work-item generation completed."
-                        : "Response completed.");
+                    completionStatus);
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
                     wasGenerating: true,
                     generationState: ChatGenerationStates.Completed,
-                    generationStatus: performedWorkItemMutation
-                        ? "Work-item generation completed."
-                        : "Response completed.",
+                    generationStatus: completionStatus,
                     ownerId: ownerId,
                     userId: userId,
                     publishSessionEvent: true);
@@ -1113,15 +1115,15 @@ public class ChatService(
                     projectId,
                     sessionId,
                     "assistant",
-                    "I wasn't able to create or update any work items yet. Please try again or simplify the request.",
+                    BuildNoWorkItemMutationMessage(dynamicIteration),
                     ownerId);
-                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, "No work-item mutation was completed.");
+                SetGenerationProgress(progress, false, ChatGenerationStates.Failed, BuildNoWorkItemMutationStatus(dynamicIteration));
                 await ClearGeneratingFlagAsync(
                     projectId,
                     sessionId,
                     wasGenerating: true,
                     generationState: ChatGenerationStates.Failed,
-                    generationStatus: "No work-item mutation was completed.",
+                    generationStatus: BuildNoWorkItemMutationStatus(dynamicIteration),
                     ownerId: ownerId,
                     userId: userId,
                     publishSessionEvent: true);
@@ -1372,8 +1374,65 @@ public class ChatService(
     private static bool DidWorkItemMutationSucceed(string toolName, string toolResult)
         => WorkItemMutationToolNames.Contains(toolName) && DidToolResultSucceed(toolResult);
 
-    private static string BuildMissingWorkItemMutationInstruction()
-        => "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
+    private static string BuildQueuedGenerationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Queued dynamic iteration..." : "Queued work-item generation...";
+
+    private static string BuildPreparingGenerationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Preparing dynamic iteration..." : "Preparing work-item generation...";
+
+    private static string BuildLoadingContextStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Loading iteration context..." : "Loading chat context...";
+
+    private static string BuildPlanningGenerationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Naming and planning the iteration..." : "Naming and planning the backlog...";
+
+    private static string BuildThinkingGenerationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Thinking through the requested code changes..." : "Thinking through the next work-item changes...";
+
+    private static string BuildRefiningGenerationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled ? "Refining the iteration plan before applying changes..." : "Refining the backlog before applying changes...";
+
+    private static string BuildGenerationCompletionStatus(
+        DynamicIterationRuntimeOptions dynamicIteration,
+        bool performedWorkItemMutation,
+        DynamicIterationDispatchResult? dispatchResult = null)
+    {
+        if (dynamicIteration.Enabled && performedWorkItemMutation)
+        {
+            if (dispatchResult?.StartedCount > 0)
+                return "Dynamic iteration started.";
+            if (dispatchResult?.AcceptedCount > 0)
+                return "Dynamic iteration queued.";
+            if (dispatchResult?.FailedCount > 0)
+                return "Dynamic iteration dispatch needs attention.";
+
+            return "Dynamic iteration updated work items.";
+        }
+
+        return performedWorkItemMutation
+            ? "Work-item generation completed."
+            : "Response completed.";
+    }
+
+    private static string BuildGenerationTriggerMessage(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled
+            ? "Create or update Fleet work items for the user's requested code iteration so Fleet can dispatch eligible work items."
+            : "Generate work-items based on provided context";
+
+    private static string BuildMissingWorkItemMutationInstruction(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled
+            ? "You have not actually created or updated any Fleet work items for this iteration yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items."
+            : "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
+
+    private static string BuildNoWorkItemMutationMessage(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled
+            ? "I wasn't able to create or update any work items for this iteration yet. Please try again or simplify the requested code change."
+            : "I wasn't able to create or update any work items yet. Please try again or simplify the request.";
+
+    private static string BuildNoWorkItemMutationStatus(DynamicIterationRuntimeOptions dynamicIteration)
+        => dynamicIteration.Enabled
+            ? "No dynamic iteration work-item mutation was completed."
+            : "No work-item mutation was completed.";
 
     private async Task<ChatTooling> CreateChatToolingAsync(
         string projectId,
@@ -1792,7 +1851,7 @@ public class ChatService(
             ? "Generation stopped due to quota limits."
             : "Generation failed. Please try again.";
 
-    private async Task AppendDynamicDispatchActivityAsync(
+    private async Task<DynamicIterationDispatchResult?> AppendDynamicDispatchActivityAsync(
         string projectId,
         string sessionId,
         int userId,
@@ -1802,7 +1861,7 @@ public class ChatService(
         string? ownerId = null)
     {
         if (!dynamicIteration.Enabled)
-            return;
+            return null;
 
         try
         {
@@ -1815,7 +1874,7 @@ public class ChatService(
                 dynamicIteration.ExecutionPolicy,
                 cancellationToken);
             if (!dispatchResult.HasOutcome)
-                return;
+                return null;
 
             var activity = BuildDispatchActivity(dispatchResult);
             await chatSessionRepository.AppendSessionActivityAsync(projectId, sessionId, activity, ownerId);
@@ -1828,6 +1887,7 @@ public class ChatService(
                 generationStatus: dispatchResult.BuildSummaryMessage(),
                 activity);
             await PublishChatUpdatedAsync(userId, projectId, sessionId);
+            return dispatchResult;
         }
         catch (OperationCanceledException)
         {
@@ -1839,6 +1899,7 @@ public class ChatService(
                 ex,
                 "Failed to append dynamic dispatch activity for session {SessionId}",
                 sessionId.SanitizeForLogging());
+            return null;
         }
     }
 
