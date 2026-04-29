@@ -253,6 +253,7 @@ builder.Services.AddHttpClient("GitHub", client =>
 
 // LLM configuration + provider
 builder.Services.Configure<LLMOptions>(builder.Configuration.GetSection(LLMOptions.SectionName));
+builder.Services.Configure<AgentAutoExecutionDispatchPolicyOptions>(builder.Configuration.GetSection(AgentAutoExecutionDispatchPolicyOptions.SectionName));
 builder.Services.PostConfigure<LLMOptions>(options =>
 {
     if (string.IsNullOrWhiteSpace(options.ApiKey))
@@ -415,6 +416,7 @@ builder.Services.AddScoped<IDynamicIterationDispatchService, DynamicIterationDis
 builder.Services.AddScoped<IWorkItemAttachmentService, WorkItemAttachmentService>();
 builder.Services.AddScoped<IWorkItemLevelService, WorkItemLevelService>();
 builder.Services.AddScoped<IAgentService, AgentService>();
+builder.Services.AddScoped<IAgentAutoExecutionDispatcher, AgentAutoExecutionDispatcher>();
 builder.Services.AddScoped<ChatService>();
 builder.Services.AddScoped<IChatService>(serviceProvider => serviceProvider.GetRequiredService<ChatService>());
 builder.Services.AddSingleton<IChatAttachmentStorage, FileSystemChatAttachmentStorage>();
