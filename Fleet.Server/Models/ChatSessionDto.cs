@@ -13,5 +13,8 @@ public record ChatSessionDto(
     ChatSessionActivityDto[]? RecentActivity = null,
     string BranchStrategy = ChatSessionBranchStrategy.AutoFromProjectPattern,
     string? SessionPinnedBranch = null,
-    bool InheritParentBranchForSubFlows = true
+    bool InheritParentBranchForSubFlows = true,
+    bool IsDynamicIterationEnabled = false,
+    string? DynamicIterationBranch = null,
+    string? DynamicIterationPolicyJson = null
 );

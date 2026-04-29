@@ -233,8 +233,19 @@ namespace Fleet.Server.Migrations
                     b.Property<DateTime?>("GenerationUpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DynamicIterationBranch")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DynamicIterationPolicyJson")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDynamicIterationEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsGenerating")
                         .HasColumnType("boolean");
@@ -255,6 +266,20 @@ namespace Fleet.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("text")
                         .HasDefaultValue("[]");
+
+                    b.Property<string>("BranchStrategy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("AutoFromProjectPattern");
+
+                    b.Property<string>("SessionPinnedBranch")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("InheritParentBranchForSubFlows")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("Timestamp")
                         .IsRequired()

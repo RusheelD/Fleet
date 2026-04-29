@@ -1,4 +1,5 @@
 import {
+    Badge,
     Caption1,
     Text,
     makeStyles,
@@ -60,6 +61,9 @@ const useStyles = makeStyles({
     iconDanger: {
         color: appTokens.color.danger,
     },
+    stateBadge: {
+        alignSelf: 'flex-start',
+    },
     content: {
         display: 'flex',
         flexDirection: 'column',
@@ -108,6 +112,7 @@ export function ChatActivityFeed({ activities }: ChatActivityFeedProps) {
         <div className={mergeClasses(styles.feed, isCompact && styles.feedCompact)}>
             {activities.map((activity, index) => {
                 const normalizedActivity = normalizeChatSessionActivity(activity, index)
+                const iterationState = resolveDynamicIterationState(normalizedActivity)
                 return (
                     <div
                         key={normalizedActivity.id}
@@ -126,6 +131,16 @@ export function ChatActivityFeed({ activities }: ChatActivityFeedProps) {
                             <Caption1 className={styles.message}>
                                 {normalizedActivity.message}
                             </Caption1>
+                            {iterationState && (
+                                <Badge
+                                    size="small"
+                                    appearance={iterationState === 'failed' ? 'filled' : 'tint'}
+                                    color={iterationState === 'failed' ? 'danger' : 'informative'}
+                                    className={styles.stateBadge}
+                                >
+                                    Dynamic iteration: {iterationState}
+                                </Badge>
+                            )}
                         </div>
                     </div>
                 )
@@ -138,6 +153,17 @@ function renderActivityIcon(
     activity: ChatSessionActivity,
     styles: ReturnType<typeof useStyles>,
 ) {
+    const iterationState = resolveDynamicIterationState(activity)
+    if (iterationState === 'failed') {
+        return <DismissCircleRegular className={mergeClasses(styles.icon, styles.iconDanger)} />
+    }
+    if (iterationState === 'running') {
+        return <InfoRegular className={mergeClasses(styles.icon, styles.iconStatus)} />
+    }
+    if (iterationState === 'queued' || iterationState === 'created') {
+        return <WarningRegular className={mergeClasses(styles.icon, styles.iconWarning)} />
+    }
+
     const normalizedMessage = typeof activity.message === 'string'
         ? activity.message.toLowerCase()
         : ''
@@ -156,6 +182,32 @@ function renderActivityIcon(
     }
 
     return <InfoRegular className={mergeClasses(styles.icon, styles.iconStatus)} />
+}
+
+function resolveDynamicIterationState(
+    activity: ChatSessionActivity,
+): ChatSessionActivity['state'] {
+    if (activity.state) {
+        return activity.state
+    }
+
+    const message = (activity.message ?? '').toLowerCase()
+    if (message.includes('dynamic iteration')) {
+        if (message.includes('failed')) {
+            return 'failed'
+        }
+        if (message.includes('running')) {
+            return 'running'
+        }
+        if (message.includes('queued')) {
+            return 'queued'
+        }
+        if (message.includes('created')) {
+            return 'created'
+        }
+    }
+
+    return null
 }
 
 function getActivityTitle(activity: ChatSessionActivity): string {

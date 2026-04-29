@@ -179,6 +179,8 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .HasDefaultValue(Models.ChatSessionBranchStrategy.AutoFromProjectPattern);
             builder.Property(s => s.InheritParentBranchForSubFlows)
                 .HasDefaultValue(true);
+            builder.Property(s => s.IsDynamicIterationEnabled)
+                .HasDefaultValue(false);
             builder.HasIndex(s => new { s.OwnerId, s.ProjectId });
 
             builder.HasOne(s => s.Project)

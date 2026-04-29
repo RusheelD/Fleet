@@ -38,20 +38,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             .ToListAsync();
 
         return entities
-            .Select(s => new ChatSessionDto(
-                s.Id,
-                s.Title,
-                s.LastMessage,
-                s.Timestamp,
-                s.IsActive,
-                s.IsGenerating,
-                s.GenerationState,
-                s.GenerationStatus,
-                s.GenerationUpdatedAtUtc?.ToString("O"),
-                DeserializeRecentActivity(s.RecentActivityJson),
-                ChatSessionBranchStrategy.Normalize(s.BranchStrategy),
-                string.IsNullOrWhiteSpace(s.SessionPinnedBranch) ? null : s.SessionPinnedBranch.Trim(),
-                s.InheritParentBranchForSubFlows))
+            .Select(ToSessionDto)
             .ToList();
     }
 
@@ -133,20 +120,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         context.ChatSessions.Add(entity);
         await context.SaveChangesAsync();
 
-        return new ChatSessionDto(
-            entity.Id,
-            entity.Title,
-            entity.LastMessage,
-            entity.Timestamp,
-            entity.IsActive,
-            entity.IsGenerating,
-            entity.GenerationState,
-            entity.GenerationStatus,
-            entity.GenerationUpdatedAtUtc?.ToString("O"),
-            DeserializeRecentActivity(entity.RecentActivityJson),
-            ChatSessionBranchStrategy.Normalize(entity.BranchStrategy),
-            string.IsNullOrWhiteSpace(entity.SessionPinnedBranch) ? null : entity.SessionPinnedBranch.Trim(),
-            entity.InheritParentBranchForSubFlows);
+        return ToSessionDto(entity);
     }
 
     public Task<bool> RenameSessionAsync(string sessionId, string title)
@@ -162,6 +136,29 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         if (entity is null) return false;
 
         entity.Title = title;
+        await context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> UpdateDynamicIterationAsync(
+        string projectId,
+        string sessionId,
+        bool isEnabled,
+        string? branch,
+        string? policyJson,
+        string? ownerId = null)
+    {
+        var effectiveOwnerId = await ResolveOwnerIdAsync(ownerId);
+        var scopeProjectId = NormalizeProjectId(projectId);
+
+        var entity = await ScopedSessions(effectiveOwnerId, scopeProjectId)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+        if (entity is null)
+            return false;
+
+        entity.IsDynamicIterationEnabled = isEnabled;
+        entity.DynamicIterationBranch = isEnabled ? NormalizeNullableString(branch) : null;
+        entity.DynamicIterationPolicyJson = isEnabled ? NormalizeNullableString(policyJson) : null;
         await context.SaveChangesAsync();
         return true;
     }
@@ -532,6 +529,25 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             : query.Where(s => s.ProjectId == scopeProjectId);
     }
 
+    private static ChatSessionDto ToSessionDto(ChatSession entity)
+        => new(
+            entity.Id,
+            entity.Title,
+            entity.LastMessage,
+            entity.Timestamp,
+            entity.IsActive,
+            entity.IsGenerating,
+            entity.GenerationState,
+            entity.GenerationStatus,
+            entity.GenerationUpdatedAtUtc?.ToString("O"),
+            DeserializeRecentActivity(entity.RecentActivityJson),
+            ChatSessionBranchStrategy.Normalize(entity.BranchStrategy),
+            string.IsNullOrWhiteSpace(entity.SessionPinnedBranch) ? null : entity.SessionPinnedBranch.Trim(),
+            entity.InheritParentBranchForSubFlows,
+            entity.IsDynamicIterationEnabled,
+            entity.DynamicIterationBranch,
+            entity.DynamicIterationPolicyJson);
+
     private static ChatAttachmentDto ToAttachmentDto(ChatAttachment entity)
     {
         var contentType = NormalizeContentType(entity.ContentType);
@@ -646,6 +662,9 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         => string.IsNullOrWhiteSpace(contentType)
             ? "application/octet-stream"
             : contentType.Trim();
+
+    private static string? NormalizeNullableString(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool IsGlobalScope(string projectId)
         => string.IsNullOrWhiteSpace(projectId);

@@ -12,8 +12,21 @@ export interface ChatSessionActivity {
   kind: 'status' | 'tool' | 'error'
   message: string
   timestampUtc: string
+  state?: 'created' | 'queued' | 'running' | 'failed' | null
   toolName?: string | null
   succeeded?: boolean | null
+}
+
+export type ChatDynamicStrategy = 'balanced' | 'parallel' | 'sequential'
+
+export interface ChatDynamicOptions {
+  enabled: boolean
+  branchName?: string | null
+  strategy?: ChatDynamicStrategy | null
+}
+
+export interface ChatDynamicPolicy {
+  autoStartLimit?: number | null
 }
 
 export interface ChatMessageData {
@@ -34,6 +47,8 @@ export interface ChatSessionData {
   generationState: ChatGenerationState
   generationStatus: string | null
   generationUpdatedAtUtc: string | null
+  dynamicOptions?: ChatDynamicOptions | null
+  dynamicPolicy?: ChatDynamicPolicy | null
   recentActivity: ChatSessionActivity[]
   branchStrategy: 'SessionPinnedBranch' | 'PerWorkItemPattern' | 'AutoFromProjectPattern'
   sessionPinnedBranch: string | null
@@ -58,6 +73,7 @@ export interface SendMessageResponse {
   toolEvents: ToolEvent[]
   error: string | null
   isDeferred: boolean
+  session?: ChatSessionData | null
 }
 
 export interface ChatAttachment {
@@ -87,6 +103,12 @@ export function normalizeChatSessionActivity(
   const timestampUtc = typeof source.timestampUtc === 'string' ? source.timestampUtc : ''
   const toolName = typeof source.toolName === 'string' ? source.toolName : null
   const succeeded = typeof source.succeeded === 'boolean' ? source.succeeded : null
+  const state = source.state === 'created'
+    || source.state === 'queued'
+    || source.state === 'running'
+    || source.state === 'failed'
+    ? source.state
+    : null
   const id = typeof source.id === 'string' && source.id.trim().length > 0
     ? source.id
     : `${kind}-${timestampUtc || 'unknown'}-${fallbackIndex}`
@@ -96,6 +118,7 @@ export function normalizeChatSessionActivity(
     kind,
     message,
     timestampUtc,
+    state,
     toolName,
     succeeded,
   }

@@ -18,6 +18,9 @@ public class ChatSession
     public string BranchStrategy { get; set; } = Models.ChatSessionBranchStrategy.AutoFromProjectPattern;
     public string? SessionPinnedBranch { get; set; }
     public bool InheritParentBranchForSubFlows { get; set; } = true;
+    public bool IsDynamicIterationEnabled { get; set; }
+    public string? DynamicIterationBranch { get; set; }
+    public string? DynamicIterationPolicyJson { get; set; }
 
     // Foreign key (null for global chat sessions)
     public string? ProjectId { get; set; }
