@@ -167,14 +167,29 @@ public class ChatsController(
         [FromBody] SendMessageRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            return BadRequest(CreateProjectScopeProblemDetails(
+                "Project scope is required.",
+                "A project-scoped chat request must include a valid project id."));
+        }
+
+        if (!request.GenerateWorkItems && request.DynamicIteration is not null)
+        {
+            return BadRequest(CreateProjectScopeProblemDetails(
+                "Dynamic iteration overrides require work-item generation.",
+                "Set generateWorkItems to true when providing dynamicIteration options."));
+        }
+
         SendMessageResponseDto response;
         try
         {
+            var sendOptions = new ChatSendOptions(request.GenerateWorkItems, request.DynamicIteration);
             response = await chatService.SendMessageAsync(
                 projectId,
                 sessionId,
                 request.Content,
-                request.GenerateWorkItems,
+                sendOptions,
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -209,6 +224,15 @@ public class ChatsController(
 
         return Ok(response);
     }
+
+    private ProblemDetails CreateProjectScopeProblemDetails(string title, string detail)
+        => new()
+        {
+            Title = title,
+            Detail = detail,
+            Status = StatusCodes.Status400BadRequest,
+            Instance = HttpContext?.Request?.Path.ToString() ?? "/api/projects/{projectId}/chat",
+        };
 
     // ── Attachments ──────────────────────────────────────────
 

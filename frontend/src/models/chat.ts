@@ -67,6 +67,18 @@ export interface ToolEvent {
   result: string
 }
 
+
+export interface SendMessageDynamicIterationOptions {
+  enabled?: boolean
+  executionPolicy?: string
+  targetBranch?: string
+}
+
+export interface SendMessageOptions {
+  generateWorkItems?: boolean
+  dynamicIteration?: SendMessageDynamicIterationOptions
+}
+
 export interface SendMessageResponse {
   sessionId: string
   assistantMessage: ChatMessageData | null

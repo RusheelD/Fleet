@@ -273,14 +273,19 @@ public class ChatService(
         string projectId,
         string sessionId,
         string content,
-        bool generateWorkItems = false,
+        ChatSendOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var resolvedOptions = options ?? new ChatSendOptions();
+        var generateWorkItems = resolvedOptions.GenerateWorkItems;
         using var scope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["ProjectId"] = projectId,
             ["SessionId"] = sessionId,
-            ["GenerateWorkItems"] = generateWorkItems
+            ["GenerateWorkItems"] = generateWorkItems,
+            ["DynamicIterationEnabledOverride"] = resolvedOptions.DynamicIteration?.Enabled,
+            ["DynamicIterationExecutionPolicyOverride"] = resolvedOptions.DynamicIteration?.ExecutionPolicy,
+            ["DynamicIterationTargetBranchOverride"] = resolvedOptions.DynamicIteration?.TargetBranch,
         });
 
         if (generateWorkItems && IsGlobalScope(projectId))
@@ -300,6 +305,20 @@ public class ChatService(
 
         return await SendMessageInlineAsync(projectId, sessionId, content, generateWorkItems, cancellationToken);
     }
+
+
+    public Task<SendMessageResponseDto> SendMessageAsync(
+        string projectId,
+        string sessionId,
+        string content,
+        bool generateWorkItems,
+        CancellationToken cancellationToken = default)
+        => SendMessageAsync(
+            projectId,
+            sessionId,
+            content,
+            new ChatSendOptions(generateWorkItems),
+            cancellationToken);
 
     private sealed class GenerationProgressState
     {
