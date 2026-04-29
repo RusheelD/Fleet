@@ -6,6 +6,9 @@ export type { ProjectData, SlugCheckResult } from './project'
 export type {
   ChatAttachment,
   ChatData,
+  ChatDynamicOptions,
+  ChatDynamicPolicy,
+  ChatDynamicStrategy,
   ChatGenerationState,
   ChatSessionActivity,
   ChatMessageData,
@@ -36,4 +39,3 @@ export type {
 } from './user'
 export type { GitHubRepo } from './github'
 export type { NotificationEvent } from './notification'
-

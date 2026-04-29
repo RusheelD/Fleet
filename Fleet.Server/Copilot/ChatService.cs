@@ -36,6 +36,7 @@ public class ChatService(
     ToolLifecycleRunner? lifecycleRunner = null,
     ToolResultStore? toolResultStore = null,
     PromptBlockCache? promptBlockCache = null,
+    IAgentAutoExecutionDispatcher? autoExecutionDispatcher = null,
     IDynamicIterationDispatchService? dynamicIterationDispatchService = null) : IChatService
 {
     private readonly IUsageLedgerService _usageLedgerService = usageLedgerService ?? NoOpUsageLedgerService.Instance;
@@ -46,6 +47,7 @@ public class ChatService(
     private readonly ISkillService _skillService = skillService ?? NoOpSkillService.Instance;
     private readonly ToolResultStore _toolResultStore = toolResultStore ?? new ToolResultStore();
     private readonly PromptBlockCache _promptBlockCache = promptBlockCache ?? new PromptBlockCache();
+    private readonly IAgentAutoExecutionDispatcher? _autoExecutionDispatcher = autoExecutionDispatcher;
     private readonly IDynamicIterationDispatchService _dynamicIterationDispatchService = dynamicIterationDispatchService ?? NoOpDynamicIterationDispatchService.Instance;
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> ActiveSessionRequests = new();
     private static readonly HashSet<string> WorkItemMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
@@ -445,6 +447,7 @@ public class ChatService(
             var toolContext = new ChatToolContext(projectId, userId.ToString(), messageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
+            var autoDispatchCandidateWorkItems = new HashSet<int>();
 
             var outputTokenCap = AdaptiveTokenCap.DefaultCap;
             var errorRecovery = new ErrorRecoveryLadder();
@@ -594,7 +597,10 @@ public class ChatService(
                             toolCall,
                             toolResult);
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
+                        {
                             performedWorkItemMutation = true;
+                            TrackAutoDispatchCandidates(toolCall.Name, toolResult, autoDispatchCandidateWorkItems);
+                        }
                     }
 
                     if (exceededToolCallLimit)
@@ -655,6 +661,14 @@ public class ChatService(
                     requestCancellation);
                 var assistantMessage = await chatSessionRepository.AddMessageAsync(
                     projectId, sessionId, "assistant", assistantContent);
+                await PublishAutoDispatchSummaryAsync(
+                    projectId,
+                    sessionId,
+                    userId,
+                    generateWorkItems,
+                    performedWorkItemMutation,
+                    autoDispatchCandidateWorkItems,
+                    requestCancellation);
 
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
@@ -940,6 +954,7 @@ public class ChatService(
             var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
+            var autoDispatchCandidateWorkItems = new HashSet<int>();
             var toolEvents = new List<ToolEventDto>();
 
             for (var loop = 0; loop < maxLoops; loop++)
@@ -1018,6 +1033,7 @@ public class ChatService(
                         if (DidWorkItemMutationSucceed(toolCall.Name, toolResult))
                         {
                             performedWorkItemMutation = true;
+                            TrackAutoDispatchCandidates(toolCall.Name, toolResult, autoDispatchCandidateWorkItems);
                         }
                     }
 
@@ -1055,6 +1071,15 @@ public class ChatService(
                     requestCancellation,
                     ownerId);
                 await chatSessionRepository.AddMessageAsync(projectId, sessionId, "assistant", assistantContent, ownerId);
+                await PublishAutoDispatchSummaryAsync(
+                    projectId,
+                    sessionId,
+                    userId,
+                    generateWorkItems: true,
+                    performedWorkItemMutation,
+                    autoDispatchCandidateWorkItems,
+                    requestCancellation,
+                    ownerId);
                 logger.CopilotAiResponseGenerated(sessionId.SanitizeForLogging(), loop + 1, totalToolCalls);
 
                 SetGenerationProgress(
@@ -1685,6 +1710,106 @@ public class ChatService(
         => exception.Message.Contains("quota", StringComparison.OrdinalIgnoreCase)
             ? "Generation stopped due to quota limits."
             : "Generation failed. Please try again.";
+
+    private static readonly HashSet<string> AutoDispatchMutationToolNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "create_work_item",
+        "update_work_item",
+        "try_update_work_item",
+        "bulk_create_work_items",
+        "bulk_update_work_items",
+        "try_bulk_update_work_items",
+    };
+
+    private static void TrackAutoDispatchCandidates(string toolName, string toolResult, ISet<int> candidates)
+    {
+        if (!AutoDispatchMutationToolNames.Contains(toolName) ||
+            string.IsNullOrWhiteSpace(toolResult) ||
+            toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(toolResult);
+            CollectWorkItemIds(doc.RootElement, candidates);
+        }
+        catch (JsonException)
+        {
+            // Ignore non-JSON tool outputs.
+        }
+    }
+
+    private static void CollectWorkItemIds(JsonElement element, ISet<int> candidates)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, "id", StringComparison.OrdinalIgnoreCase) &&
+                        property.Value.ValueKind == JsonValueKind.Number &&
+                        property.Value.TryGetInt32(out var id) &&
+                        id > 0)
+                    {
+                        candidates.Add(id);
+                        continue;
+                    }
+
+                    CollectWorkItemIds(property.Value, candidates);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectWorkItemIds(item, candidates);
+                }
+                break;
+        }
+    }
+
+    private async Task PublishAutoDispatchSummaryAsync(
+        string projectId,
+        string sessionId,
+        int userId,
+        bool generateWorkItems,
+        bool performedWorkItemMutation,
+        IReadOnlyCollection<int> candidateWorkItems,
+        CancellationToken cancellationToken,
+        string? ownerId = null)
+    {
+        if (!generateWorkItems ||
+            !performedWorkItemMutation ||
+            candidateWorkItems.Count == 0 ||
+            _autoExecutionDispatcher is null)
+        {
+            return;
+        }
+
+        var dispatchResult = await _autoExecutionDispatcher.DispatchAsync(
+            projectId,
+            sessionId,
+            userId,
+            candidateWorkItems,
+            cancellationToken);
+        if (!dispatchResult.HasOutcome)
+            return;
+
+        await chatSessionRepository.AppendSessionActivityAsync(
+            projectId,
+            sessionId,
+            BuildStatusActivity(dispatchResult.BuildSummary()),
+            ownerId);
+        await PublishChatSessionEventAsync(
+            userId,
+            projectId,
+            sessionId,
+            true,
+            ChatGenerationStates.Running,
+            dispatchResult.BuildSummary());
+        await PublishChatUpdatedAsync(userId, projectId, sessionId);
+    }
 
     private async Task AppendDynamicDispatchActivityAsync(
         string projectId,

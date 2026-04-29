@@ -26,7 +26,7 @@ import {
   getMcpServers, getMcpServerTemplates, getSystemMcpServers, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
 } from './userProxy'
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
-import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, SendMessageOptions, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
+import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
 import {
   findExecutionInCollection,
   patchExecutionCollection,
@@ -1127,8 +1127,8 @@ export function useCancelChatGeneration(projectId: string | undefined) {
 export function useSendMessage(projectId: string | undefined, sessionId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ content, options }: { content: string; options?: SendMessageOptions }) =>
-      sendChatMessage(projectId, sessionId!, content, options),
+    mutationFn: ({ content, generateWorkItems }: { content: string; generateWorkItems?: boolean }) =>
+      sendChatMessage(projectId, sessionId!, { content, generateWorkItems }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })

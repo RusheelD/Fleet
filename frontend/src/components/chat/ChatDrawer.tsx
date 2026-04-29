@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { makeStyles, mergeClasses, Spinner } from '@fluentui/react-components'
+import {
+    Badge,
+    Dropdown,
+    Field,
+    Input,
+    Option,
+    Switch,
+    makeStyles,
+    mergeClasses,
+    Spinner,
+} from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatInput, AttachedFiles } from './'
@@ -16,7 +26,13 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useServerEventConnection } from '../../hooks/useServerEvents'
 import { resolveConnectionAwarePollingInterval } from '../../hooks/serverEventConnectionState'
 import { appTokens } from '../../styles/appTokens'
-import type { ChatAttachment, ChatGenerationState, ChatMessageData } from '../../models'
+import type {
+    ChatAttachment,
+    ChatDynamicOptions,
+    ChatDynamicStrategy,
+    ChatGenerationState,
+    ChatMessageData,
+} from '../../models'
 import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
@@ -63,6 +79,42 @@ const useStyles = makeStyles({
         paddingLeft: '0.625rem',
         paddingRight: '0.625rem',
     },
+    generationOptionsPanel: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: appTokens.space.sm,
+        paddingTop: appTokens.space.sm,
+        paddingBottom: appTokens.space.sm,
+        paddingLeft: appTokens.space.md,
+        paddingRight: appTokens.space.md,
+        borderTop: appTokens.border.subtle,
+        backgroundColor: appTokens.color.surfaceAlt,
+    },
+    generationOptionsPanelCompact: {
+        paddingTop: appTokens.space.xs,
+        paddingBottom: appTokens.space.xs,
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+        gap: appTokens.space.xs,
+    },
+    generationOptionsPanelMobile: {
+        paddingLeft: appTokens.space.sm,
+        paddingRight: appTokens.space.sm,
+    },
+    generationOptionsRow: {
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: appTokens.space.sm,
+    },
+    generationOptionsRowStacked: {
+        gridTemplateColumns: '1fr',
+    },
+    policyIndicators: {
+        display: 'flex',
+        gap: appTokens.space.xs,
+        flexWrap: 'wrap',
+        alignItems: 'center',
+    },
 })
 
 interface ChatDrawerProps {
@@ -77,6 +129,11 @@ const DEFAULT_GENERATE_MESSAGE =
     'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
 const BUSY_CHAT_FALLBACK_POLL_MS = 4000
 const IDLE_CHAT_FALLBACK_POLL_MS = 8000
+const DYNAMIC_STRATEGIES: Array<{ value: ChatDynamicStrategy; label: string }> = [
+    { value: 'balanced', label: 'Balanced' },
+    { value: 'parallel', label: 'Parallel' },
+    { value: 'sequential', label: 'Sequential' },
+]
 
 type PendingAttachment = ChatAttachment & {
     isUploading: true
@@ -136,6 +193,9 @@ export function ChatDrawer({
     const uploadMutation = useUploadAttachment(projectId)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
     const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+    const [dynamicIterationEnabled, setDynamicIterationEnabled] = useState(false)
+    const [dynamicBranchName, setDynamicBranchName] = useState('')
+    const [dynamicStrategy, setDynamicStrategy] = useState<ChatDynamicStrategy>('balanced')
 
     const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     const sessions = useMemo(
@@ -196,6 +256,13 @@ export function ChatDrawer({
         && cancelGenerationMutation.isPending
         && cancelGenerationMutation.variables === activeSession
     )
+
+    useEffect(() => {
+        const options = activeSessionData?.dynamicOptions
+        setDynamicIterationEnabled(Boolean(options?.enabled))
+        setDynamicBranchName(options?.branchName ?? '')
+        setDynamicStrategy(options?.strategy ?? 'balanced')
+    }, [activeSessionData?.id, activeSessionData?.dynamicOptions])
 
     const displayMessages = useMemo(
         () => reconcileDisplayMessages(serverMessages, optimisticMessages),
@@ -303,6 +370,7 @@ export function ChatDrawer({
         userContent: string,
         generateWorkItems: boolean,
         messageAttachments: ChatAttachment[],
+        nextDynamicOptions?: ChatDynamicOptions,
     ) => {
         setMessage('')
 
@@ -339,7 +407,11 @@ export function ChatDrawer({
 
         // Call API directly with the explicit sessionId to avoid stale closures
         // when a session was just auto-created
-        sendChatMessage(projectId, sessionId, contentToSend, { generateWorkItems })
+        sendChatMessage(projectId, sessionId, {
+            content: contentToSend,
+            generateWorkItems,
+            dynamicOptions: nextDynamicOptions,
+        })
             .then(async (response) => {
                 await queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
                 await queryClient.invalidateQueries({ queryKey: ['chat-data'] })
@@ -350,6 +422,7 @@ export function ChatDrawer({
                 }
                 if (generateWorkItems && !response.isDeferred) {
                     void queryClient.invalidateQueries({ queryKey: ['work-items'] })
+                    void queryClient.invalidateQueries({ queryKey: ['executions'] })
                 }
             })
             .catch(async (error: unknown) => {
@@ -382,25 +455,28 @@ export function ChatDrawer({
 
     const handleSend = (generateWorkItems = false) => {
         const userContent = message.trim()
-        if (activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession) return
+        if (controlsDisabled) return
         if (hasUploadingAttachments) return
         if (generateWorkItems && !allowGenerateWorkItems) return
         if (!userContent && !generateWorkItems) return
 
         const messageAttachments = attachmentsForNextMessage
+        const nextDynamicOptions = generateWorkItems && allowGenerateWorkItems
+            ? dynamicOptions
+            : undefined
 
         // Auto-create a session if none exists, then send
         if (!activeSession) {
             createSessionMutation.mutate('New Chat', {
                 onSuccess: (session) => {
                     setActiveSession(session.id)
-                    doSend(session.id, userContent, generateWorkItems, messageAttachments)
+                    doSend(session.id, userContent, generateWorkItems, messageAttachments, nextDynamicOptions)
                 },
             })
             return
         }
 
-        doSend(activeSession, userContent, generateWorkItems, messageAttachments)
+        doSend(activeSession, userContent, generateWorkItems, messageAttachments, nextDynamicOptions)
     }
 
     const handleNewSession = () => {
@@ -462,6 +538,23 @@ export function ChatDrawer({
     const visibleActivity = useMemo(() => {
         return activeSessionData?.recentActivity ?? []
     }, [activeSessionData?.recentActivity])
+    const dynamicOptions = useMemo<ChatDynamicOptions>(
+        () => ({
+            enabled: dynamicIterationEnabled,
+            branchName: dynamicBranchName.trim().length > 0 ? dynamicBranchName.trim() : null,
+            strategy: dynamicIterationEnabled ? dynamicStrategy : null,
+        }),
+        [dynamicIterationEnabled, dynamicBranchName, dynamicStrategy],
+    )
+    const controlsDisabled = activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession
+    const policyBadges = useMemo(() => {
+        const autoStartLimit = activeSessionData?.dynamicPolicy?.autoStartLimit
+        if (typeof autoStartLimit !== 'number' || autoStartLimit <= 0) {
+            return []
+        }
+
+        return [`Auto-start limit ${autoStartLimit}`]
+    }, [activeSessionData?.dynamicPolicy?.autoStartLimit])
     const timelineItems = useMemo(
         () => buildChatTimeline(displayMessages, visibleActivity, {
             isBusy: activeSessionIsBusy,
@@ -543,6 +636,8 @@ export function ChatDrawer({
                     createSessionMutation.isPending
                     || deleteSessionMutation.isPending
                     || renameSessionMutation.isPending
+                    || activeSessionIsBusy
+                    || isCancelingActiveSession
                 }
             />
 
@@ -581,10 +676,70 @@ export function ChatDrawer({
                     <div ref={messagesEndRef} />
                 </div>
             )}
+            {allowGenerateWorkItems && (
+                <div
+                    className={mergeClasses(
+                        styles.generationOptionsPanel,
+                        isCompact && styles.generationOptionsPanelCompact,
+                        isMobile && styles.generationOptionsPanelMobile,
+                    )}
+                >
+                    <Switch
+                        label="Dynamic iteration"
+                        checked={dynamicIterationEnabled}
+                        onChange={(_event, data) => setDynamicIterationEnabled(Boolean(data.checked))}
+                        disabled={controlsDisabled}
+                    />
+                    {dynamicIterationEnabled && (
+                        <div className={mergeClasses(
+                            styles.generationOptionsRow,
+                            (isMobile || hasConstrainedPaneWidth) && styles.generationOptionsRowStacked,
+                        )}
+                        >
+                            <Field label="Branch override (optional)">
+                                <Input
+                                    value={dynamicBranchName}
+                                    onChange={(_event, data) => setDynamicBranchName(data.value)}
+                                    placeholder="main"
+                                    disabled={controlsDisabled}
+                                />
+                            </Field>
+                            <Field label="Dispatch strategy">
+                                <Dropdown
+                                    value={DYNAMIC_STRATEGIES.find((option) => option.value === dynamicStrategy)?.label ?? 'Balanced'}
+                                    selectedOptions={[dynamicStrategy]}
+                                    onOptionSelect={(_event, data) => {
+                                        const selected = data.optionValue
+                                        if (selected === 'balanced' || selected === 'parallel' || selected === 'sequential') {
+                                            setDynamicStrategy(selected)
+                                        }
+                                    }}
+                                    disabled={controlsDisabled}
+                                >
+                                    {DYNAMIC_STRATEGIES.map((option) => (
+                                        <Option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </Option>
+                                    ))}
+                                </Dropdown>
+                            </Field>
+                        </div>
+                    )}
+                    {policyBadges.length > 0 && (
+                        <div className={styles.policyIndicators}>
+                            {policyBadges.map((badge) => (
+                                <Badge key={badge} appearance="tint">
+                                    {badge}
+                                </Badge>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
             <AttachedFiles
                 attachments={displayAttachments}
                 onDelete={(id) => deleteMutation.mutate(id)}
-                deleting={deleteMutation.isPending || uploadMutation.isPending}
+                deleting={deleteMutation.isPending || uploadMutation.isPending || controlsDisabled}
             />
 
             <ChatInput
@@ -596,7 +751,7 @@ export function ChatDrawer({
                 onFileSelect={handleFileSelect}
                 allowGenerate={allowGenerateWorkItems}
                 forceStackedLayout={hasConstrainedPaneWidth}
-                disabled={activeSessionIsBusy || createSessionMutation.isPending || hasUploadingAttachments || isCancelingActiveSession}
+                disabled={controlsDisabled || hasUploadingAttachments}
                 uploading={uploadMutation.isPending}
                 isGenerating={activeSessionIsGenerating}
                 canceling={isCancelingActiveSession}
