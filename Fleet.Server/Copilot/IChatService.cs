@@ -8,6 +8,7 @@ public interface IChatService
     Task<IReadOnlyList<ChatMessageDto>> GetMessagesAsync(string projectId, string sessionId);
     Task<ChatSessionDto> CreateSessionAsync(string projectId, string title);
     Task<bool> RenameSessionAsync(string projectId, string sessionId, string title);
+    Task<bool> UpdateSessionDynamicIterationAsync(string projectId, string sessionId, bool isEnabled, string? branch, string? policyJson);
     Task<bool> DeleteSessionAsync(string projectId, string sessionId);
     Task<bool> CancelGenerationAsync(string projectId, string sessionId);
     Task<SendMessageResponseDto> SendMessageAsync(
