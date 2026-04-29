@@ -37,6 +37,7 @@ import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
 import { buildChatTimeline } from './chatTimeline'
+import { resolveContentToSend, applySessionOptimisticState } from './chatDrawerHelpers'
 
 const useStyles = makeStyles({
     drawer: {
@@ -125,8 +126,6 @@ interface ChatDrawerProps {
     onRequestChatWidth?: (nextWidth: number) => void
 }
 
-const DEFAULT_GENERATE_MESSAGE =
-    'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
 const BUSY_CHAT_FALLBACK_POLL_MS = 4000
 const IDLE_CHAT_FALLBACK_POLL_MS = 8000
 const DYNAMIC_STRATEGIES: Array<{ value: ChatDynamicStrategy; label: string }> = [
@@ -200,33 +199,17 @@ export function ChatDrawer({
     const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     const sessions = useMemo(
         () => serverSessions.map((session) => {
-            const isOptimisticGenerating = optimisticGeneratingSessionIds.includes(session.id)
             const isCancelingSession = Boolean(
                 cancelGenerationMutation.isPending
                 && cancelGenerationMutation.variables === session.id,
             )
-
-            let generationState = session.generationState
-            let generationStatus = session.generationStatus
-            let isGenerating = session.isGenerating
-
-            if (isOptimisticGenerating && !session.isGenerating) {
-                isGenerating = true
-                generationState = 'running'
-                generationStatus = session.generationStatus ?? 'Preparing work-item generation...'
-            }
-
-            if (isCancelingSession) {
-                isGenerating = true
-                generationState = 'canceling'
-                generationStatus = 'Canceling generation...'
-            }
+            const optimisticSession = applySessionOptimisticState(session, {
+                optimisticGeneratingSessionIds,
+                isCancelingSession,
+            })
 
             return {
-                ...session,
-                isGenerating,
-                generationState,
-                generationStatus,
+                ...optimisticSession,
                 recentActivity: normalizeChatSessionActivities(session.recentActivity),
             }
         }),
@@ -375,9 +358,7 @@ export function ChatDrawer({
         setMessage('')
 
         // If generating with no user input, use the default generate message
-        const contentToSend = generateWorkItems && !userContent
-            ? DEFAULT_GENERATE_MESSAGE
-            : userContent
+        const contentToSend = resolveContentToSend(userContent, generateWorkItems)
 
         const attachmentsQueryKey = buildAttachmentsQueryKey(projectId, sessionId)
         const previousAttachments = queryClient.getQueryData<ChatAttachment[]>(attachmentsQueryKey) ?? []

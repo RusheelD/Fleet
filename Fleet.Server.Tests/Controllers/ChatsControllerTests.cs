@@ -243,6 +243,32 @@ public class ChatsControllerTests
             Times.Never);
     }
 
+    [TestMethod]
+    public async Task SendMessage_GenerateModeStarted_DoesNotPublishWorkItemEventsUntilCompletion()
+    {
+        var response = new SendMessageResponseDto(SessionId, null, [], null, IsDeferred: true);
+        _chatService.Setup(s => s.SendMessageAsync(ProjectId, SessionId, "hello", It.Is<ChatSendOptions?>(o => o != null && o.GenerateWorkItems && o.DynamicIteration == null), It.IsAny<CancellationToken>())).ReturnsAsync(response);
+
+        var result = await _sut.SendMessage(ProjectId, SessionId, new SendMessageRequest("hello", true));
+
+        Assert.IsInstanceOfType<AcceptedResult>(result);
+        _eventPublisher.Verify(
+            publisher => publisher.PublishProjectEventAsync(
+                It.IsAny<int>(),
+                ProjectId,
+                ServerEventTopics.WorkItemsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _eventPublisher.Verify(
+            publisher => publisher.PublishUserEventAsync(
+                It.IsAny<int>(),
+                ServerEventTopics.ProjectsUpdated,
+                It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ── GetAttachments ───────────────────────────────────
 
     [TestMethod]
