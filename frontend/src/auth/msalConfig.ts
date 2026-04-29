@@ -1,5 +1,5 @@
 import { LogLevel, PublicClientApplication, type Configuration, type RedirectRequest } from '@azure/msal-browser'
-import { describeEntraConfigError, getMsalLogLevel, isPlaceholderValue, resolveKnownAuthorities, resolveRedirectUri } from './msalConfigUtils'
+import { describeEntraConfigError, getMsalLogLevel, isPlaceholderValue, resolveKnownAuthorities, resolveProviderDomainHint, resolveRedirectUri } from './msalConfigUtils'
 
 /**
  * MSAL configuration for Microsoft Entra ID authentication.
@@ -11,6 +11,7 @@ import { describeEntraConfigError, getMsalLogLevel, isPlaceholderValue, resolveK
  * - VITE_ENTRA_KNOWN_AUTHORITIES: {tenant-name}.ciamlogin.com
  * - VITE_ENTRA_REDIRECT_URI: The exact redirect URI registered for the SPA app
  * - VITE_ENTRA_GOOGLE_AUTHORITY / VITE_ENTRA_MICROSOFT_AUTHORITY: Optional provider-specific authorities
+ * - VITE_ENTRA_MICROSOFT_DOMAIN_HINT: Optional Microsoft provider domain hint
  */
 
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
@@ -20,6 +21,7 @@ const configuredRedirectUri = import.meta.env.VITE_ENTRA_REDIRECT_URI as string 
 const configuredKnownAuthorities = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
 const microsoftAuthority = import.meta.env.VITE_ENTRA_MICROSOFT_AUTHORITY as string | undefined
+const microsoftDomainHint = import.meta.env.VITE_ENTRA_MICROSOFT_DOMAIN_HINT as string | undefined
 const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : undefined
 const runtimeHostname = typeof window !== 'undefined' ? window.location.hostname : undefined
 const FALLBACK_CLIENT_ID = '00000000-0000-0000-0000-000000000000'
@@ -51,6 +53,7 @@ const knownAuthorities = resolveKnownAuthorities(
   microsoftAuthority,
 )
 export const redirectUri = resolveRedirectUri(configuredRedirectUri, runtimeOrigin)
+const resolvedMicrosoftDomainHint = resolveProviderDomainHint(microsoftDomainHint, 'login.live.com')
 
 if (authConfigError) {
   console.error(authConfigError)
@@ -130,9 +133,10 @@ export const googleLoginRequest: RedirectRequest = {
 /** Optional Microsoft account sign-in request. */
 export const microsoftLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
+  prompt: 'login',
   authority: resolveOptionalAuthority(microsoftAuthority, resolvedAuthority),
   extraQueryParameters: {
-    domain_hint: 'live.com',
+    domain_hint: resolvedMicrosoftDomainHint,
   },
 }
 

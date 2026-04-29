@@ -6,6 +6,7 @@ import {
   isPlaceholderValue,
   normalizeRedirectUri,
   resolveKnownAuthorities,
+  resolveProviderDomainHint,
   resolveRedirectUri,
 } from './msalConfigUtils'
 
@@ -73,6 +74,15 @@ describe('msalConfigUtils', () => {
       'fleet-google.ciamlogin.com',
       'fleet-microsoft.ciamlogin.com',
     ])
+  })
+
+  it('falls back to the Microsoft account issuer domain hint', () => {
+    expect(resolveProviderDomainHint(undefined, 'login.live.com')).toBe('login.live.com')
+    expect(resolveProviderDomainHint('your-domain-here', 'login.live.com')).toBe('login.live.com')
+  })
+
+  it('allows provider domain hint overrides', () => {
+    expect(resolveProviderDomainHint('live.com', 'login.live.com')).toBe('live.com')
   })
 
   it('detects placeholder config values', () => {

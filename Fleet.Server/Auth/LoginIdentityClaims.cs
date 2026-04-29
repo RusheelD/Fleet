@@ -52,8 +52,10 @@ internal static class LoginIdentityClaims
 
         if (normalized.Contains("microsoft", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("live.com", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("login.live.com", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("windowslive", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("login.microsoftonline", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("liveid", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("msa", StringComparison.OrdinalIgnoreCase))
         {
             return "Microsoft";

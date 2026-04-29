@@ -246,6 +246,9 @@ VITE_ENTRA_API_SCOPE=api://your-api-client-id/access_as_user
 VITE_ENTRA_GOOGLE_AUTHORITY=https://your-tenant-name.ciamlogin.com/
 VITE_ENTRA_MICROSOFT_AUTHORITY=https://your-tenant-name.ciamlogin.com/
 
+# Microsoft provider domain hint. Use the domain associated with your Microsoft identity provider.
+VITE_ENTRA_MICROSOFT_DOMAIN_HINT=login.live.com
+
 # Environment label
 VITE_ENVIRONMENT=development
 
@@ -258,6 +261,8 @@ VITE_WEBSITE_URL=https://fleet-ai.dev
 Fleet supports email, Google, and Microsoft sign-in through the same Entra-backed token flow. Users can link additional sign-in methods from **Settings > Security**; Fleet stores each linked provider identity separately and resolves every linked provider back to the same `UserProfile`.
 
 If a user signs in with a provider that has the same email as an existing Fleet account but has not been linked yet, Fleet rejects the automatic sign-in. The user must sign in with an already-linked method first, then link the new provider from Security settings. This prevents accidental account takeover when two identity providers report the same email address.
+
+For Microsoft sign-in, Fleet sends `domain_hint=login.live.com` by default. Microsoft Entra External ID uses `domain_hint` to route directly to the identity provider associated with that domain. If your tenant's Microsoft Account provider is configured with a different domain, set `VITE_ENTRA_MICROSOFT_DOMAIN_HINT` to that value, for example `live.com`.
 
 ### Building for Each Environment
 
@@ -375,6 +380,7 @@ dotnet publish Fleet.Server -c Release -o ./publish
 | `VITE_ENTRA_API_SCOPE` | Frontend | `api://{id}/access_as_user` | Same | Same |
 | `VITE_ENTRA_GOOGLE_AUTHORITY` | Frontend | Optional provider authority | Same | Same |
 | `VITE_ENTRA_MICROSOFT_AUTHORITY` | Frontend | Optional provider authority | Same | Same |
+| `VITE_ENTRA_MICROSOFT_DOMAIN_HINT` | Frontend | `login.live.com` | Same | Same |
 | `VITE_ENTRA_REDIRECT_URI` | Frontend | `http://localhost:5250` | `https://app-staging.fleet-ai.dev` | `https://app.fleet-ai.dev` |
 | `VITE_ENVIRONMENT` | Frontend + Website | `development` | `staging` | `production` |
 | `VITE_WEBSITE_URL` | Frontend | `https://fleet-ai.dev` | `https://fleet-ai.dev` | `https://fleet-ai.dev` |

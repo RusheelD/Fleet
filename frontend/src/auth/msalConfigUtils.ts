@@ -93,6 +93,18 @@ export function resolveKnownAuthorities(
   return knownHosts.size > 0 ? Array.from(knownHosts) : undefined
 }
 
+export function resolveProviderDomainHint(
+  configuredDomainHint: string | undefined,
+  fallbackDomainHint: string,
+): string {
+  const normalized = normalizeOptionalValue(configuredDomainHint)
+  if (!normalized || isPlaceholderValue(normalized)) {
+    return fallbackDomainHint
+  }
+
+  return normalized
+}
+
 export function resolveRedirectUri(
   configuredRedirectUri: string | undefined,
   runtimeOrigin: string | undefined,
