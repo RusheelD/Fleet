@@ -14,13 +14,7 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
     {
         var user = await context.UserProfiles.FindAsync(userId);
         if (user is null) return null;
-        return new UserProfileDto(
-            user.DisplayName,
-            user.Email,
-            user.Bio,
-            user.Location,
-            user.AvatarUrl,
-            UserRoles.Normalize(user.Role));
+        return ToProfileDto(user);
     }
 
     public async Task<UserProfileDto> UpdateProfileAsync(int userId, UpdateProfileRequest request)
@@ -28,8 +22,8 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
         var user = await context.UserProfiles.FindAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
         var normalizedEmail = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(normalizedEmail))
-            throw new ArgumentException("Email is required.");
+        if (!LoginIdentityClaims.IsDisplayableEmail(normalizedEmail, user.EntraObjectId))
+            throw new ArgumentException("Enter a valid email address.");
 
         var emailInUse = await context.UserProfiles
             .AnyAsync(u => u.Id != userId && u.Email == normalizedEmail);
@@ -52,13 +46,7 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
             throw new InvalidOperationException("That email address is already in use by another account.", ex);
         }
 
-        return new UserProfileDto(
-            user.DisplayName,
-            user.Email,
-            user.Bio,
-            user.Location,
-            user.AvatarUrl,
-            UserRoles.Normalize(user.Role));
+        return ToProfileDto(user);
     }
 
     public async Task<IReadOnlyList<LinkedAccountDto>> GetConnectionsAsync(int userId)
@@ -101,4 +89,13 @@ public class UserRepository(FleetDbContext context, ILogger<UserRepository> logg
         logger.UsersPreferencesUpdated(userId);
         return preferences;
     }
+
+    private static UserProfileDto ToProfileDto(UserProfile user) =>
+        new(
+            user.DisplayName,
+            LoginIdentityClaims.NormalizeDisplayEmail(user.Email, user.EntraObjectId) ?? string.Empty,
+            user.Bio,
+            user.Location,
+            user.AvatarUrl,
+            UserRoles.Normalize(user.Role));
 }

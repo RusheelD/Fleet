@@ -164,8 +164,7 @@ static bool IsAdminIdentity(ClaimsPrincipal principal, string[] allowedObjectIds
         return true;
     }
 
-    var email = principal.FindFirst(ClaimTypes.Email)?.Value
-        ?? principal.FindFirst("preferred_username")?.Value;
+    var email = LoginIdentityClaims.ResolveDisplayEmail(principal, oid);
 
     if (!string.IsNullOrWhiteSpace(email) &&
         string.Equals(email, "rusheel@live.com", StringComparison.OrdinalIgnoreCase))

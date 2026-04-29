@@ -272,9 +272,10 @@ public class AuthService(
     {
         var now = DateTime.UtcNow;
         var needsUpdate = false;
-        if (!string.Equals(identity.Email, currentIdentity.Email, StringComparison.OrdinalIgnoreCase))
+        var displayEmail = ToLoginIdentityDisplayEmail(currentIdentity);
+        if (!string.Equals(identity.Email, displayEmail, StringComparison.OrdinalIgnoreCase))
         {
-            identity.Email = currentIdentity.Email;
+            identity.Email = displayEmail;
             needsUpdate = true;
         }
 
@@ -314,7 +315,7 @@ public class AuthService(
             UserProfileId = userId,
             Provider = currentIdentity.Provider,
             ProviderUserId = currentIdentity.ProviderUserId,
-            Email = currentIdentity.Email,
+            Email = ToLoginIdentityDisplayEmail(currentIdentity),
             DisplayName = currentIdentity.DisplayName,
             LinkedAtUtc = DateTime.UtcNow,
             LastUsedAtUtc = DateTime.UtcNow,
@@ -326,7 +327,7 @@ public class AuthService(
         => new(
             identity.Id,
             identity.Provider,
-            identity.Email,
+            ToLoginIdentityDisplayEmail(identity),
             identity.DisplayName,
             identity.LinkedAtUtc,
             identity.LastUsedAtUtc,
@@ -356,10 +357,19 @@ public class AuthService(
     private static bool IsPlaceholderEmail(string email)
         => email.EndsWith("@entra.local", StringComparison.OrdinalIgnoreCase);
 
+    private static string? ToLoginIdentityDisplayEmail(CurrentLoginIdentity identity)
+        => LoginIdentityClaims.NormalizeDisplayEmail(identity.Email, identity.ProviderUserId);
+
+    private static string? ToLoginIdentityDisplayEmail(LoginIdentity identity)
+        => LoginIdentityClaims.NormalizeDisplayEmail(identity.Email, identity.ProviderUserId);
+
+    private static string ToUserProfileDisplayEmail(UserProfile user)
+        => LoginIdentityClaims.NormalizeDisplayEmail(user.Email, user.EntraObjectId) ?? string.Empty;
+
     private static UserProfileDto ToProfileDto(UserProfile user) =>
         new(
             user.DisplayName,
-            user.Email,
+            ToUserProfileDisplayEmail(user),
             user.Bio,
             user.Location,
             user.AvatarUrl,

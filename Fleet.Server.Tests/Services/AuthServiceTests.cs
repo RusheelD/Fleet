@@ -91,6 +91,30 @@ public class AuthServiceTests
     }
 
     [TestMethod]
+    public async Task GetOrCreateCurrentUserAsync_ExistingUser_HidesProviderInternalEmail()
+    {
+        const string externalId = "117653d4-fb26-4b34-865d-fa3e6761aa7f";
+        SetupHttpContext(oid: externalId, name: "Google User", provider: "google.com");
+
+        var user = new UserProfile
+        {
+            Id = 1,
+            EntraObjectId = externalId,
+            DisplayName = "Google User",
+            Email = $"{externalId}@fleetaidev.onmicrosoft.com",
+            Bio = "Dev",
+            Location = "NYC",
+            AvatarUrl = ""
+        };
+        _authRepo.Setup(r => r.GetByEntraObjectIdAsync(externalId)).ReturnsAsync(user);
+
+        var result = await _sut.GetOrCreateCurrentUserAsync();
+
+        Assert.AreEqual("Google User", result.DisplayName);
+        Assert.AreEqual(string.Empty, result.Email);
+    }
+
+    [TestMethod]
     public async Task GetOrCreateCurrentUserAsync_NewUser_AutoProvisions()
     {
         SetupHttpContext(oid: "oid-new", name: "Jane Smith", email: "jane@test.com");
@@ -273,6 +297,31 @@ public class AuthServiceTests
         var state = await _sut.CreateLoginProviderLinkStateAsync(42, "Google");
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _sut.CompleteLoginProviderLinkAsync(state.State));
+    }
+
+    [TestMethod]
+    public async Task GetLoginIdentitiesAsync_HidesProviderInternalEmails()
+    {
+        const string externalId = "117653d4-fb26-4b34-865d-fa3e6761aa7f";
+        SetupHttpContext(oid: "current-oid", name: "Current User", email: "current@test.com", provider: "google.com");
+        _authRepo.Setup(r => r.GetLoginIdentitiesAsync(42)).ReturnsAsync([
+            new LoginIdentity
+            {
+                Id = 7,
+                Provider = "Google",
+                ProviderUserId = externalId,
+                UserProfileId = 42,
+                Email = $"{externalId}@fleetaidev.onmicrosoft.com",
+                DisplayName = "Google User",
+                LinkedAtUtc = DateTime.UtcNow,
+            },
+        ]);
+
+        var result = await _sut.GetLoginIdentitiesAsync(42);
+
+        Assert.AreEqual(1, result.Count);
+        Assert.IsNull(result[0].Email);
+        Assert.AreEqual("Google User", result[0].DisplayName);
     }
 
     [TestMethod]
