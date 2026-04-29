@@ -541,6 +541,9 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             entity.GenerationStatus,
             entity.GenerationUpdatedAtUtc?.ToString("O"),
             DeserializeRecentActivity(entity.RecentActivityJson),
+            ChatSessionBranchStrategy.Normalize(entity.BranchStrategy),
+            string.IsNullOrWhiteSpace(entity.SessionPinnedBranch) ? null : entity.SessionPinnedBranch.Trim(),
+            entity.InheritParentBranchForSubFlows,
             entity.IsDynamicIterationEnabled,
             entity.DynamicIterationBranch,
             entity.DynamicIterationPolicyJson);

@@ -14,6 +14,7 @@ namespace Fleet.Server.Controllers;
 public class AgentsController(
     IAgentService agentService,
     IAgentOrchestrationService orchestrationService,
+    IAgentExecutionDispatcher executionDispatcher,
     IAuthService authService,
     IServerEventPublisher eventPublisher) : ControllerBase
 {
@@ -64,8 +65,12 @@ public class AgentsController(
     public async Task<IActionResult> StartExecution(string projectId, [FromBody] StartExecutionRequest request)
     {
         var userId = await authService.GetCurrentUserIdAsync();
-        var executionId = await orchestrationService.StartExecutionAsync(
-            projectId, request.WorkItemNumber, userId, request.TargetBranch);
+        var executionId = await executionDispatcher.DispatchWorkItemAsync(
+            projectId,
+            request.WorkItemNumber,
+            userId,
+            request.TargetBranch,
+            request.ChatSessionId);
 
         return Accepted(new { executionId });
     }

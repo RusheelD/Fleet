@@ -175,6 +175,10 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
                 .HasDefaultValue(Models.ChatGenerationStates.Idle);
             builder.Property(s => s.RecentActivityJson)
                 .HasDefaultValue("[]");
+            builder.Property(s => s.BranchStrategy)
+                .HasDefaultValue(Models.ChatSessionBranchStrategy.AutoFromProjectPattern);
+            builder.Property(s => s.InheritParentBranchForSubFlows)
+                .HasDefaultValue(true);
             builder.Property(s => s.IsDynamicIterationEnabled)
                 .HasDefaultValue(false);
             builder.HasIndex(s => new { s.OwnerId, s.ProjectId });

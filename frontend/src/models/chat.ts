@@ -50,6 +50,9 @@ export interface ChatSessionData {
   dynamicOptions?: ChatDynamicOptions | null
   dynamicPolicy?: ChatDynamicPolicy | null
   recentActivity: ChatSessionActivity[]
+  branchStrategy: 'SessionPinnedBranch' | 'PerWorkItemPattern' | 'AutoFromProjectPattern'
+  sessionPinnedBranch: string | null
+  inheritParentBranchForSubFlows: boolean
 }
 
 export interface ChatData {

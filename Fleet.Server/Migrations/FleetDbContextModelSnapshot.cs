@@ -267,6 +267,20 @@ namespace Fleet.Server.Migrations
                         .HasColumnType("text")
                         .HasDefaultValue("[]");
 
+                    b.Property<string>("BranchStrategy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("AutoFromProjectPattern");
+
+                    b.Property<string>("SessionPinnedBranch")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("InheritParentBranchForSubFlows")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("Timestamp")
                         .IsRequired()
                         .HasColumnType("text");

@@ -395,6 +395,7 @@ builder.Services.AddSingleton<AgentCallCapacityManager>();
 builder.Services.AddScoped<IAgentPhaseRunner, AgentPhaseRunner>();
 builder.Services.AddScoped<IRepoSandbox, RepoSandbox>();
 builder.Services.AddScoped<IAgentOrchestrationService, AgentOrchestrationService>();
+builder.Services.AddScoped<IAgentExecutionDispatcher, AgentExecutionDispatcher>();
 builder.Services.AddScoped<IAgentExecutionPipelineRunner>(sp =>
     (IAgentExecutionPipelineRunner)sp.GetRequiredService<IAgentOrchestrationService>());
 
