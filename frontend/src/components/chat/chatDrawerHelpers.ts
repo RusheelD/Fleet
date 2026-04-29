@@ -1,4 +1,4 @@
-import type { ChatGenerationState } from '../../models'
+import type { ChatGenerationState, ChatMessageData } from '../../models'
 
 const DEFAULT_GENERATE_MESSAGE =
     'Generate work-items based on provided context. If context is limited, make reasonable assumptions and produce a best-effort initial backlog draft.'
@@ -32,6 +32,38 @@ export function resolveContentToSend(
     }
 
     return userContent
+}
+
+export function resolveActiveChatSessionId<TSession extends { id: string; isActive: boolean }>(
+    sessions: TSession[],
+    currentActiveSessionId: string | undefined,
+): string | undefined {
+    if (sessions.length === 0) {
+        return undefined
+    }
+
+    if (currentActiveSessionId && sessions.some((session) => session.id === currentActiveSessionId)) {
+        return currentActiveSessionId
+    }
+
+    return sessions.find((session) => session.isActive)?.id ?? sessions[0]?.id
+}
+
+export function resolveServerMessagesForActiveSession(
+    sessionMessages: ChatMessageData[] | undefined,
+    chatDataMessages: ChatMessageData[] | undefined,
+    activeSessionId: string | undefined,
+    chatDataActiveSessionId: string | undefined,
+): ChatMessageData[] {
+    if (sessionMessages) {
+        return sessionMessages
+    }
+
+    if (!activeSessionId || activeSessionId === chatDataActiveSessionId) {
+        return chatDataMessages ?? []
+    }
+
+    return []
 }
 
 export function applySessionOptimisticState<

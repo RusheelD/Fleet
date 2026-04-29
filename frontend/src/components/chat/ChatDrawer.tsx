@@ -38,8 +38,20 @@ import type {
 import { normalizeChatSessionActivities } from '../../models/chat'
 import { resolveChatUserIdentity } from './initials'
 import { filterPendingOptimisticMessages, reconcileDisplayMessages } from './chatMessageReconciliation'
+import {
+    applyDynamicOptionsToChatSession,
+    mergeOptimisticChatSessions,
+    removeOptimisticSessionsPresentOnServer,
+    upsertOptimisticChatSession,
+} from './chatSessionOptimism'
 import { buildChatTimeline } from './chatTimeline'
-import { resolveContentToSend, applySessionOptimisticState, canSubmitChatMessage } from './chatDrawerHelpers'
+import {
+    resolveActiveChatSessionId,
+    resolveContentToSend,
+    resolveServerMessagesForActiveSession,
+    applySessionOptimisticState,
+    canSubmitChatMessage,
+} from './chatDrawerHelpers'
 
 const useStyles = makeStyles({
     drawer: {
@@ -163,6 +175,7 @@ export function ChatDrawer({
     const queryClient = useQueryClient()
     const [message, setMessage] = useState('')
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
+    const [optimisticSessions, setOptimisticSessions] = useState<ChatSessionData[]>([])
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [pendingMessageSessionIds, setPendingMessageSessionIds] = useState<string[]>([])
     const [optimisticGeneratingSessionIds, setOptimisticGeneratingSessionIds] = useState<string[]>([])
@@ -200,8 +213,19 @@ export function ChatDrawer({
     const [dynamicStrategy, setDynamicStrategy] = useState<ChatDynamicStrategy>('balanced')
 
     const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
+    useEffect(() => {
+        setOptimisticSessions((current) => {
+            const next = removeOptimisticSessionsPresentOnServer(current, serverSessions)
+            return next.length === current.length ? current : next
+        })
+    }, [serverSessions])
+
+    useEffect(() => {
+        setOptimisticSessions([])
+    }, [projectId])
+
     const sessions = useMemo(
-        () => serverSessions.map((session) => {
+        () => mergeOptimisticChatSessions(serverSessions, optimisticSessions).map((session) => {
             const isCancelingSession = Boolean(
                 cancelGenerationMutation.isPending
                 && cancelGenerationMutation.variables === session.id,
@@ -217,9 +241,21 @@ export function ChatDrawer({
                 recentActivity: normalizeChatSessionActivities(session.recentActivity),
             }
         }),
-        [serverSessions, optimisticGeneratingSessionIds, cancelGenerationMutation.isPending, cancelGenerationMutation.variables],
+        [serverSessions, optimisticSessions, optimisticGeneratingSessionIds, cancelGenerationMutation.isPending, cancelGenerationMutation.variables],
     )
-    const serverMessages = useMemo(() => messages ?? chatData?.messages ?? [], [messages, chatData?.messages])
+    const chatDataActiveSessionId = useMemo(
+        () => serverSessions.find((session) => session.isActive)?.id,
+        [serverSessions],
+    )
+    const serverMessages = useMemo(
+        () => resolveServerMessagesForActiveSession(
+            messages,
+            chatData?.messages,
+            activeSession,
+            chatDataActiveSessionId,
+        ),
+        [messages, chatData?.messages, activeSession, chatDataActiveSessionId],
+    )
     const displayAttachments = useMemo(
         () => [...pendingAttachments, ...(attachments ?? [])],
         [pendingAttachments, attachments]
@@ -306,8 +342,9 @@ export function ChatDrawer({
             return
         }
 
-        if (!activeSession || !sessions.some(s => s.id === activeSession)) {
-            setActiveSession(sessions[0].id)
+        const nextActiveSession = resolveActiveChatSessionId(sessions, activeSession)
+        if (nextActiveSession !== activeSession) {
+            setActiveSession(nextActiveSession)
         }
     }, [activeSession, sessions])
 
@@ -453,6 +490,10 @@ export function ChatDrawer({
             setOptimisticMessages([createOptimisticUserMessage(contentToSend, messageAttachments)])
             createSessionMutation.mutate('New Chat', {
                 onSuccess: (session) => {
+                    setOptimisticSessions((current) => upsertOptimisticChatSession(
+                        current,
+                        applyDynamicOptionsToChatSession(session, nextDynamicOptions),
+                    ))
                     setActiveSession(session.id)
                     doSend(session.id, userContent, generateWorkItems, messageAttachments, nextDynamicOptions)
                 },
@@ -478,6 +519,7 @@ export function ChatDrawer({
     const handleNewSession = () => {
         createSessionMutation.mutate('New Chat', {
             onSuccess: (session) => {
+                setOptimisticSessions((current) => upsertOptimisticChatSession(current, session))
                 setActiveSession(session.id)
                 setOptimisticMessages([])
             },
@@ -487,6 +529,7 @@ export function ChatDrawer({
     const handleDeleteSession = (sessionId: string) => {
         deletingSessionIdsRef.current.add(sessionId)
         cancelChatSessionRequests(projectId, sessionId)
+        setOptimisticSessions((current) => current.filter((session) => session.id !== sessionId))
 
         if (activeSession === sessionId) {
             setOptimisticMessages([])
@@ -640,6 +683,7 @@ export function ChatDrawer({
 
         createSessionMutation.mutate('New Chat', {
             onSuccess: (session) => {
+                setOptimisticSessions((current) => upsertOptimisticChatSession(current, session))
                 setActiveSession(session.id)
                 uploadToSession(session.id)
             },

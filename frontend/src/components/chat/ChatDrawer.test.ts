@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { applySessionOptimisticState, canSubmitChatMessage, resolveContentToSend } from './chatDrawerHelpers'
+import {
+  applySessionOptimisticState,
+  canSubmitChatMessage,
+  resolveActiveChatSessionId,
+  resolveContentToSend,
+  resolveServerMessagesForActiveSession,
+} from './chatDrawerHelpers'
 import type { ChatSessionData } from '../../models'
 
 function createSession(overrides: Partial<ChatSessionData> = {}): ChatSessionData {
@@ -46,6 +52,58 @@ describe('ChatDrawer mode helpers', () => {
 
   it('still allows empty backlog generation outside dynamic iteration', () => {
     expect(canSubmitChatMessage('', true, false)).toBe(true)
+  })
+})
+
+describe('ChatDrawer session selection helpers', () => {
+  it('keeps the selected session when it still exists', () => {
+    const sessions = [
+      createSession({ id: 'old-session', isActive: true }),
+      createSession({ id: 'selected-session', isActive: false }),
+    ]
+
+    expect(resolveActiveChatSessionId(sessions, 'selected-session')).toBe('selected-session')
+  })
+
+  it('prefers the server active session when the current selection is missing', () => {
+    const sessions = [
+      createSession({ id: 'first-session', isActive: false }),
+      createSession({ id: 'active-session', isActive: true }),
+    ]
+
+    expect(resolveActiveChatSessionId(sessions, 'missing-session')).toBe('active-session')
+  })
+
+  it('does not reuse chat-data messages for a different active session', () => {
+    const staleChatDataMessages = [{
+      id: 'old-message',
+      role: 'user' as const,
+      content: 'old session',
+      timestamp: '2026-01-01T00:00:00Z',
+    }]
+
+    expect(resolveServerMessagesForActiveSession(
+      undefined,
+      staleChatDataMessages,
+      'new-session',
+      'old-session',
+    )).toEqual([])
+  })
+
+  it('uses chat-data messages while viewing the chat-data active session', () => {
+    const chatDataMessages = [{
+      id: 'active-message',
+      role: 'assistant' as const,
+      content: 'active session',
+      timestamp: '2026-01-01T00:00:00Z',
+    }]
+
+    expect(resolveServerMessagesForActiveSession(
+      undefined,
+      chatDataMessages,
+      'active-session',
+      'active-session',
+    )).toEqual(chatDataMessages)
   })
 })
 
