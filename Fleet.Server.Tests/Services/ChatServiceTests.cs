@@ -916,6 +916,120 @@ public class ChatServiceTests
             It.IsAny<string?>()), Times.Once);
     }
 
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_PartialToolFailuresStillCompletesWhenMutationSucceeds()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 101, \"Title\": \"Create auth endpoint\" }] }");
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            new ChatToolRegistry([writeTool]),
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Completed", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Completed", It.IsAny<string?>()))
+            .ReturnsAsync(assistantMsg);
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "missing_tool", "{}"),
+            new("call-2", "bulk_create_work_items", "{\"items\":[{\"title\":\"Create auth endpoint\"}]}"),
+        };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Auth backlog", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Completed", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true);
+
+        Assert.IsNull(result.Error);
+        Assert.IsNotNull(result.AssistantMessage);
+        Assert.AreEqual("Completed", result.AssistantMessage.Content);
+        Assert.AreEqual(2, result.ToolEvents.Length);
+        StringAssert.StartsWith(result.ToolEvents[0].Result, "Error:");
+        Assert.AreEqual(1, writeTool.ExecuteCount);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_CancellationDuringInFlightToolIteration_ClearsGenerationState()
+    {
+        var cancellationTriggered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blockingTool = new BlockingChatTool(
+            name: "bulk_update_work_items",
+            description: "Bulk update work items",
+            isWriteTool: true,
+            onStart: () => cancellationTriggered.TrySetResult());
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            new ChatToolRegistry([blockingTool]),
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Generate", "now");
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Generate"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Auth backlog", null),
+            new LLMResponse(null, [new LLMToolCall("call-1", "bulk_update_work_items", "{}")]),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        using var cts = new CancellationTokenSource();
+        var sendTask = sut.SendMessageAsync(ProjectId, SessionId, "Generate", generateWorkItems: true, cancellationToken: cts.Token);
+
+        await cancellationTriggered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
+
+        await Assert.ThrowsExceptionAsync<OperationCanceledException>(() => sendTask);
+        _chatRepo.Verify(r => r.UpdateSessionGenerationStateAsync(
+            ProjectId,
+            SessionId,
+            false,
+            ChatGenerationStates.Canceled,
+            "Generation canceled.",
+            It.IsAny<ChatSessionActivityDto?>(),
+            It.IsAny<string?>()), Times.AtLeastOnce);
+    }
+
     // ── Attachment methods ───────────────────────────────────
 
     [TestMethod]
@@ -1449,6 +1563,25 @@ public class ChatServiceTests
             ExecuteCount++;
             executionOrder.Add(Name);
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class BlockingChatTool(
+        string name,
+        string description,
+        bool isWriteTool,
+        Action onStart) : IChatTool
+    {
+        public string Name => name;
+        public string Description => description;
+        public string ParametersJsonSchema => "{}";
+        public bool IsWriteTool => isWriteTool;
+
+        public async Task<string> ExecuteAsync(string argumentsJson, ChatToolContext context, CancellationToken cancellationToken = default)
+        {
+            onStart();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return "Canceled";
         }
     }
 

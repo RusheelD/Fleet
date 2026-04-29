@@ -31,7 +31,11 @@ public class GlobalChatsControllerTests
     {
         var result = await _sut.SendMessage("sess-1", new SendMessageRequest("hello", true));
 
-        Assert.IsInstanceOfType<BadRequestObjectResult>(result);
+        var badRequest = result as BadRequestObjectResult;
+        Assert.IsNotNull(badRequest);
+        Assert.IsInstanceOfType<ProblemDetails>(badRequest.Value);
+        var problemDetails = (ProblemDetails)badRequest.Value!;
+        Assert.AreEqual("Work-item generation is only available when a project is open.", problemDetails.Detail);
         _chatService.Verify(
             service => service.SendMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()),
             Times.Never);
