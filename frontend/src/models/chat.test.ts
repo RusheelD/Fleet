@@ -8,6 +8,7 @@ describe('chat activity normalization', () => {
       kind: 'status',
       message: 'Session update',
       timestampUtc: '2026-04-03T00:00:00Z',
+      state: null,
       toolName: null,
       succeeded: null,
     })

@@ -138,6 +138,19 @@ function parseEventBlock(block: string): ServerEventMessage | null {
   }
 }
 
+function isDynamicDispatchActivity(activity: ChatSessionActivity | null | undefined): boolean {
+  if (!activity) {
+    return false
+  }
+
+  if (activity.state === 'created' || activity.state === 'queued' || activity.state === 'running' || activity.state === 'failed') {
+    return true
+  }
+
+  const message = (activity.message ?? '').toLowerCase()
+  return message.includes('dynamic iteration') || message.includes('dispatch')
+}
+
 function parseAndDispatchChunks(
   buffer: string,
   onEvent: (event: ServerEventMessage) => void,
@@ -630,6 +643,19 @@ export function useServerEvents(projectId?: string) {
               if (eventName === 'chat.session-event') {
                 const detail = data as ChatSessionEventPayload
                 updateChatSessionCaches(detail)
+
+                if (isDynamicDispatchActivity(detail.activity)) {
+                  refreshMany([
+                    'chat-data',
+                    'chat-messages',
+                    'chat-attachments',
+                    'executions',
+                    'work-items',
+                    'project-dashboard',
+                    'project-dashboard-slug',
+                    'projects',
+                  ])
+                }
 
                 if (typeof window !== 'undefined') {
                   window.dispatchEvent(new CustomEvent<ChatSessionEventPayload>(CHAT_SESSION_EVENT_WINDOW_EVENT, {

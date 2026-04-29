@@ -1128,7 +1128,7 @@ export function useSendMessage(projectId: string | undefined, sessionId: string 
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ content, generateWorkItems }: { content: string; generateWorkItems?: boolean }) =>
-      sendChatMessage(projectId, sessionId!, content, generateWorkItems),
+      sendChatMessage(projectId, sessionId!, { content, generateWorkItems }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-messages'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-data'] })
