@@ -82,32 +82,15 @@ public class AgentsControllerTests
     [DataRow(23)]
     public async Task StartExecution_DispatchesRequestedWorkItemNumber(int workItemNumber)
     {
-        _orchestrationService
-            .Setup(s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()))
+        _executionDispatcher
+            .Setup(s => s.DispatchWorkItemAsync(ProjectId, workItemNumber, UserId, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync($"exec-{workItemNumber}");
 
         var result = await _sut.StartExecution(ProjectId, new StartExecutionRequest(workItemNumber));
 
         Assert.IsInstanceOfType<AcceptedResult>(result);
-        _orchestrationService.Verify(
-            s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [DataTestMethod]
-    [DataRow(5)]
-    [DataRow(23)]
-    public async Task StartExecution_DispatchesRequestedWorkItemNumber(int workItemNumber)
-    {
-        _orchestrationService
-            .Setup(s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync($"exec-{workItemNumber}");
-
-        var result = await _sut.StartExecution(ProjectId, new StartExecutionRequest(workItemNumber));
-
-        Assert.IsInstanceOfType<AcceptedResult>(result);
-        _orchestrationService.Verify(
-            s => s.StartExecutionAsync(ProjectId, workItemNumber, UserId, null, It.IsAny<CancellationToken>()),
+        _executionDispatcher.Verify(
+            s => s.DispatchWorkItemAsync(ProjectId, workItemNumber, UserId, null, null, null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
