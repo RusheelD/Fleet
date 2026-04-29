@@ -77,6 +77,14 @@ public class ChatServiceTests
             .ReturnsAsync(0);
         _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(It.IsAny<string>()))
             .ReturnsAsync(Array.Empty<ChatSessionDto>());
+        _chatRepo.Setup(r => r.UpdateDynamicIterationAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<bool>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()))
+            .ReturnsAsync(true);
         _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
@@ -745,6 +753,17 @@ public class ChatServiceTests
             .ReturnsAsync(new List<ChatAttachmentDto>());
         _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
             .ReturnsAsync(assistantMsg);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new[]
+            {
+                new ChatSessionDto(
+                    SessionId,
+                    "Chat",
+                    "",
+                    "now",
+                    true,
+                    IsDynamicIterationEnabled: false),
+            });
 
         _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
                 ProjectId,
@@ -804,6 +823,13 @@ public class ChatServiceTests
             "Dynamic iteration started.",
             It.IsAny<ChatSessionActivityDto?>(),
             It.IsAny<string?>()), Times.Once);
+        _chatRepo.Verify(r => r.UpdateDynamicIterationAsync(
+            ProjectId,
+            SessionId,
+            true,
+            "feature/auth",
+            "{\"executionPolicy\":\"parallel\"}",
+            null), Times.Once);
     }
 
     [TestMethod]

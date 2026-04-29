@@ -1224,7 +1224,17 @@ public class ChatService(
         var session = await TryGetSessionAsync(projectId, sessionId);
         var enabled = requestOptions?.Enabled ?? session?.IsDynamicIterationEnabled ?? false;
         if (!enabled)
+        {
+            await PersistRequestedDynamicIterationOptionsAsync(
+                projectId,
+                sessionId,
+                session,
+                requestOptions,
+                false,
+                null,
+                null);
             return DynamicIterationRuntimeOptions.Disabled;
+        }
 
         var targetBranch = NormalizeNullableString(requestOptions?.TargetBranch)
             ?? NormalizeNullableString(session?.DynamicIterationBranch);
@@ -1232,7 +1242,52 @@ public class ChatService(
             ?? ResolveExecutionPolicyFromPolicyJson(session?.DynamicIterationPolicyJson)
             ?? "balanced";
 
+        await PersistRequestedDynamicIterationOptionsAsync(
+            projectId,
+            sessionId,
+            session,
+            requestOptions,
+            true,
+            targetBranch,
+            executionPolicy);
+
         return new DynamicIterationRuntimeOptions(true, targetBranch, executionPolicy);
+    }
+
+    private async Task PersistRequestedDynamicIterationOptionsAsync(
+        string projectId,
+        string sessionId,
+        ChatSessionDto? session,
+        DynamicIterationOptionsRequest? requestOptions,
+        bool isEnabled,
+        string? targetBranch,
+        string? executionPolicy)
+    {
+        if (requestOptions is null)
+            return;
+
+        var normalizedBranch = isEnabled ? NormalizeNullableString(targetBranch) : null;
+        var normalizedPolicy = isEnabled ? NormalizeExecutionPolicy(executionPolicy) ?? "balanced" : null;
+        var storedBranch = NormalizeNullableString(session?.DynamicIterationBranch);
+        var storedPolicy = ResolveExecutionPolicyFromPolicyJson(session?.DynamicIterationPolicyJson);
+        var shouldPersist = session is null
+            || session.IsDynamicIterationEnabled != isEnabled
+            || !string.Equals(storedBranch, normalizedBranch, StringComparison.Ordinal)
+            || !string.Equals(storedPolicy, normalizedPolicy, StringComparison.Ordinal);
+
+        if (!shouldPersist)
+            return;
+
+        var policyJson = normalizedPolicy is null
+            ? null
+            : JsonSerializer.Serialize(new { executionPolicy = normalizedPolicy });
+
+        await chatSessionRepository.UpdateDynamicIterationAsync(
+            projectId,
+            sessionId,
+            isEnabled,
+            normalizedBranch,
+            policyJson);
     }
 
     private async Task<ChatSessionDto?> TryGetSessionAsync(string projectId, string sessionId)

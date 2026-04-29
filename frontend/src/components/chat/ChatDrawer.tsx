@@ -180,7 +180,7 @@ export function ChatDrawer({
             ? BUSY_CHAT_FALLBACK_POLL_MS
             : IDLE_CHAT_FALLBACK_POLL_MS
     const chatPollingInterval = resolveConnectionAwarePollingInterval(serverEventState, chatFallbackPollingInterval, chatFallbackPollingInterval)
-    const { data: chatData, isLoading: loadingChat } = useChatData(projectId, {
+    const { data: chatData, isLoading: loadingChat, isError: chatDataIsError, error: chatDataError } = useChatData(projectId, {
         pollingInterval: chatPollingInterval,
     })
     const { data: messages } = useChatMessages(projectId, activeSession, {
@@ -363,24 +363,14 @@ export function ChatDrawer({
         messageAttachments: ChatAttachment[],
         nextDynamicOptions?: ChatDynamicOptions,
     ) => {
-        setMessage('')
-
-        // If generating with no user input, use the default generate message
         const isDynamicIterationSend = Boolean(nextDynamicOptions?.enabled)
         const contentToSend = resolveContentToSend(userContent, generateWorkItems, isDynamicIterationSend)
+        setMessage('')
 
         const attachmentsQueryKey = buildAttachmentsQueryKey(projectId, sessionId)
         const previousAttachments = queryClient.getQueryData<ChatAttachment[]>(attachmentsQueryKey) ?? []
 
-        // Optimistic: show user message immediately
-        const displayContent = contentToSend
-        setOptimisticMessages([{
-            id: `optimistic-${Date.now()}`,
-            role: 'user',
-            content: displayContent,
-            timestamp: new Date().toISOString(),
-            attachments: messageAttachments,
-        }])
+        setOptimisticMessages([createOptimisticUserMessage(contentToSend, messageAttachments)])
         setPendingMessageSessionIds((current) => addSessionId(current, sessionId))
         if (generateWorkItems) {
             setOptimisticGeneratingSessionIds((current) => addSessionId(current, sessionId))
@@ -455,13 +445,28 @@ export function ChatDrawer({
         const nextDynamicOptions = generateWorkItems && allowGenerateWorkItems
             ? dynamicOptions
             : undefined
+        const contentToSend = resolveContentToSend(userContent, generateWorkItems, Boolean(nextDynamicOptions?.enabled))
 
         // Auto-create a session if none exists, then send
         if (!activeSession) {
+            setMessage('')
+            setOptimisticMessages([createOptimisticUserMessage(contentToSend, messageAttachments)])
             createSessionMutation.mutate('New Chat', {
                 onSuccess: (session) => {
                     setActiveSession(session.id)
                     doSend(session.id, userContent, generateWorkItems, messageAttachments, nextDynamicOptions)
+                },
+                onError: (error: unknown) => {
+                    setMessage(userContent)
+                    setOptimisticMessages((current) => [
+                        ...current.filter((entry) => entry.role === 'user'),
+                        {
+                            id: `chat-create-error-${Date.now()}`,
+                            role: 'assistant',
+                            content: getApiErrorMessage(error, 'Failed to create a chat session.'),
+                            timestamp: new Date().toISOString(),
+                        },
+                    ])
                 },
             })
             return
@@ -582,6 +587,10 @@ export function ChatDrawer({
         }),
         [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating, dynamicIterationActive],
     )
+    const showLoadingChat = loadingChat && displayMessages.length === 0
+    const chatLoadErrorMessage = chatDataIsError
+        ? getApiErrorMessage(chatDataError, 'Failed to load chat.')
+        : null
 
     const handleFileSelect = (files: File[]) => {
         if (files.length === 0) {
@@ -662,7 +671,7 @@ export function ChatDrawer({
                 }
             />
 
-            {loadingChat ? (
+            {showLoadingChat ? (
                 <div
                     ref={messagesContainerRef}
                     className={mergeClasses(
@@ -682,6 +691,17 @@ export function ChatDrawer({
                         isMobile && styles.messagesContainerMobile,
                     )}
                 >
+                    {chatLoadErrorMessage && displayMessages.length === 0 && (
+                        <ChatMessage
+                            message={{
+                                id: 'chat-load-error',
+                                role: 'assistant',
+                                content: chatLoadErrorMessage,
+                                timestamp: new Date().toISOString(),
+                            }}
+                            currentUserIdentity={currentUserIdentity}
+                        />
+                    )}
                     {timelineItems.map((item) => item.type === 'message' ? (
                         <ChatMessage
                             key={item.id}
@@ -788,6 +808,16 @@ export function ChatDrawer({
             />
         </div>
     )
+}
+
+function createOptimisticUserMessage(content: string, attachments: ChatAttachment[]): ChatMessageData {
+    return {
+        id: `optimistic-${Date.now()}`,
+        role: 'user',
+        content,
+        timestamp: new Date().toISOString(),
+        attachments,
+    }
 }
 
 function resolveSessionDynamicOptions(session: ChatSessionData | undefined): ChatDynamicOptions | null {
