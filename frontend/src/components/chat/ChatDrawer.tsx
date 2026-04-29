@@ -51,6 +51,7 @@ import {
     resolveServerMessagesForActiveSession,
     applySessionOptimisticState,
     canSubmitChatMessage,
+    shouldShowChatLoading,
 } from './chatDrawerHelpers'
 
 const useStyles = makeStyles({
@@ -630,7 +631,7 @@ export function ChatDrawer({
         }),
         [displayMessages, visibleActivity, activeSessionIsBusy, activeSessionStatusMessage, activeSessionIsGenerating, dynamicIterationActive],
     )
-    const showLoadingChat = loadingChat && displayMessages.length === 0
+    const showLoadingChat = shouldShowChatLoading(loadingChat, displayMessages)
     const chatLoadErrorMessage = chatDataIsError
         ? getApiErrorMessage(chatDataError, 'Failed to load chat.')
         : null

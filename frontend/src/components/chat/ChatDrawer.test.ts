@@ -5,6 +5,7 @@ import {
   resolveActiveChatSessionId,
   resolveContentToSend,
   resolveServerMessagesForActiveSession,
+  shouldShowChatLoading,
 } from './chatDrawerHelpers'
 import type { ChatSessionData } from '../../models'
 
@@ -104,6 +105,24 @@ describe('ChatDrawer session selection helpers', () => {
       'active-session',
       'active-session',
     )).toEqual(chatDataMessages)
+  })
+})
+
+describe('ChatDrawer loading guardrails', () => {
+  it('does not show the chat loader over an optimistic first message', () => {
+    const optimisticMessage = {
+      id: 'optimistic-1',
+      role: 'user' as const,
+      content: 'hello',
+      timestamp: '2026-01-01T00:00:00Z',
+    }
+
+    expect(shouldShowChatLoading(true, [optimisticMessage])).toBe(false)
+  })
+
+  it('shows the chat loader only while loading with no visible messages', () => {
+    expect(shouldShowChatLoading(true, [])).toBe(true)
+    expect(shouldShowChatLoading(false, [])).toBe(false)
   })
 })
 

@@ -460,6 +460,22 @@ public class ChatServiceTests
         Assert.AreEqual("Hi there!", assistantMessage.Content);
         Assert.AreEqual(0, result.ToolEvents.Length);
         Assert.IsNull(result.Error);
+        _chatRepo.Verify(r => r.GetSessionsByProjectIdAsync(ProjectId), Times.Never);
+        _chatRepo.Verify(r => r.UpdateDynamicIterationAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<bool>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>()), Times.Never);
+        _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            It.IsAny<IReadOnlyList<ToolEventDto>>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -830,6 +846,176 @@ public class ChatServiceTests
             "feature/auth",
             "{\"executionPolicy\":\"parallel\"}",
             null), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_DynamicIteration_UsesPersistedSessionSettings_WhenNoOverrideProvided()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 202, \"Title\": \"Fix retry handling\" }] }");
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Fix retry handling", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Created work items", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Fix retry handling"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
+            .ReturnsAsync(assistantMsg);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new[]
+            {
+                new ChatSessionDto(
+                    SessionId,
+                    "Chat",
+                    "",
+                    "now",
+                    true,
+                    IsDynamicIterationEnabled: true,
+                    DynamicIterationBranch: "feature/session",
+                    DynamicIterationPolicyJson: "{\"executionPolicy\":\"sequential\"}"),
+            });
+
+        _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
+                ProjectId,
+                SessionId,
+                UserId,
+                It.IsAny<IReadOnlyList<ToolEventDto>>(),
+                "feature/session",
+                "sequential",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, []));
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Fix retry handling\"}]}")
+        };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Retry backlog", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Created work items", null),
+        });
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(ProjectId, SessionId, "Fix retry handling", generateWorkItems: true);
+
+        Assert.IsNotNull(result.AssistantMessage);
+        _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
+            ProjectId,
+            SessionId,
+            UserId,
+            It.IsAny<IReadOnlyList<ToolEventDto>>(),
+            "feature/session",
+            "sequential",
+            It.IsAny<CancellationToken>()), Times.Once);
+        _chatRepo.Verify(r => r.UpdateDynamicIterationAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<bool>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_DisabledDynamicOverride_ClearsDynamicIterationAndDoesNotDispatch()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 303, \"Title\": \"Plan billing polish\" }] }");
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Plan billing polish", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Created work items", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Plan billing polish"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
+            .ReturnsAsync(assistantMsg);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new[]
+            {
+                new ChatSessionDto(
+                    SessionId,
+                    "Chat",
+                    "",
+                    "now",
+                    true,
+                    IsDynamicIterationEnabled: true,
+                    DynamicIterationBranch: "feature/session",
+                    DynamicIterationPolicyJson: "{\"executionPolicy\":\"parallel\"}"),
+            });
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Plan billing polish\"}]}")
+        };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Billing backlog", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Created work items", null),
+        });
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(
+            ProjectId,
+            SessionId,
+            "Plan billing polish",
+            new ChatSendOptions(
+                GenerateWorkItems: true,
+                DynamicIteration: new DynamicIterationOptionsRequest(Enabled: false)));
+
+        Assert.IsNotNull(result.AssistantMessage);
+        _chatRepo.Verify(r => r.UpdateDynamicIterationAsync(
+            ProjectId,
+            SessionId,
+            false,
+            null,
+            null,
+            null), Times.Once);
+        _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            It.IsAny<IReadOnlyList<ToolEventDto>>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]

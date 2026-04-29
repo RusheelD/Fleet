@@ -66,6 +66,13 @@ export function resolveServerMessagesForActiveSession(
     return []
 }
 
+export function shouldShowChatLoading(
+    loadingChat: boolean,
+    displayMessages: ChatMessageData[],
+): boolean {
+    return loadingChat && displayMessages.length === 0
+}
+
 export function applySessionOptimisticState<
     TSession extends {
         id: string
