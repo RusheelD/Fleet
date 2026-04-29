@@ -1,7 +1,9 @@
-using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Logging;
 using Fleet.Server.Models;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 namespace Fleet.Server.Auth;
@@ -10,8 +12,14 @@ public class AuthService(
     IAuthRepository authRepository,
     IHttpContextAccessor httpContextAccessor,
     IConfiguration configuration,
-    ILogger<AuthService> logger) : IAuthService
+    ILogger<AuthService> logger,
+    IDataProtectionProvider? dataProtectionProvider = null) : IAuthService
 {
+    private static readonly TimeSpan LoginProviderLinkStateLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan LoginIdentityUsageUpdateInterval = TimeSpan.FromMinutes(15);
+    private readonly IDataProtector _loginProviderLinkStateProtector =
+        (dataProtectionProvider ?? DataProtectionProvider.Create("Fleet.AuthService"))
+            .CreateProtector("Fleet.LoginProvider.LinkState.v1");
     private int? _resolvedUserId;
 
     public async Task<UserProfileDto> GetOrCreateCurrentUserAsync()
@@ -30,59 +38,117 @@ public class AuthService(
         return user.Id;
     }
 
+    public Task<LoginProviderLinkStateDto> CreateLoginProviderLinkStateAsync(int userId, string provider)
+    {
+        var normalizedProvider = NormalizeSupportedProvider(provider);
+        var payload = new LoginProviderLinkStatePayload(
+            userId,
+            normalizedProvider,
+            DateTimeOffset.UtcNow.Add(LoginProviderLinkStateLifetime).ToUnixTimeSeconds(),
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(16)));
+
+        var state = _loginProviderLinkStateProtector.Protect(JsonSerializer.Serialize(payload));
+        return Task.FromResult(new LoginProviderLinkStateDto(state));
+    }
+
+    public async Task<UserProfileDto> CompleteLoginProviderLinkAsync(string state)
+    {
+        var payload = ValidateLoginProviderLinkState(state);
+        var principal = httpContextAccessor.HttpContext?.User
+            ?? throw new UnauthorizedAccessException("No authenticated user.");
+        var currentIdentity = LoginIdentityClaims.Resolve(principal);
+
+        if (!string.Equals(payload.Provider, currentIdentity.Provider, StringComparison.Ordinal))
+            throw new InvalidOperationException($"The completed sign-in was for {currentIdentity.Provider}, but the link request was for {payload.Provider}.");
+
+        var targetUser = await authRepository.GetByIdAsync(payload.UserId)
+            ?? throw new InvalidOperationException("The account being linked no longer exists.");
+        var existingIdentity = await authRepository.GetLoginIdentityAsync(currentIdentity.Provider, currentIdentity.ProviderUserId);
+        if (existingIdentity is not null)
+        {
+            if (existingIdentity.UserProfileId != targetUser.Id)
+                throw new InvalidOperationException("That sign-in method is already linked to another Fleet account.");
+
+            await UpdateLoginIdentityUsageAsync(existingIdentity, currentIdentity);
+            return ToProfileDto(targetUser);
+        }
+
+        var linkedIdentities = await authRepository.GetLoginIdentitiesAsync(targetUser.Id);
+        if (linkedIdentities.Any(identity =>
+                string.Equals(identity.Provider, currentIdentity.Provider, StringComparison.Ordinal) &&
+                !string.Equals(identity.ProviderUserId, currentIdentity.ProviderUserId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"A {currentIdentity.Provider} sign-in method is already linked. Delink it before linking a different one.");
+        }
+
+        await authRepository.CreateLoginIdentityAsync(CreateLoginIdentity(targetUser.Id, currentIdentity));
+        return ToProfileDto(targetUser);
+    }
+
+    public async Task<IReadOnlyList<LoginIdentityDto>> GetLoginIdentitiesAsync(int userId)
+    {
+        var currentIdentity = TryResolveCurrentLoginIdentity();
+        var identities = await authRepository.GetLoginIdentitiesAsync(userId);
+        return identities
+            .Select(identity => ToLoginIdentityDto(identity, currentIdentity))
+            .ToArray();
+    }
+
+    public async Task DeleteLoginIdentityAsync(int userId, int identityId)
+    {
+        var identity = await authRepository.GetLoginIdentityByIdAsync(userId, identityId)
+            ?? throw new InvalidOperationException("Sign-in method not found.");
+        var identityCount = await authRepository.CountLoginIdentitiesAsync(userId);
+        if (identityCount <= 1)
+            throw new InvalidOperationException("At least one sign-in method must remain linked.");
+
+        await authRepository.DeleteLoginIdentityAsync(identity);
+    }
+
     private async Task<UserProfile> ResolveCurrentUserAsync()
     {
         var principal = httpContextAccessor.HttpContext?.User
             ?? throw new UnauthorizedAccessException("No authenticated user.");
 
-        var oid = principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? principal.FindFirst("oid")?.Value;
+        var currentIdentity = LoginIdentityClaims.Resolve(principal);
+        var isUnlimitedTierUser = IsUnlimitedTierUser(currentIdentity.ProviderUserId, currentIdentity.Email);
 
-        if (string.IsNullOrEmpty(oid))
-            throw new UnauthorizedAccessException("No object identifier claim found in token.");
+        var linkedIdentity = await authRepository.GetLoginIdentityAsync(currentIdentity.Provider, currentIdentity.ProviderUserId);
+        if (linkedIdentity?.UserProfile is not null)
+        {
+            await UpdateLoginIdentityUsageAsync(linkedIdentity, currentIdentity);
+            await ApplyRoleUpdatesAsync(linkedIdentity.UserProfile, isUnlimitedTierUser);
+            logger.AuthResolvedUser(currentIdentity.ProviderUserId.SanitizeForLogging(), linkedIdentity.UserProfileId);
+            _resolvedUserId = linkedIdentity.UserProfileId;
+            return linkedIdentity.UserProfile;
+        }
 
-        var rawEmail = principal.FindFirst(ClaimTypes.Email)?.Value
-            ?? principal.FindFirst("preferred_username")?.Value
-            ?? "";
-        var email = NormalizeEmail(rawEmail, oid);
-        var isUnlimitedTierUser = IsUnlimitedTierUser(oid, rawEmail);
-
-        var existing = await authRepository.GetByEntraObjectIdAsync(oid);
+        var existing = await authRepository.GetByEntraObjectIdAsync(currentIdentity.ProviderUserId);
         if (existing is not null)
         {
-            var needsUpdate = false;
-            var normalizedRole = UserRoles.Normalize(existing.Role);
-            if (!string.Equals(existing.Role, normalizedRole, StringComparison.Ordinal))
-            {
-                existing.Role = normalizedRole;
-                needsUpdate = true;
-            }
-
-            if (isUnlimitedTierUser && !UserRoles.IsUnlimited(normalizedRole))
-            {
-                existing.Role = UserRoles.Unlimited;
-                needsUpdate = true;
-            }
-
-            if (needsUpdate)
-                await authRepository.UpdateUserAsync(existing);
-
-            logger.AuthResolvedUser(oid.SanitizeForLogging(), existing.Id);
+            await EnsureLoginIdentityAsync(existing.Id, currentIdentity);
+            await ApplyRoleUpdatesAsync(existing, isUnlimitedTierUser);
+            logger.AuthResolvedUser(currentIdentity.ProviderUserId.SanitizeForLogging(), existing.Id);
             _resolvedUserId = existing.Id;
             return existing;
         }
 
-        // Auto-provision a new local profile from Entra ID claims
-        var name = principal.FindFirst("name")?.Value
-            ?? principal.Identity?.Name
-            ?? "User";
+        var existingEmailUser = await authRepository.GetByEmailAsync(currentIdentity.Email);
+        if (existingEmailUser is not null)
+        {
+            throw new InvalidOperationException(
+                "A Fleet account already exists for this email. Sign in with an already-linked method, then link this sign-in method from Security settings.");
+        }
 
+        // Auto-provision a new local profile from Entra ID claims
         var user = new UserProfile
         {
-            EntraObjectId = oid,
-            Username = DeriveUsername(rawEmail, name),
-            Email = email,
-            DisplayName = name,
+            EntraObjectId = currentIdentity.ProviderUserId,
+            Username = DeriveUsername(
+                IsPlaceholderEmail(currentIdentity.Email) ? string.Empty : currentIdentity.Email,
+                currentIdentity.DisplayName),
+            Email = currentIdentity.Email,
+            DisplayName = currentIdentity.DisplayName,
             Bio = string.Empty,
             Location = string.Empty,
             AvatarUrl = string.Empty,
@@ -94,44 +160,189 @@ public class AuthService(
         try
         {
             await authRepository.CreateUserAsync(user);
-            logger.AuthAutoProvisionedUser(user.Id, oid.SanitizeForLogging(), email.SanitizeForLogging());
+            await EnsureLoginIdentityAsync(user.Id, currentIdentity);
+            logger.AuthAutoProvisionedUser(
+                user.Id,
+                currentIdentity.ProviderUserId.SanitizeForLogging(),
+                currentIdentity.Email.SanitizeForLogging());
             _resolvedUserId = user.Id;
             return user;
         }
         catch (DbUpdateException)
         {
             // A concurrent request already created this user (race condition on first login).
-            // Re-fetch by OID first, then fall back to email match.
-            var concurrentlyCreated = await authRepository.GetByEntraObjectIdAsync(oid)
-                ?? await authRepository.GetByEmailAsync(email);
+            // Re-fetch by linked identity first, then by legacy OID.
+            var concurrentIdentity = await authRepository.GetLoginIdentityAsync(currentIdentity.Provider, currentIdentity.ProviderUserId);
+            if (concurrentIdentity?.UserProfile is not null)
+            {
+                await UpdateLoginIdentityUsageAsync(concurrentIdentity, currentIdentity);
+                await ApplyRoleUpdatesAsync(concurrentIdentity.UserProfile, isUnlimitedTierUser);
+                logger.AuthResolvedUser(currentIdentity.ProviderUserId.SanitizeForLogging(), concurrentIdentity.UserProfileId);
+                _resolvedUserId = concurrentIdentity.UserProfileId;
+                return concurrentIdentity.UserProfile;
+            }
+
+            var concurrentlyCreated = await authRepository.GetByEntraObjectIdAsync(currentIdentity.ProviderUserId);
             if (concurrentlyCreated is not null)
             {
-                // If found by email but OID differs, update OID so future lookups are fast
-                if (concurrentlyCreated.EntraObjectId != oid)
-                {
-                    concurrentlyCreated.EntraObjectId = oid;
-                }
-
-                if (string.IsNullOrWhiteSpace(concurrentlyCreated.Role))
-                    concurrentlyCreated.Role = UserRoles.Free;
-
-                concurrentlyCreated.Role = UserRoles.Normalize(concurrentlyCreated.Role);
-
-                if (isUnlimitedTierUser && !UserRoles.IsUnlimited(concurrentlyCreated.Role))
-                {
-                    concurrentlyCreated.Role = UserRoles.Unlimited;
-                }
-
-                await authRepository.UpdateUserAsync(concurrentlyCreated);
-
-                logger.AuthResolvedUser(oid.SanitizeForLogging(), concurrentlyCreated.Id);
+                await EnsureLoginIdentityAsync(concurrentlyCreated.Id, currentIdentity);
+                await ApplyRoleUpdatesAsync(concurrentlyCreated, isUnlimitedTierUser);
+                logger.AuthResolvedUser(currentIdentity.ProviderUserId.SanitizeForLogging(), concurrentlyCreated.Id);
                 _resolvedUserId = concurrentlyCreated.Id;
                 return concurrentlyCreated;
+            }
+
+            var concurrentlyCreatedByEmail = await authRepository.GetByEmailAsync(currentIdentity.Email);
+            if (concurrentlyCreatedByEmail is not null)
+            {
+                throw new InvalidOperationException(
+                    "A Fleet account already exists for this email. Sign in with an already-linked method, then link this sign-in method from Security settings.");
             }
 
             // If still not found, the constraint violation was for a different reason — rethrow.
             throw;
         }
+    }
+
+    private LoginProviderLinkStatePayload ValidateLoginProviderLinkState(string state)
+    {
+        if (string.IsNullOrWhiteSpace(state))
+            throw new UnauthorizedAccessException("Missing login provider link state.");
+
+        try
+        {
+            var json = _loginProviderLinkStateProtector.Unprotect(state);
+            var payload = JsonSerializer.Deserialize<LoginProviderLinkStatePayload>(json);
+            if (payload is null)
+                throw new UnauthorizedAccessException("Invalid login provider link state.");
+
+            if (payload.ExpiresAtUnix < DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                throw new UnauthorizedAccessException("Login provider link state expired.");
+
+            return payload with { Provider = NormalizeSupportedProvider(payload.Provider) };
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
+        {
+            throw new UnauthorizedAccessException("Invalid login provider link state.", ex);
+        }
+    }
+
+    private async Task ApplyRoleUpdatesAsync(UserProfile user, bool isUnlimitedTierUser)
+    {
+        var needsUpdate = false;
+        var normalizedRole = UserRoles.Normalize(user.Role);
+        if (!string.Equals(user.Role, normalizedRole, StringComparison.Ordinal))
+        {
+            user.Role = normalizedRole;
+            needsUpdate = true;
+        }
+
+        if (isUnlimitedTierUser && !UserRoles.IsUnlimited(normalizedRole))
+        {
+            user.Role = UserRoles.Unlimited;
+            needsUpdate = true;
+        }
+
+        if (needsUpdate)
+            await authRepository.UpdateUserAsync(user);
+    }
+
+    private async Task EnsureLoginIdentityAsync(int userId, CurrentLoginIdentity currentIdentity)
+    {
+        var identity = await authRepository.GetLoginIdentityAsync(currentIdentity.Provider, currentIdentity.ProviderUserId);
+        if (identity is not null)
+        {
+            await UpdateLoginIdentityUsageAsync(identity, currentIdentity);
+            return;
+        }
+
+        try
+        {
+            await authRepository.CreateLoginIdentityAsync(CreateLoginIdentity(userId, currentIdentity));
+        }
+        catch (DbUpdateException)
+        {
+            var concurrentlyCreated = await authRepository.GetLoginIdentityAsync(currentIdentity.Provider, currentIdentity.ProviderUserId);
+            if (concurrentlyCreated is null || concurrentlyCreated.UserProfileId != userId)
+                throw;
+        }
+    }
+
+    private async Task UpdateLoginIdentityUsageAsync(LoginIdentity identity, CurrentLoginIdentity currentIdentity)
+    {
+        var now = DateTime.UtcNow;
+        var needsUpdate = false;
+        if (!string.Equals(identity.Email, currentIdentity.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            identity.Email = currentIdentity.Email;
+            needsUpdate = true;
+        }
+
+        if (!string.Equals(identity.DisplayName, currentIdentity.DisplayName, StringComparison.Ordinal))
+        {
+            identity.DisplayName = currentIdentity.DisplayName;
+            needsUpdate = true;
+        }
+
+        if (identity.LastUsedAtUtc is null ||
+            now - identity.LastUsedAtUtc.Value >= LoginIdentityUsageUpdateInterval)
+        {
+            identity.LastUsedAtUtc = now;
+            needsUpdate = true;
+        }
+
+        if (needsUpdate)
+            await authRepository.UpdateLoginIdentityAsync(identity);
+    }
+
+    private CurrentLoginIdentity? TryResolveCurrentLoginIdentity()
+    {
+        try
+        {
+            var principal = httpContextAccessor.HttpContext?.User;
+            return principal is null ? null : LoginIdentityClaims.Resolve(principal);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static LoginIdentity CreateLoginIdentity(int userId, CurrentLoginIdentity currentIdentity)
+        => new()
+        {
+            UserProfileId = userId,
+            Provider = currentIdentity.Provider,
+            ProviderUserId = currentIdentity.ProviderUserId,
+            Email = currentIdentity.Email,
+            DisplayName = currentIdentity.DisplayName,
+            LinkedAtUtc = DateTime.UtcNow,
+            LastUsedAtUtc = DateTime.UtcNow,
+        };
+
+    private static LoginIdentityDto ToLoginIdentityDto(
+        LoginIdentity identity,
+        CurrentLoginIdentity? currentIdentity)
+        => new(
+            identity.Id,
+            identity.Provider,
+            identity.Email,
+            identity.DisplayName,
+            identity.LinkedAtUtc,
+            identity.LastUsedAtUtc,
+            currentIdentity is not null &&
+            string.Equals(identity.Provider, currentIdentity.Provider, StringComparison.Ordinal) &&
+            string.Equals(identity.ProviderUserId, currentIdentity.ProviderUserId, StringComparison.Ordinal));
+
+    private static string NormalizeSupportedProvider(string provider)
+    {
+        if (string.IsNullOrWhiteSpace(provider))
+            throw new ArgumentException("Login provider is required.", nameof(provider));
+
+        var normalized = LoginIdentityClaims.NormalizeProvider(provider);
+        return normalized is "Email" or "Google" or "Microsoft"
+            ? normalized
+            : throw new ArgumentException("Unsupported login provider.", nameof(provider));
     }
 
     private static string DeriveUsername(string email, string displayName)
@@ -142,17 +353,8 @@ public class AuthService(
         return displayName.ToLowerInvariant().Replace(' ', '.');
     }
 
-    private static string NormalizeEmail(string email, string oid)
-    {
-        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(normalized))
-            return normalized;
-
-        // Some identity tokens omit email. Use a stable per-user placeholder to
-        // satisfy the unique email constraint without conflating distinct users.
-        var safeOid = (oid ?? string.Empty).Trim().ToLowerInvariant();
-        return $"{safeOid}@entra.local";
-    }
+    private static bool IsPlaceholderEmail(string email)
+        => email.EndsWith("@entra.local", StringComparison.OrdinalIgnoreCase);
 
     private static UserProfileDto ToProfileDto(UserProfile user) =>
         new(
@@ -198,4 +400,10 @@ public class AuthService(
         var adminEmails = configuration.GetSection("Admin:AllowedEmails").Get<string[]>() ?? [];
         return adminEmails.Contains(email, StringComparer.OrdinalIgnoreCase);
     }
+
+    private sealed record LoginProviderLinkStatePayload(
+        int UserId,
+        string Provider,
+        long ExpiresAtUnix,
+        string Nonce);
 }

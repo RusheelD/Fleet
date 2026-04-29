@@ -27,10 +27,26 @@ public class AuthServiceTests
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
+        _authRepo.Setup(r => r.GetLoginIdentityAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync((LoginIdentity?)null);
+        _authRepo.Setup(r => r.GetLoginIdentitiesAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<LoginIdentity>());
+        _authRepo.Setup(r => r.CreateLoginIdentityAsync(It.IsAny<LoginIdentity>()))
+            .ReturnsAsync((LoginIdentity identity) =>
+            {
+                identity.Id = identity.Id == 0 ? 1 : identity.Id;
+                return identity;
+            });
+        _authRepo.Setup(r => r.UpdateLoginIdentityAsync(It.IsAny<LoginIdentity>()))
+            .Returns(Task.CompletedTask);
+        _authRepo.Setup(r => r.DeleteLoginIdentityAsync(It.IsAny<LoginIdentity>()))
+            .Returns(Task.CompletedTask);
+        _authRepo.Setup(r => r.CountLoginIdentitiesAsync(It.IsAny<int>()))
+            .ReturnsAsync(1);
         _sut = new AuthService(_authRepo.Object, _httpContextAccessor.Object, _configuration, _logger.Object);
     }
 
-    private void SetupHttpContext(string? oid = null, string? name = null, string? email = null)
+    private void SetupHttpContext(string? oid = null, string? name = null, string? email = null, string? provider = null)
     {
         var claims = new List<Claim>();
         if (oid is not null)
@@ -39,6 +55,8 @@ public class AuthServiceTests
             claims.Add(new Claim("name", name));
         if (email is not null)
             claims.Add(new Claim(ClaimTypes.Email, email));
+        if (provider is not null)
+            claims.Add(new Claim("idp", provider));
 
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var principal = new ClaimsPrincipal(identity);
@@ -89,6 +107,40 @@ public class AuthServiceTests
             u.EntraObjectId == "oid-new" &&
             u.Username == "jane" &&
             u.DisplayName == "Jane Smith")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task GetOrCreateCurrentUserAsync_LinkedGoogleIdentity_ReturnsLinkedProfile()
+    {
+        SetupHttpContext(oid: "google-oid", name: "Jane Google", email: "jane@test.com", provider: "google.com");
+
+        var user = new UserProfile
+        {
+            Id = 7,
+            EntraObjectId = "email-oid",
+            DisplayName = "Jane Fleet",
+            Email = "jane@test.com",
+            Bio = "Dev",
+            Location = "NYC",
+            AvatarUrl = "",
+        };
+        var identity = new LoginIdentity
+        {
+            Id = 10,
+            Provider = "Google",
+            ProviderUserId = "google-oid",
+            UserProfileId = 7,
+            UserProfile = user,
+            Email = "jane@test.com",
+            DisplayName = "Jane Google",
+        };
+        _authRepo.Setup(r => r.GetLoginIdentityAsync("Google", "google-oid")).ReturnsAsync(identity);
+
+        var result = await _sut.GetOrCreateCurrentUserAsync();
+
+        Assert.AreEqual("Jane Fleet", result.DisplayName);
+        _authRepo.Verify(r => r.GetByEntraObjectIdAsync(It.IsAny<string>()), Times.Never);
+        _authRepo.Verify(r => r.UpdateLoginIdentityAsync(identity), Times.Once);
     }
 
     [TestMethod]
@@ -168,6 +220,74 @@ public class AuthServiceTests
 
         _authRepo.Verify(r => r.CreateUserAsync(It.Is<UserProfile>(u =>
             u.Username == "john.doe")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task CompleteLoginProviderLinkAsync_CreatesIdentityForTargetUser()
+    {
+        var targetUser = new UserProfile
+        {
+            Id = 42,
+            EntraObjectId = "email-oid",
+            DisplayName = "Fleet User",
+            Email = "user@test.com",
+        };
+        _authRepo.Setup(r => r.GetByIdAsync(42)).ReturnsAsync(targetUser);
+        _authRepo.Setup(r => r.GetLoginIdentitiesAsync(42)).ReturnsAsync([
+            new LoginIdentity
+            {
+                Id = 1,
+                Provider = "Email",
+                ProviderUserId = "email-oid",
+                UserProfileId = 42,
+            },
+        ]);
+        SetupHttpContext(oid: "microsoft-oid", name: "Fleet User", email: "user@outlook.com", provider: "live.com");
+        var state = await _sut.CreateLoginProviderLinkStateAsync(42, "Microsoft");
+
+        var result = await _sut.CompleteLoginProviderLinkAsync(state.State);
+
+        Assert.AreEqual("Fleet User", result.DisplayName);
+        _authRepo.Verify(r => r.CreateLoginIdentityAsync(It.Is<LoginIdentity>(identity =>
+            identity.UserProfileId == 42 &&
+            identity.Provider == "Microsoft" &&
+            identity.ProviderUserId == "microsoft-oid" &&
+            identity.Email == "user@outlook.com")), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task CompleteLoginProviderLinkAsync_RejectsIdentityLinkedToAnotherUser()
+    {
+        var targetUser = new UserProfile { Id = 42, EntraObjectId = "email-oid", DisplayName = "Fleet User", Email = "user@test.com" };
+        var otherUser = new UserProfile { Id = 99, EntraObjectId = "other-oid", DisplayName = "Other", Email = "other@test.com" };
+        _authRepo.Setup(r => r.GetByIdAsync(42)).ReturnsAsync(targetUser);
+        _authRepo.Setup(r => r.GetLoginIdentityAsync("Google", "google-oid")).ReturnsAsync(new LoginIdentity
+        {
+            Id = 5,
+            Provider = "Google",
+            ProviderUserId = "google-oid",
+            UserProfileId = 99,
+            UserProfile = otherUser,
+        });
+        SetupHttpContext(oid: "google-oid", name: "Other", email: "other@test.com", provider: "google.com");
+        var state = await _sut.CreateLoginProviderLinkStateAsync(42, "Google");
+
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _sut.CompleteLoginProviderLinkAsync(state.State));
+    }
+
+    [TestMethod]
+    public async Task DeleteLoginIdentityAsync_RejectsRemovingLastIdentity()
+    {
+        _authRepo.Setup(r => r.GetLoginIdentityByIdAsync(42, 7)).ReturnsAsync(new LoginIdentity
+        {
+            Id = 7,
+            Provider = "Email",
+            ProviderUserId = "email-oid",
+            UserProfileId = 42,
+        });
+        _authRepo.Setup(r => r.CountLoginIdentitiesAsync(42)).ReturnsAsync(1);
+
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _sut.DeleteLoginIdentityAsync(42, 7));
     }
 
     // ── GetCurrentUserIdAsync ────────────────────────────────

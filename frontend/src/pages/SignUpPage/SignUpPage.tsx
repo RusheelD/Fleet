@@ -33,11 +33,22 @@ const useStyles = makeStyles({
     },
 })
 
-function MicrosoftIcon({ className }: { className?: string }) {
+function EmailIcon({ className }: { className?: string }) {
     return (
         <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
             <rect x="2.5" y="5" width="19" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
             <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    )
+}
+
+function MicrosoftIcon({ className }: { className?: string }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="9.5" height="9.5" fill="#f25022" />
+            <rect x="12.5" y="2" width="9.5" height="9.5" fill="#7fba00" />
+            <rect x="2" y="12.5" width="9.5" height="9.5" fill="#00a4ef" />
+            <rect x="12.5" y="12.5" width="9.5" height="9.5" fill="#ffb900" />
         </svg>
     )
 }
@@ -85,11 +96,20 @@ export function SignUpPage() {
                         <Button
                             appearance="primary"
                             size="large"
-                            icon={<MicrosoftIcon className={styles.providerIcon} />}
+                            icon={<EmailIcon className={styles.providerIcon} />}
                             disabled={authDisabled}
                             onClick={() => void signUp('email')}
                         >
                             Sign up with email
+                        </Button>
+                        <Button
+                            appearance="secondary"
+                            size="large"
+                            icon={<MicrosoftIcon className={styles.providerIcon} />}
+                            disabled={authDisabled}
+                            onClick={() => void signUp('microsoft')}
+                        >
+                            Sign up with Microsoft
                         </Button>
                         <Button
                             appearance="secondary"

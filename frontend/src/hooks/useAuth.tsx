@@ -1,13 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
-import { InteractionRequiredAuthError, InteractionStatus } from '@azure/msal-browser'
-import { apiLoginRequest, authConfigError, emailLoginRequest, emailSignUpRequest, googleLoginRequest, isAuthConfigured, redirectUri } from '../auth'
-import { setTokenGetter, get } from '../proxies/proxy'
+import { InteractionRequiredAuthError, InteractionStatus, type RedirectRequest } from '@azure/msal-browser'
+import {
+    apiLoginRequest,
+    authConfigError,
+    emailLoginRequest,
+    emailSignUpRequest,
+    googleLoginRequest,
+    isAuthConfigured,
+    LOGIN_PROVIDER_LINK_ERROR_KEY,
+    microsoftLoginRequest,
+    PENDING_LOGIN_PROVIDER_LINK_STATE_KEY,
+    redirectUri,
+} from '../auth'
+import type { AuthLoginProvider } from '../auth'
+import { setTokenGetter, get, getApiErrorMessage } from '../proxies/proxy'
+import { completeLoginProviderLink, createLoginProviderLinkState } from '../proxies/authProxy'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import type { UserProfile } from '../models'
 
 interface AuthProviderProps {
     children: ReactNode
+}
+
+function resolveLoginRequest(provider?: AuthLoginProvider, signUp = false): RedirectRequest {
+    if (provider === 'google') {
+        return googleLoginRequest
+    }
+
+    if (provider === 'microsoft') {
+        return microsoftLoginRequest
+    }
+
+    return signUp ? emailSignUpRequest : emailLoginRequest
+}
+
+function resolveProviderLinkRequest(provider: AuthLoginProvider): RedirectRequest {
+    return {
+        ...resolveLoginRequest(provider),
+        prompt: 'login',
+    }
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
@@ -20,28 +52,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Deduplicate concurrent acquireTokenSilent calls — all callers share one in-flight promise
     const tokenPromiseRef = useRef<Promise<string | undefined> | null>(null)
 
-    const login = useCallback(async (provider?: 'email' | 'google') => {
+    const login = useCallback(async (provider?: AuthLoginProvider) => {
         if (!isAuthConfigured) {
             throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
         }
 
         if (inProgress === InteractionStatus.None) {
-            const request =
-                provider === 'google' ? googleLoginRequest : emailLoginRequest
-            await instance.loginRedirect(request)
+            await instance.loginRedirect(resolveLoginRequest(provider))
         }
     }, [instance, inProgress])
 
-    const signUp = useCallback(async (provider?: 'email' | 'google') => {
+    const signUp = useCallback(async (provider?: AuthLoginProvider) => {
         if (!isAuthConfigured) {
             throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
         }
 
         if (inProgress === InteractionStatus.None) {
-            const request =
-                provider === 'google' ? googleLoginRequest : emailSignUpRequest
-            await instance.loginRedirect(request)
+            await instance.loginRedirect(resolveLoginRequest(provider, true))
         }
+    }, [instance, inProgress])
+
+    const linkLoginProvider = useCallback(async (provider: AuthLoginProvider) => {
+        if (!isAuthConfigured) {
+            throw new Error(authConfigError ?? 'Fleet sign-in is not configured.')
+        }
+
+        if (inProgress !== InteractionStatus.None) {
+            return
+        }
+
+        const { state } = await createLoginProviderLinkState(provider)
+        window.sessionStorage.setItem(PENDING_LOGIN_PROVIDER_LINK_STATE_KEY, state)
+        await instance.loginRedirect(resolveProviderLinkRequest(provider))
     }, [instance, inProgress])
 
     const logout = useCallback(() => {
@@ -57,7 +99,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const accounts = instance.getAllAccounts()
-        if (accounts.length === 0) return undefined
+        const account = instance.getActiveAccount() ?? accounts[0]
+        if (!account) return undefined
 
         // If there's already an in-flight token request, piggyback on it
         // instead of spawning another acquireTokenSilent (which opens a
@@ -70,7 +113,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             try {
                 const result = await instance.acquireTokenSilent({
                     ...apiLoginRequest,
-                    account: accounts[0],
+                    account,
                 })
                 return result.accessToken
             } catch (error: unknown) {
@@ -124,6 +167,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     fetchedRef.current = false
                     return
                 }
+                const pendingLinkState = window.sessionStorage.getItem(PENDING_LOGIN_PROVIDER_LINK_STATE_KEY)
+                if (pendingLinkState) {
+                    return completeLoginProviderLink(pendingLinkState)
+                        .then((profile) => {
+                            window.sessionStorage.removeItem(PENDING_LOGIN_PROVIDER_LINK_STATE_KEY)
+                            return profile
+                        })
+                        .catch((error) => {
+                            window.sessionStorage.removeItem(PENDING_LOGIN_PROVIDER_LINK_STATE_KEY)
+                            window.sessionStorage.setItem(
+                                LOGIN_PROVIDER_LINK_ERROR_KEY,
+                                getApiErrorMessage(error, 'Unable to link that sign-in method.'),
+                            )
+                            void instance.logoutRedirect({ postLogoutRedirectUri: redirectUri })
+                            throw error
+                        })
+                }
+
                 return get<UserProfile>('/api/auth/me')
             })
             .then((profile) => {
@@ -142,7 +203,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             })
 
         return () => { cancelled = true }
-    }, [isAuthenticated, inProgress, getAccessToken])
+    }, [isAuthenticated, inProgress, getAccessToken, instance])
 
     // Clear user state when MSAL reports not authenticated (e.g. session expired)
     useEffect(() => {
@@ -165,9 +226,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         updateUser,
         login,
         signUp,
+        linkLoginProvider,
         logout,
         getAccessToken,
-    }), [isAuthenticated, isLoading, user, updateUser, login, signUp, logout, getAccessToken])
+    }), [isAuthenticated, isLoading, user, updateUser, login, signUp, linkLoginProvider, logout, getAccessToken])
 
     return (
         <AuthContext value={value}>

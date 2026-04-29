@@ -242,12 +242,22 @@ VITE_ENTRA_REDIRECT_URI=http://localhost:5250
 # API scope — api://{apiClientId}/access_as_user
 VITE_ENTRA_API_SCOPE=api://your-api-client-id/access_as_user
 
+# Optional provider-specific authorities. Leave unset to use VITE_ENTRA_AUTHORITY.
+VITE_ENTRA_GOOGLE_AUTHORITY=https://your-tenant-name.ciamlogin.com/
+VITE_ENTRA_MICROSOFT_AUTHORITY=https://your-tenant-name.ciamlogin.com/
+
 # Environment label
 VITE_ENVIRONMENT=development
 
 # Marketing website URL (for "back to site" links)
 VITE_WEBSITE_URL=https://fleet-ai.dev
 ```
+
+### Sign-In Providers and Account Linking
+
+Fleet supports email, Google, and Microsoft sign-in through the same Entra-backed token flow. Users can link additional sign-in methods from **Settings > Security**; Fleet stores each linked provider identity separately and resolves every linked provider back to the same `UserProfile`.
+
+If a user signs in with a provider that has the same email as an existing Fleet account but has not been linked yet, Fleet rejects the automatic sign-in. The user must sign in with an already-linked method first, then link the new provider from Security settings. This prevents accidental account takeover when two identity providers report the same email address.
 
 ### Building for Each Environment
 
@@ -363,6 +373,8 @@ dotnet publish Fleet.Server -c Release -o ./publish
 | `VITE_ENTRA_AUTHORITY` | Frontend | `https://{tenant-name}.ciamlogin.com/{tid}` | Same | Same |
 | `VITE_ENTRA_KNOWN_AUTHORITIES` | Frontend | `{tenant-name}.ciamlogin.com` | Same | Same |
 | `VITE_ENTRA_API_SCOPE` | Frontend | `api://{id}/access_as_user` | Same | Same |
+| `VITE_ENTRA_GOOGLE_AUTHORITY` | Frontend | Optional provider authority | Same | Same |
+| `VITE_ENTRA_MICROSOFT_AUTHORITY` | Frontend | Optional provider authority | Same | Same |
 | `VITE_ENTRA_REDIRECT_URI` | Frontend | `http://localhost:5250` | `https://app-staging.fleet-ai.dev` | `https://app.fleet-ai.dev` |
 | `VITE_ENVIRONMENT` | Frontend + Website | `development` | `staging` | `production` |
 | `VITE_WEBSITE_URL` | Frontend | `https://fleet-ai.dev` | `https://fleet-ai.dev` | `https://fleet-ai.dev` |

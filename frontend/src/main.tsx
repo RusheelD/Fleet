@@ -22,7 +22,16 @@ installStaleChunkRecovery()
 
 msalInstance.initialize().then(() => {
   // Handle redirect promise from login redirect
-  msalInstance.handleRedirectPromise().then(() => {
+  msalInstance.handleRedirectPromise().then((response) => {
+    if (response?.account) {
+      msalInstance.setActiveAccount(response.account)
+    } else if (!msalInstance.getActiveAccount()) {
+      const [account] = msalInstance.getAllAccounts()
+      if (account) {
+        msalInstance.setActiveAccount(account)
+      }
+    }
+
     createRoot(document.getElementById('root')!).render(
       <StrictMode>
         <QueryClientProvider client={queryClient}>

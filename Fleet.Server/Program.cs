@@ -41,12 +41,12 @@ Directory.CreateDirectory(chatAttachmentStorageRoot);
 var cacheConnectionString = ResolveCacheConnectionString(builder.Configuration);
 var dataProtectionKeysPath = ResolveDataProtectionKeysPath(builder.Configuration, builder.Environment);
 
+var dataProtectionBuilder = builder.Services.AddDataProtection()
+    .SetApplicationName("Fleet");
 if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
 {
     Directory.CreateDirectory(dataProtectionKeysPath);
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-        .SetApplicationName("Fleet");
+    dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
 }
 
 #if DEBUG
@@ -204,6 +204,7 @@ builder.Services.AddRateLimiter(options =>
         var isAdmin = IsAdminIdentity(httpContext.User, adminObjectIds, adminEmails);
 
         var userKey =
+            httpContext.User.FindFirst(FleetClaimTypes.UserId)?.Value ??
             httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value ??
             httpContext.User.FindFirst("oid")?.Value ??
             httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??

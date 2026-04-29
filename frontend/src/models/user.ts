@@ -16,6 +16,16 @@ export interface LinkedAccount {
   isPrimary?: boolean
 }
 
+export interface LoginIdentity {
+  id: number
+  provider: 'Email' | 'Google' | 'Microsoft' | string
+  email?: string | null
+  displayName?: string | null
+  linkedAtUtc: string
+  lastUsedAtUtc?: string | null
+  isCurrent?: boolean
+}
+
 export interface McpServerVariable {
   name: string
   value?: string | null

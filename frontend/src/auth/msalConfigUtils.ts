@@ -68,19 +68,29 @@ function shouldWarnRedirectUriMismatch(runtimeUrl: URL | null): boolean {
 
 export function resolveKnownAuthorities(
   configuredKnownAuthorities: string | undefined,
-  authority: string | undefined,
+  ...authorities: Array<string | undefined>
 ): string[] | undefined {
-  const configured = configuredKnownAuthorities
+  const knownHosts = new Set<string>()
+
+  configuredKnownAuthorities
     ?.split(',')
     .map(value => value.trim())
     .filter(value => value.length > 0 && !isPlaceholderValue(value))
+    .forEach(value => knownHosts.add(value))
 
-  if (configured && configured.length > 0) {
-    return configured
+  for (const authority of authorities) {
+    const normalizedAuthority = authority?.trim()
+    if (!normalizedAuthority || isPlaceholderValue(normalizedAuthority)) {
+      continue
+    }
+
+    const parsedAuthority = tryParseUrl(normalizedAuthority)
+    if (parsedAuthority?.hostname) {
+      knownHosts.add(parsedAuthority.hostname)
+    }
   }
 
-  const parsedAuthority = authority?.trim() ? tryParseUrl(authority.trim()) : null
-  return parsedAuthority?.hostname ? [parsedAuthority.hostname] : undefined
+  return knownHosts.size > 0 ? Array.from(knownHosts) : undefined
 }
 
 export function resolveRedirectUri(

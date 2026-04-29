@@ -22,9 +22,16 @@ public class UserRoleClaimsMiddleware(RequestDelegate next)
 
             if (!string.IsNullOrWhiteSpace(oid))
             {
-                var user = await authRepository.GetByEntraObjectIdAsync(oid);
+                var provider = LoginIdentityClaims.Resolve(principal).Provider;
+                var loginIdentity = await authRepository.GetLoginIdentityAsync(provider, oid);
+                var user = loginIdentity?.UserProfile
+                    ?? await authRepository.GetByEntraObjectIdAsync(oid);
                 var role = UserRoles.Normalize(user?.Role);
                 identity.AddClaim(new Claim(FleetClaimTypes.AppRole, role));
+                if (user is not null)
+                {
+                    identity.AddClaim(new Claim(FleetClaimTypes.UserId, user.Id.ToString()));
+                }
             }
         }
 

@@ -27,6 +27,7 @@ export type { MemoryEntry, MemoryType } from './memory'
 export type { PromptSkill, PromptSkillTemplate } from './playbook'
 export type {
   UserProfile,
+  LoginIdentity,
   LinkedAccount,
   McpServer,
   McpServerTemplate,

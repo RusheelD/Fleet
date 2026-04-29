@@ -8,10 +8,11 @@ import {
 import { useAuth } from '../../hooks'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionStatus } from '@azure/msal-browser'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { appTokens } from '../../styles/appTokens'
 import { AuthShell } from '../../components/shared'
+import { LOGIN_PROVIDER_LINK_ERROR_KEY } from '../../auth'
 
 const useStyles = makeStyles({
     actions: {
@@ -33,11 +34,22 @@ const useStyles = makeStyles({
     },
 })
 
-function MicrosoftIcon({ className }: { className?: string }) {
+function EmailIcon({ className }: { className?: string }) {
     return (
         <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
             <rect x="2.5" y="5" width="19" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
             <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    )
+}
+
+function MicrosoftIcon({ className }: { className?: string }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="9.5" height="9.5" fill="#f25022" />
+            <rect x="12.5" y="2" width="9.5" height="9.5" fill="#7fba00" />
+            <rect x="2" y="12.5" width="9.5" height="9.5" fill="#00a4ef" />
+            <rect x="12.5" y="12.5" width="9.5" height="9.5" fill="#ffb900" />
         </svg>
     )
 }
@@ -59,6 +71,15 @@ export function LoginPage() {
     const { authConfigError, isAuthConfigured, login } = useAuth()
     const isAuthenticated = useIsAuthenticated()
     const { inProgress } = useMsal()
+    const [linkError, setLinkError] = useState<string | null>(null)
+
+    useEffect(() => {
+        const storedLinkError = window.sessionStorage.getItem(LOGIN_PROVIDER_LINK_ERROR_KEY)
+        if (storedLinkError) {
+            setLinkError(storedLinkError)
+            window.sessionStorage.removeItem(LOGIN_PROVIDER_LINK_ERROR_KEY)
+        }
+    }, [])
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -85,11 +106,20 @@ export function LoginPage() {
                         <Button
                             appearance="primary"
                             size="large"
-                            icon={<MicrosoftIcon className={styles.providerIcon} />}
+                            icon={<EmailIcon className={styles.providerIcon} />}
                             disabled={authDisabled}
                             onClick={() => void login('email')}
                         >
                             Continue with email
+                        </Button>
+                        <Button
+                            appearance="secondary"
+                            size="large"
+                            icon={<MicrosoftIcon className={styles.providerIcon} />}
+                            disabled={authDisabled}
+                            onClick={() => void login('microsoft')}
+                        >
+                            Sign in with Microsoft
                         </Button>
                         <Button
                             appearance="secondary"
@@ -103,6 +133,11 @@ export function LoginPage() {
                         {authConfigError && (
                             <Caption1 className={styles.configError}>
                                 {authConfigError}
+                            </Caption1>
+                        )}
+                        {linkError && (
+                            <Caption1 className={styles.configError}>
+                                {linkError}
                             </Caption1>
                         )}
                     </>

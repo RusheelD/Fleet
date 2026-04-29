@@ -17,6 +17,7 @@ public class UserProfile
     public UserPreferences Preferences { get; set; } = new();
 
     // Navigation
+    public List<LoginIdentity> LoginIdentities { get; set; } = [];
     public List<LinkedAccount> LinkedAccounts { get; set; } = [];
     public List<McpServerConnection> McpServerConnections { get; set; } = [];
     public List<MemoryEntry> MemoryEntries { get; set; } = [];

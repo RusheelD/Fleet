@@ -10,6 +10,7 @@ import { describeEntraConfigError, getMsalLogLevel, isPlaceholderValue, resolveK
  * - VITE_ENTRA_API_SCOPE: api://{apiClientId}/access_as_user
  * - VITE_ENTRA_KNOWN_AUTHORITIES: {tenant-name}.ciamlogin.com
  * - VITE_ENTRA_REDIRECT_URI: The exact redirect URI registered for the SPA app
+ * - VITE_ENTRA_GOOGLE_AUTHORITY / VITE_ENTRA_MICROSOFT_AUTHORITY: Optional provider-specific authorities
  */
 
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined
@@ -18,6 +19,7 @@ const apiScope = import.meta.env.VITE_ENTRA_API_SCOPE as string | undefined
 const configuredRedirectUri = import.meta.env.VITE_ENTRA_REDIRECT_URI as string | undefined
 const configuredKnownAuthorities = import.meta.env.VITE_ENTRA_KNOWN_AUTHORITIES as string | undefined
 const googleAuthority = import.meta.env.VITE_ENTRA_GOOGLE_AUTHORITY as string | undefined
+const microsoftAuthority = import.meta.env.VITE_ENTRA_MICROSOFT_AUTHORITY as string | undefined
 const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : undefined
 const runtimeHostname = typeof window !== 'undefined' ? window.location.hostname : undefined
 const FALLBACK_CLIENT_ID = '00000000-0000-0000-0000-000000000000'
@@ -42,7 +44,12 @@ export const authConfigError = describeEntraConfigError({
 
 export const isAuthConfigured = authConfigError === null
 const resolvedAuthority = resolveOptionalAuthority(authority, FALLBACK_AUTHORITY)
-const knownAuthorities = resolveKnownAuthorities(configuredKnownAuthorities, resolvedAuthority)
+const knownAuthorities = resolveKnownAuthorities(
+  configuredKnownAuthorities,
+  resolvedAuthority,
+  googleAuthority,
+  microsoftAuthority,
+)
 export const redirectUri = resolveRedirectUri(configuredRedirectUri, runtimeOrigin)
 
 if (authConfigError) {
@@ -97,6 +104,8 @@ export const apiLoginRequest: RedirectRequest = {
   scopes: apiScope ? [apiScope] : [],
 }
 
+export type AuthLoginProvider = 'email' | 'google' | 'microsoft'
+
 /** Interactive email/local-account sign-in should always show the CIAM prompt. */
 export const emailLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
@@ -113,6 +122,18 @@ export const emailSignUpRequest: RedirectRequest = {
 export const googleLoginRequest: RedirectRequest = {
   ...apiLoginRequest,
   authority: resolveOptionalAuthority(googleAuthority, resolvedAuthority),
+  extraQueryParameters: {
+    domain_hint: 'google.com',
+  },
+}
+
+/** Optional Microsoft account sign-in request. */
+export const microsoftLoginRequest: RedirectRequest = {
+  ...apiLoginRequest,
+  authority: resolveOptionalAuthority(microsoftAuthority, resolvedAuthority),
+  extraQueryParameters: {
+    domain_hint: 'live.com',
+  },
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig)

@@ -62,6 +62,19 @@ describe('msalConfigUtils', () => {
     ])
   })
 
+  it('includes optional provider authority hosts', () => {
+    expect(resolveKnownAuthorities(
+      'fleetaidev.ciamlogin.com',
+      'https://fleetaidev.ciamlogin.com/',
+      'https://fleet-google.ciamlogin.com/',
+      'https://fleet-microsoft.ciamlogin.com/',
+    )).toEqual([
+      'fleetaidev.ciamlogin.com',
+      'fleet-google.ciamlogin.com',
+      'fleet-microsoft.ciamlogin.com',
+    ])
+  })
+
   it('detects placeholder config values', () => {
     expect(isPlaceholderValue('YOUR_ENTRA_TENANT_ID')).toBe(true)
     expect(isPlaceholderValue('https://your-tenant-name.ciamlogin.com/your-tenant-id')).toBe(true)

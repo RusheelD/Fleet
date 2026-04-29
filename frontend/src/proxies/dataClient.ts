@@ -27,6 +27,7 @@ import {
   getMcpServers, getMcpServerTemplates, getSystemMcpServers, createMcpServer, updateMcpServer, deleteMcpServer, validateMcpServer,
 } from './userProxy'
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './notificationProxy'
+import { deleteLoginIdentity, getLoginIdentities } from './authProxy'
 import type { AgentExecution, AgentInfo, ChatAttachment, ChatData, ChatDynamicPolicy, ChatDynamicStrategy, LogEntry, UserProfile, UserPreferences, WorkItemAttachment } from '../models'
 import {
   findExecutionInCollection,
@@ -430,6 +431,21 @@ export function useUpdatePreferences() {
   return useMutation({
     mutationFn: (data: UserPreferences) => updatePreferences(data),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+    },
+  })
+}
+
+export function useLoginIdentities() {
+  return useDataQuery('login-identities', getLoginIdentities, [])
+}
+
+export function useDeleteLoginIdentity() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (identityId: number) => deleteLoginIdentity(identityId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['login-identities'] })
       void queryClient.invalidateQueries({ queryKey: ['user-settings'] })
     },
   })

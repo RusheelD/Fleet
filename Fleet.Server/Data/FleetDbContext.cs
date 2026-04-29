@@ -19,6 +19,7 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<WorkItemAttachment> WorkItemAttachments => Set<WorkItemAttachment>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
+    public DbSet<LoginIdentity> LoginIdentities => Set<LoginIdentity>();
     public DbSet<LinkedAccount> LinkedAccounts => Set<LinkedAccount>();
     public DbSet<McpServerConnection> McpServerConnections => Set<McpServerConnection>();
     public DbSet<MemoryEntry> MemoryEntries => Set<MemoryEntry>();
@@ -232,6 +233,23 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
 
             // JSON column for preferences (PostgreSQL jsonb)
             builder.OwnsOne(u => u.Preferences, b => b.ToJson());
+        });
+
+        // ── LoginIdentity ─────────────────────────────────────────
+        modelBuilder.Entity<LoginIdentity>(builder =>
+        {
+            builder.HasKey(i => i.Id);
+            builder.Property(i => i.Id).ValueGeneratedOnAdd();
+            builder.Property(i => i.Provider).IsRequired();
+            builder.Property(i => i.ProviderUserId).IsRequired();
+
+            builder.HasOne(i => i.UserProfile)
+                .WithMany(u => u.LoginIdentities)
+                .HasForeignKey(i => i.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(i => new { i.Provider, i.ProviderUserId }).IsUnique();
+            builder.HasIndex(i => new { i.UserProfileId, i.Provider }).IsUnique();
         });
 
         // ── LinkedAccount ──────────────────────────────────────────

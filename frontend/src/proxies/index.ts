@@ -48,6 +48,12 @@ export type { UpdateSessionDynamicIterationRequest } from './chatProxy'
 export { search } from './searchProxy'
 export { getSubscription } from './subscriptionProxy'
 export {
+  getLoginIdentities,
+  createLoginProviderLinkState,
+  completeLoginProviderLink,
+  deleteLoginIdentity,
+} from './authProxy'
+export {
   getUserSettings,
   updateProfile,
   updatePreferences,
@@ -124,6 +130,8 @@ export {
   useUserSettings,
   useUpdateProfile,
   useUpdatePreferences,
+  useLoginIdentities,
+  useDeleteLoginIdentity,
   useUserMemories,
   useCreateUserMemory,
   useUpdateUserMemory,
