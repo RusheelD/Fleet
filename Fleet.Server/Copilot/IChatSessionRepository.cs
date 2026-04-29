@@ -10,6 +10,7 @@ public interface IChatSessionRepository
     Task<ChatSessionDto> CreateSessionAsync(string projectId, string title);
     Task<bool> RenameSessionAsync(string sessionId, string title);
     Task<bool> RenameSessionAsync(string projectId, string sessionId, string title, string? ownerId = null);
+    Task<bool> UpdateDynamicIterationAsync(string projectId, string sessionId, bool isEnabled, string? branch, string? policyJson, string? ownerId = null);
     Task<bool> DeleteSessionAsync(string sessionId);
     Task<bool> DeleteSessionAsync(string projectId, string sessionId);
     Task<ChatMessageDto> AddMessageAsync(string projectId, string sessionId, string role, string content, string? ownerId = null);
