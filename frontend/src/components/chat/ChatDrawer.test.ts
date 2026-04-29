@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applySessionOptimisticState, resolveContentToSend } from './ChatDrawer'
+import { applySessionOptimisticState, resolveContentToSend } from './chatDrawerHelpers'
 import type { ChatSessionData } from '../../models'
 
 function createSession(overrides: Partial<ChatSessionData> = {}): ChatSessionData {
