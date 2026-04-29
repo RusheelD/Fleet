@@ -411,6 +411,7 @@ builder.Services.AddScoped<ISkillService, SkillService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
+builder.Services.AddScoped<IDynamicIterationDispatchService, DynamicIterationDispatchService>();
 builder.Services.AddScoped<IWorkItemAttachmentService, WorkItemAttachmentService>();
 builder.Services.AddScoped<IWorkItemLevelService, WorkItemLevelService>();
 builder.Services.AddScoped<IAgentService, AgentService>();

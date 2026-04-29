@@ -28,6 +28,7 @@ public class ChatServiceTests
     private Mock<IAuthService> _authService = null!;
     private Mock<IUsageLedgerService> _usageLedgerService = null!;
     private Mock<IServerEventPublisher> _eventPublisher = null!;
+    private Mock<IDynamicIterationDispatchService> _dynamicIterationDispatchService = null!;
     private Mock<ILogger<ChatService>> _logger = null!;
     private ChatToolRegistry _toolRegistry = null!;
     private IOptions<LLMOptions> _llmOptions = null!;
@@ -46,6 +47,7 @@ public class ChatServiceTests
         _authService = new Mock<IAuthService>();
         _usageLedgerService = new Mock<IUsageLedgerService>();
         _eventPublisher = new Mock<IServerEventPublisher>();
+        _dynamicIterationDispatchService = new Mock<IDynamicIterationDispatchService>();
         _logger = new Mock<ILogger<ChatService>>();
 
         // Empty tool registry (no tools registered)
@@ -73,6 +75,13 @@ public class ChatServiceTests
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.MarkStaleGeneratingSessionsAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync(0);
+        _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<ToolEventDto>>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DynamicIterationDispatchResult.Empty);
         _chatRepo.Setup(r => r.UpdateSessionGenerationStateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<ChatSessionActivityDto?>(), It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
         _chatRepo.Setup(r => r.AppendSessionActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ChatSessionActivityDto>(), It.IsAny<string?>()))
@@ -99,7 +108,8 @@ public class ChatServiceTests
             _llmOptions,
             _logger.Object,
             _usageLedgerService.Object,
-            _eventPublisher.Object);
+            _eventPublisher.Object,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
     }
 
     // ── GetChatDataAsync ─────────────────────────────────────
@@ -697,6 +707,71 @@ public class ChatServiceTests
             request.Messages.Any(message =>
                 message.Content != null &&
                 message.Content.Contains("You have not actually created or updated any work items yet", StringComparison.Ordinal))));
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_GenerateMode_AppendsDispatchActivity_WhenDispatchFindsCandidates()
+    {
+        var writeTool = new TestChatTool(
+            name: "bulk_create_work_items",
+            description: "Bulk create work items",
+            isWriteTool: true,
+            result: "{ \"Created\": 1, \"Results\": [{ \"Id\": 101, \"Title\": \"Create auth endpoint\" }] }");
+        var toolRegistryWithTools = new ChatToolRegistry([writeTool]);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Build auth", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Created work items", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Build auth"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Created work items"))
+            .ReturnsAsync(assistantMsg);
+
+        _dynamicIterationDispatchService.Setup(s => s.DispatchFromToolEventsAsync(
+                ProjectId,
+                UserId,
+                It.IsAny<IReadOnlyList<ToolEventDto>>(),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, []));
+
+        var toolCalls = new List<LLMToolCall>
+        {
+            new("call-1", "bulk_create_work_items", "{\"items\":[{\"title\":\"Create auth endpoint\"}]}")
+        };
+
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Created work items", null),
+        });
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(ProjectId, SessionId, "Build auth", generateWorkItems: true);
+
+        Assert.IsNotNull(result.AssistantMessage);
+        _chatRepo.Verify(r => r.AppendSessionActivityAsync(
+            ProjectId,
+            SessionId,
+            It.Is<ChatSessionActivityDto>(activity => activity.Kind == "dispatch"),
+            It.IsAny<string?>()), Times.Once);
     }
 
     [TestMethod]
