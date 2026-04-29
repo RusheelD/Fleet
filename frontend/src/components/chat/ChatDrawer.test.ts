@@ -3,9 +3,12 @@ import {
   applySessionOptimisticState,
   canSubmitChatMessage,
   resolveActiveChatSessionId,
+  resolveChatInputPlaceholder,
+  resolveChatPromptStarters,
   resolveContentToSend,
   resolveServerMessagesForActiveSession,
   shouldShowChatLoading,
+  shouldShowPromptStarters,
 } from './chatDrawerHelpers'
 import type { ChatSessionData } from '../../models'
 
@@ -123,6 +126,55 @@ describe('ChatDrawer loading guardrails', () => {
   it('shows the chat loader only while loading with no visible messages', () => {
     expect(shouldShowChatLoading(true, [])).toBe(true)
     expect(shouldShowChatLoading(false, [])).toBe(false)
+  })
+})
+
+describe('ChatDrawer first-run UX helpers', () => {
+  it('shows prompt starters only when the chat is ready and empty', () => {
+    const optimisticMessage = {
+      id: 'optimistic-1',
+      role: 'user' as const,
+      content: 'hello',
+      timestamp: '2026-01-01T00:00:00Z',
+    }
+
+    expect(shouldShowPromptStarters(false, false, [])).toBe(true)
+    expect(shouldShowPromptStarters(true, false, [])).toBe(false)
+    expect(shouldShowPromptStarters(false, true, [])).toBe(false)
+    expect(shouldShowPromptStarters(false, false, [optimisticMessage])).toBe(false)
+  })
+
+  it('deduplicates server suggestions and fills empty project chat starters', () => {
+    const starters = resolveChatPromptStarters(
+      ['Summarize this project', 'Summarize this project', '  '],
+      { allowGenerateWorkItems: true, dynamicIterationActive: false },
+    )
+
+    expect(starters).toEqual([
+      'Summarize this project',
+      'Find the riskiest open work',
+      'Draft work items for the next milestone',
+      'Turn this request into a plan',
+    ])
+  })
+
+  it('prioritizes execution-oriented starters in dynamic iteration mode', () => {
+    const starters = resolveChatPromptStarters(
+      ['Summarize this project'],
+      { allowGenerateWorkItems: true, dynamicIterationActive: true },
+    )
+
+    expect(starters[0]).toBe('Fix the failing build')
+    expect(starters).toContain('Summarize this project')
+  })
+
+  it('uses mode-specific composer placeholders', () => {
+    expect(resolveChatInputPlaceholder({ allowGenerateWorkItems: true, dynamicIterationActive: true }))
+      .toContain('code change')
+    expect(resolveChatInputPlaceholder({ allowGenerateWorkItems: true, dynamicIterationActive: false }))
+      .toContain('project')
+    expect(resolveChatInputPlaceholder({ allowGenerateWorkItems: false, dynamicIterationActive: false }))
+      .toContain('workspace')
   })
 })
 

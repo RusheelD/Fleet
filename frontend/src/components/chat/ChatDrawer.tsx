@@ -1,18 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import {
-    Badge,
-    Dropdown,
-    Field,
-    Input,
-    Option,
-    Switch,
     makeStyles,
     mergeClasses,
     Spinner,
 } from '@fluentui/react-components'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatInput, AttachedFiles } from './'
+import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatInput, AttachedFiles, ChatModeBar, ChatSuggestions } from './'
 
 import {
     useChatData, useChatMessages, useCreateChatSession,
@@ -52,6 +46,9 @@ import {
     applySessionOptimisticState,
     canSubmitChatMessage,
     shouldShowChatLoading,
+    shouldShowPromptStarters,
+    resolveChatPromptStarters,
+    resolveChatInputPlaceholder,
 } from './chatDrawerHelpers'
 
 const useStyles = makeStyles({
@@ -94,42 +91,6 @@ const useStyles = makeStyles({
         paddingBottom: '0.75rem',
         paddingLeft: '0.625rem',
         paddingRight: '0.625rem',
-    },
-    generationOptionsPanel: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: appTokens.space.sm,
-        paddingTop: appTokens.space.sm,
-        paddingBottom: appTokens.space.sm,
-        paddingLeft: appTokens.space.md,
-        paddingRight: appTokens.space.md,
-        borderTop: appTokens.border.subtle,
-        backgroundColor: appTokens.color.surfaceAlt,
-    },
-    generationOptionsPanelCompact: {
-        paddingTop: appTokens.space.xs,
-        paddingBottom: appTokens.space.xs,
-        paddingLeft: appTokens.space.sm,
-        paddingRight: appTokens.space.sm,
-        gap: appTokens.space.xs,
-    },
-    generationOptionsPanelMobile: {
-        paddingLeft: appTokens.space.sm,
-        paddingRight: appTokens.space.sm,
-    },
-    generationOptionsRow: {
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: appTokens.space.sm,
-    },
-    generationOptionsRowStacked: {
-        gridTemplateColumns: '1fr',
-    },
-    policyIndicators: {
-        display: 'flex',
-        gap: appTokens.space.xs,
-        flexWrap: 'wrap',
-        alignItems: 'center',
     },
 })
 
@@ -175,6 +136,7 @@ export function ChatDrawer({
     const styles = useStyles()
     const queryClient = useQueryClient()
     const [message, setMessage] = useState('')
+    const [inputFocusRequest, setInputFocusRequest] = useState(0)
     const [activeSession, setActiveSession] = useState<string | undefined>(undefined)
     const [optimisticSessions, setOptimisticSessions] = useState<ChatSessionData[]>([])
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
@@ -635,6 +597,26 @@ export function ChatDrawer({
     const chatLoadErrorMessage = chatDataIsError
         ? getApiErrorMessage(chatDataError, 'Failed to load chat.')
         : null
+    const promptStarters = useMemo(
+        () => resolveChatPromptStarters(chatData?.suggestions, {
+            allowGenerateWorkItems,
+            dynamicIterationActive,
+        }),
+        [chatData?.suggestions, allowGenerateWorkItems, dynamicIterationActive],
+    )
+    const showPromptStarterPanel = promptStarters.length > 0
+        && timelineItems.length === 0
+        && !activeSessionIsBusy
+        && shouldShowPromptStarters(loadingChat, Boolean(chatLoadErrorMessage), displayMessages)
+    const promptStarterTitle = dynamicIterationActive
+        ? 'What should Fleet change?'
+        : allowGenerateWorkItems
+            ? 'What should Fleet work on?'
+            : 'What should Fleet help with?'
+    const chatInputPlaceholder = resolveChatInputPlaceholder({
+        allowGenerateWorkItems,
+        dynamicIterationActive,
+    })
 
     const handleFileSelect = (files: File[]) => {
         if (files.length === 0) {
@@ -689,6 +671,11 @@ export function ChatDrawer({
                 uploadToSession(session.id)
             },
         })
+    }
+
+    const handlePromptStarterSelect = (suggestion: string) => {
+        setMessage(suggestion)
+        setInputFocusRequest((current) => current + 1)
     }
 
     return (
@@ -747,6 +734,13 @@ export function ChatDrawer({
                             currentUserIdentity={currentUserIdentity}
                         />
                     )}
+                    {showPromptStarterPanel && (
+                        <ChatSuggestions
+                            title={promptStarterTitle}
+                            suggestions={promptStarters}
+                            onSelect={handlePromptStarterSelect}
+                        />
+                    )}
                     {timelineItems.map((item) => item.type === 'message' ? (
                         <ChatMessage
                             key={item.id}
@@ -763,70 +757,25 @@ export function ChatDrawer({
                 </div>
             )}
             {allowGenerateWorkItems && (
-                <div
-                    className={mergeClasses(
-                        styles.generationOptionsPanel,
-                        isCompact && styles.generationOptionsPanelCompact,
-                        isMobile && styles.generationOptionsPanelMobile,
-                    )}
-                >
-                    <Switch
-                        label="Dynamic iteration"
-                        checked={dynamicIterationEnabled}
-                        onChange={(_event, data) => {
-                            const isEnabled = Boolean(data.checked)
-                            setDynamicIterationEnabled(isEnabled)
-                            persistDynamicIterationOptions(isEnabled, dynamicBranchName, dynamicStrategy)
-                        }}
-                        disabled={dynamicSettingsDisabled}
-                    />
-                    {dynamicIterationEnabled && (
-                        <div className={mergeClasses(
-                            styles.generationOptionsRow,
-                            (isMobile || hasConstrainedPaneWidth) && styles.generationOptionsRowStacked,
-                        )}
-                        >
-                            <Field label="Branch override (optional)">
-                                <Input
-                                    value={dynamicBranchName}
-                                    onChange={(_event, data) => setDynamicBranchName(data.value)}
-                                    onBlur={() => persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, dynamicStrategy)}
-                                    placeholder="main"
-                                    disabled={dynamicSettingsDisabled}
-                                />
-                            </Field>
-                            <Field label="Dispatch strategy">
-                                <Dropdown
-                                    value={DYNAMIC_STRATEGIES.find((option) => option.value === dynamicStrategy)?.label ?? 'Balanced'}
-                                    selectedOptions={[dynamicStrategy]}
-                                    onOptionSelect={(_event, data) => {
-                                        const selected = data.optionValue
-                                        if (selected === 'balanced' || selected === 'parallel' || selected === 'sequential') {
-                                            setDynamicStrategy(selected)
-                                            persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, selected)
-                                        }
-                                    }}
-                                    disabled={dynamicSettingsDisabled}
-                                >
-                                    {DYNAMIC_STRATEGIES.map((option) => (
-                                        <Option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </Option>
-                                    ))}
-                                </Dropdown>
-                            </Field>
-                        </div>
-                    )}
-                    {policyBadges.length > 0 && (
-                        <div className={styles.policyIndicators}>
-                            {policyBadges.map((badge) => (
-                                <Badge key={badge} appearance="tint">
-                                    {badge}
-                                </Badge>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <ChatModeBar
+                    dynamicIterationEnabled={dynamicIterationEnabled}
+                    dynamicBranchName={dynamicBranchName}
+                    dynamicStrategy={dynamicStrategy}
+                    strategyOptions={DYNAMIC_STRATEGIES}
+                    policyBadges={policyBadges}
+                    disabled={dynamicSettingsDisabled}
+                    forceStackedLayout={hasConstrainedPaneWidth}
+                    onDynamicIterationChange={(isEnabled) => {
+                        setDynamicIterationEnabled(isEnabled)
+                        persistDynamicIterationOptions(isEnabled, dynamicBranchName, dynamicStrategy)
+                    }}
+                    onBranchNameChange={setDynamicBranchName}
+                    onBranchNameCommit={() => persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, dynamicStrategy)}
+                    onStrategyChange={(strategy) => {
+                        setDynamicStrategy(strategy)
+                        persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, strategy)
+                    }}
+                />
             )}
             <AttachedFiles
                 attachments={displayAttachments}
@@ -850,6 +799,8 @@ export function ChatDrawer({
                 statusMessage={activeSessionStatusMessage}
                 statusState={activeSessionStatusState}
                 dynamicIterationActive={dynamicIterationActive}
+                placeholder={chatInputPlaceholder}
+                focusRequest={inputFocusRequest}
             />
         </div>
     )

@@ -260,6 +260,9 @@ export function ChatSessionBar({
         }
     }
 
+    const getSessionSummary = (session: ChatSessionData) =>
+        getSessionStatus(session) ?? (session.isDynamicIterationEnabled ? 'Iteration mode' : null)
+
     const getSessionStatusDotClassName = (session: ChatSessionData) => {
         switch (session.generationState) {
             case 'failed':
@@ -289,13 +292,15 @@ export function ChatSessionBar({
                     New Chat
                 </Button>
                 <Text className={styles.sessionMeta}>
-                    {sessions.length} session{sessions.length === 1 ? '' : 's'}
+                    {sessions.length === 0
+                        ? 'No chats yet'
+                        : `${sessions.length} chat${sessions.length === 1 ? '' : 's'}`}
                 </Text>
             </div>
 
             <div className={mergeClasses(styles.sessionsScroller, isCompact && styles.sessionsScrollerCompact)}>
                 {sessions.length === 0 && (
-                    <Text className={styles.emptyState}>Create a chat session to get started.</Text>
+                    <Text className={styles.emptyState}>Ready for a new chat.</Text>
                 )}
 
                 {sessions.map((session) => (
@@ -352,7 +357,7 @@ export function ChatSessionBar({
                                 >
                                     <span className={styles.sessionButtonContent}>
                                         <span className={styles.sessionTitle}>{session.title}</span>
-                                        {getSessionStatus(session) && (
+                                        {getSessionSummary(session) && (
                                             <span className={styles.sessionStatusRow}>
                                                 <CircleRegular
                                                     className={mergeClasses(
@@ -367,7 +372,7 @@ export function ChatSessionBar({
                                                         session.id === activeSessionId && styles.sessionStatusActive,
                                                     )}
                                                 >
-                                                    {getSessionStatus(session)}
+                                                    {getSessionSummary(session)}
                                                 </span>
                                             </span>
                                         )}

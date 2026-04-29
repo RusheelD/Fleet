@@ -133,7 +133,7 @@ const useStyles = makeStyles({
     },
     inputActions: {
         display: 'flex',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
         alignItems: 'center',
         gap: '0.5rem',
         minWidth: 0,
@@ -169,16 +169,6 @@ const useStyles = makeStyles({
     },
     cancelButton: {
         flexShrink: 0,
-    },
-    inputHint: {
-        color: appTokens.color.textMuted,
-    },
-    inputHintCompact: {
-        fontSize: '10px',
-        lineHeight: '12px',
-    },
-    inputHintMobile: {
-        alignSelf: 'flex-start',
     },
     hiddenInput: {
         display: 'none',
@@ -255,6 +245,8 @@ interface ChatInputProps {
     statusMessage?: string | null
     statusState?: 'idle' | 'running' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
     dynamicIterationActive?: boolean
+    placeholder?: string
+    focusRequest?: number
 }
 
 export function ChatInput({
@@ -273,6 +265,8 @@ export function ChatInput({
     statusMessage,
     statusState = 'idle',
     dynamicIterationActive = false,
+    placeholder,
+    focusRequest,
 }: ChatInputProps) {
     const styles = useStyles()
     const { preferences } = usePreferences()
@@ -281,6 +275,7 @@ export function ChatInput({
     const shouldStackLayout = isMobile || forceStackedLayout
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const previousFocusRequestRef = useRef(focusRequest)
 
     const hasText = value.trim().length > 0
     const canGenerate = allowGenerate && typeof onGenerate === 'function'
@@ -301,12 +296,9 @@ export function ChatInput({
     const primaryIcon = isGenerating || dynamicIterationActive || !hasText
         ? <TaskListAddRegular />
         : <SendRegular />
-    const inputPlaceholder = dynamicIterationActive
+    const inputPlaceholder = placeholder ?? (dynamicIterationActive
         ? 'Describe the code change to iterate on...'
-        : 'Describe what you want to build...'
-    const inputHint = dynamicIterationActive
-        ? 'Enter adds a new line. Ctrl/Cmd+Enter iterates. Upload images, docs, or assets for Fleet to use.'
-        : 'Enter adds a new line. Ctrl/Cmd+Enter sends. Upload images, docs, or assets for Fleet to use.'
+        : 'Describe what you want to build...')
 
     const statusIconClassName = (() => {
         switch (statusState) {
@@ -349,6 +341,22 @@ export function ChatInput({
         autoResize()
     }, [value, autoResize])
 
+    useEffect(() => {
+        if (focusRequest === undefined || previousFocusRequestRef.current === focusRequest) {
+            return
+        }
+
+        previousFocusRequestRef.current = focusRequest
+        const textarea = textareaRef.current
+        if (!textarea) {
+            return
+        }
+
+        textarea.focus()
+        const end = textarea.value.length
+        textarea.setSelectionRange(end, end)
+    }, [focusRequest])
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? [])
         if (files.length > 0 && onFileSelect) {
@@ -386,6 +394,7 @@ export function ChatInput({
                     rows={2}
                     className={mergeClasses(styles.inputTextarea, isCompact && styles.inputTextareaCompact)}
                     disabled={disabled}
+                    aria-label={dynamicIterationActive ? 'Dynamic iteration request' : 'Chat message'}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                             e.preventDefault()
@@ -429,6 +438,7 @@ export function ChatInput({
                                                         disabled={disabled}
                                                         className={styles.menuButton}
                                                         size={isCompact ? 'small' : 'medium'}
+                                                        aria-label="Choose chat action"
                                                     />
                                                 </MenuTrigger>
                                                 <MenuPopover>
@@ -509,13 +519,11 @@ export function ChatInput({
                         icon={<AttachRegular />}
                         onClick={() => fileInputRef.current?.click()}
                         disabled={disabled || uploading}
+                        aria-label={uploading ? 'Uploading files' : 'Attach files'}
                     >
                         {uploading ? 'Uploading...' : 'Attach files'}
                     </Button>
                 </div>
-                <Caption1 className={mergeClasses(styles.inputHint, isCompact && styles.inputHintCompact, shouldStackLayout && styles.inputHintMobile)}>
-                    {inputHint}
-                </Caption1>
             </div>
         </div>
     )
