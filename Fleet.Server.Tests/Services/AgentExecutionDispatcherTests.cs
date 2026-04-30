@@ -4,6 +4,7 @@ using Fleet.Server.Data;
 using Fleet.Server.Data.Entities;
 using Fleet.Server.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Fleet.Server.Tests.Services;
@@ -47,10 +48,10 @@ public class AgentExecutionDispatcherTests
                 "p1",
                 "s1",
                 It.IsAny<ChatSessionActivityDto>(),
-                null))
+                "7"))
             .Returns(Task.CompletedTask);
 
-        var sut = new AgentExecutionDispatcher(db, orchestrationService.Object, chatSessionRepository.Object);
+        var sut = CreateDispatcher(db, orchestrationService.Object, chatSessionRepository.Object);
 
         var executionId = await sut.DispatchWorkItemAsync("p1", 160, 7, chatSessionId: "s1");
 
@@ -76,7 +77,8 @@ public class AgentExecutionDispatcherTests
         var sut = new AgentExecutionDispatcher(
             db,
             orchestrationService.Object,
-            Mock.Of<IChatSessionRepository>());
+            Mock.Of<IChatSessionRepository>(),
+            Mock.Of<ILogger<AgentExecutionDispatcher>>());
 
         var executionId = await sut.DispatchWorkItemAsync("p1", 161, 7, requestedTargetBranch: " release/v1 ");
 
@@ -99,7 +101,8 @@ public class AgentExecutionDispatcherTests
         var sut = new AgentExecutionDispatcher(
             db,
             orchestrationService.Object,
-            Mock.Of<IChatSessionRepository>());
+            Mock.Of<IChatSessionRepository>(),
+            Mock.Of<ILogger<AgentExecutionDispatcher>>());
 
         var executionId = await sut.DispatchWorkItemAsync("p1", 162, 7, requestedTargetBranch: "fleet/{workItemNumber}-{slug}");
 
@@ -108,6 +111,48 @@ public class AgentExecutionDispatcherTests
             service => service.StartExecutionAsync("p1", 162, 7, (string?)null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    [TestMethod]
+    public async Task DispatchWorkItemAsync_DoesNotFailWhenBranchActivityAppendNeedsRequestAuth()
+    {
+        await using var db = CreateDbContext();
+
+        var orchestrationService = new Mock<IAgentOrchestrationService>();
+        orchestrationService
+            .Setup(service => service.StartExecutionAsync("p1", 163, 7, "feature/chat", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-163");
+        var chatSessionRepository = new Mock<IChatSessionRepository>();
+        chatSessionRepository
+            .Setup(repository => repository.AppendSessionActivityAsync(
+                "p1",
+                "s1",
+                It.IsAny<ChatSessionActivityDto>(),
+                "7"))
+            .ThrowsAsync(new UnauthorizedAccessException("No authenticated user."));
+        var sut = CreateDispatcher(db, orchestrationService.Object, chatSessionRepository.Object);
+
+        var executionId = await sut.DispatchWorkItemAsync(
+            "p1",
+            163,
+            7,
+            requestedTargetBranch: "feature/chat",
+            chatSessionId: "s1");
+
+        Assert.AreEqual("exec-163", executionId);
+        orchestrationService.Verify(
+            service => service.StartExecutionAsync("p1", 163, 7, "feature/chat", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    private static AgentExecutionDispatcher CreateDispatcher(
+        FleetDbContext db,
+        IAgentOrchestrationService orchestrationService,
+        IChatSessionRepository chatSessionRepository)
+        => new(
+            db,
+            orchestrationService,
+            chatSessionRepository,
+            Mock.Of<ILogger<AgentExecutionDispatcher>>());
 
     private static FleetDbContext CreateDbContext()
     {

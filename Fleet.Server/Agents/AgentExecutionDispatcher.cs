@@ -8,7 +8,8 @@ namespace Fleet.Server.Agents;
 public class AgentExecutionDispatcher(
     FleetDbContext db,
     IAgentOrchestrationService orchestrationService,
-    IChatSessionRepository chatSessionRepository) : IAgentExecutionDispatcher
+    IChatSessionRepository chatSessionRepository,
+    ILogger<AgentExecutionDispatcher> logger) : IAgentExecutionDispatcher
 {
     public async Task<string> DispatchWorkItemAsync(
         string projectId,
@@ -44,6 +45,7 @@ public class AgentExecutionDispatcher(
         await AppendResolvedBranchActivityAsync(
             projectId,
             chatSessionId,
+            userId.ToString(),
             workItemNumber,
             resolvedTargetBranch);
 
@@ -93,23 +95,36 @@ public class AgentExecutionDispatcher(
     private async Task AppendResolvedBranchActivityAsync(
         string projectId,
         string? chatSessionId,
+        string ownerId,
         int workItemNumber,
         string? resolvedTargetBranch)
     {
         if (string.IsNullOrWhiteSpace(chatSessionId))
             return;
 
-        var branchLabel = string.IsNullOrWhiteSpace(resolvedTargetBranch)
-            ? "inherit parent/default branch"
-            : resolvedTargetBranch;
-        await chatSessionRepository.AppendSessionActivityAsync(
-            projectId,
-            chatSessionId,
-            new ChatSessionActivityDto(
-                Id: Guid.NewGuid().ToString("N"),
-                Kind: "status",
-                Message: $"Queued work item #{workItemNumber} with target branch '{branchLabel}'.",
-                TimestampUtc: DateTime.UtcNow.ToString("O")));
+        try
+        {
+            var branchLabel = string.IsNullOrWhiteSpace(resolvedTargetBranch)
+                ? "inherit parent/default branch"
+                : resolvedTargetBranch;
+            await chatSessionRepository.AppendSessionActivityAsync(
+                projectId,
+                chatSessionId,
+                new ChatSessionActivityDto(
+                    Id: Guid.NewGuid().ToString("N"),
+                    Kind: "status",
+                    Message: $"Queued work item #{workItemNumber} with target branch '{branchLabel}'.",
+                    TimestampUtc: DateTime.UtcNow.ToString("O")),
+                ownerId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to append dynamic iteration branch activity for work item {WorkItemNumber} in chat session {SessionId}.",
+                workItemNumber,
+                chatSessionId);
+        }
     }
 
     private static string? NormalizeBranch(string? branch)
