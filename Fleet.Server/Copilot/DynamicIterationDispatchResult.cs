@@ -45,7 +45,7 @@ public sealed record DynamicIterationDispatchResult(
         if (Notes.Count == 0)
             return summary;
 
-        var details = string.Join(" | ", Notes.Take(3));
+        var details = string.Join(" | ", Notes);
         return $"{summary} Details: {details}";
     }
 }

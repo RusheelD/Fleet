@@ -9,4 +9,10 @@ public class AgentAutoExecutionDispatchPolicyOptions
     public int MaxActiveExecutionsPerSession { get; set; } = 3;
 
     public string[] AllowedLevels { get; set; } = ["Bug", "Task"];
+
+    public int MaxDynamicAutoStartPerMessage { get; set; }
+
+    public int MaxDynamicActiveExecutionsPerSession { get; set; }
+
+    public string[] DynamicAllowedLevels { get; set; } = ["Feature", "Component", "Bug", "Task"];
 }

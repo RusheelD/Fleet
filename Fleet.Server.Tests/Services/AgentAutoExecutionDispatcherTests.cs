@@ -88,6 +88,89 @@ public class AgentAutoExecutionDispatcherTests
         executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 12, 7, null, "s2", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [DataTestMethod]
+    [DataRow("balanced")]
+    [DataRow("parallel")]
+    public async Task DispatchAsync_DynamicPolicyStartsAllAcceptedCandidatesBeyondLegacyCaps(string executionPolicy)
+    {
+        var sessionId = $"s-{executionPolicy}";
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        foreach (var workItemNumber in new[] { 21, 22, 23, 24 })
+        {
+            executionDispatcher
+                .Setup(service => service.DispatchWorkItemAsync("p1", workItemNumber, 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync($"exec-{workItemNumber}");
+        }
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 21)).ReturnsAsync(CreateWorkItem(21, levelId: 1));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 22)).ReturnsAsync(CreateWorkItem(22, levelId: 2));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 23)).ReturnsAsync(CreateWorkItem(23, levelId: 3));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 24)).ReturnsAsync(CreateWorkItem(24, levelId: 4));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync(
+        [
+            new WorkItemLevelDto(1, "Feature", "lightbulb", "#00B7C3", 0, true),
+            new WorkItemLevelDto(2, "Component", "code", "#498205", 1, true),
+            new WorkItemLevelDto(3, "Bug", "bug", "#D13438", 2, true),
+            new WorkItemLevelDto(4, "Task", "task-list", "#8A8886", 3, true),
+        ]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 3,
+            maxActiveExecutionsPerSession: 3);
+
+        var result = await dispatcher.DispatchAsync("p1", sessionId, 7, [21, 22, 23, 24], "feature/chat", executionPolicy);
+
+        Assert.AreEqual(4, result.StartedExecutionIds.Count);
+        Assert.AreEqual(4, result.WorkItems.Count(item => item.Status == "started"));
+        Assert.AreEqual(0, result.WorkItems.Count(item => item.Status == "skipped"));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", It.IsAny<int>(), 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()), Times.Exactly(4));
+    }
+
+    [TestMethod]
+    public async Task DispatchAsync_SequentialDynamicPolicyStartsOnlyOneCandidate()
+    {
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-31");
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 31)).ReturnsAsync(CreateWorkItem(31, levelId: 1));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 32)).ReturnsAsync(CreateWorkItem(32, levelId: 1));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([new WorkItemLevelDto(1, "Task", "task-list", "#8A8886", 0, true)]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 5,
+            maxActiveExecutionsPerSession: 5);
+
+        var result = await dispatcher.DispatchAsync("p1", "s-sequential", 7, [31, 32], "feature/chat", "sequential");
+
+        Assert.AreEqual(1, result.StartedExecutionIds.Count);
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "skipped"));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 32, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [TestMethod]
     public async Task DispatchAsync_ReportsSanitizedUnexpectedStartFailure()
     {

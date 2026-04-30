@@ -56,10 +56,12 @@ public sealed class AgentAutoExecutionDispatcher(
         if (candidateWorkItemNumbers.Count == 0)
             return AgentAutoExecutionDispatchResult.Empty;
 
-        var maxAutoStartPerMessage = ResolveMaxAutoStartPerMessage(policy, executionPolicy);
+        var normalizedExecutionPolicy = NormalizeExecutionPolicy(executionPolicy);
+        var maxAutoStartPerMessage = ResolveMaxAutoStartPerMessage(policy, normalizedExecutionPolicy);
+        var maxActiveExecutionsPerSession = ResolveMaxActiveExecutionsPerSession(policy, normalizedExecutionPolicy);
 
         var normalizedAllowedLevels = new HashSet<string>(
-            policy.AllowedLevels
+            ResolveAllowedLevels(policy, normalizedExecutionPolicy)
                 .Where(level => !string.IsNullOrWhiteSpace(level))
                 .Select(level => level.Trim()),
             StringComparer.OrdinalIgnoreCase);
@@ -143,12 +145,12 @@ public sealed class AgentAutoExecutionDispatcher(
             }
 
             var activeInSessionCount = sessionActiveExecutionIds.Count;
-            if (policy.MaxActiveExecutionsPerSession > 0 && activeInSessionCount >= policy.MaxActiveExecutionsPerSession)
+            if (maxActiveExecutionsPerSession > 0 && activeInSessionCount >= maxActiveExecutionsPerSession)
             {
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
                     "skipped",
-                    $"Skipped by policy: session already has {activeInSessionCount} active auto-start execution(s) (limit {policy.MaxActiveExecutionsPerSession})."));
+                    $"Skipped by policy: session already has {activeInSessionCount} active auto-start execution(s) (limit {maxActiveExecutionsPerSession})."));
                 SkippedPolicyCounter.Add(1);
                 continue;
             }
@@ -242,7 +244,41 @@ public sealed class AgentAutoExecutionDispatcher(
         if (string.Equals(executionPolicy, "sequential", StringComparison.OrdinalIgnoreCase))
             return 1;
 
+        if (IsDynamicExecutionPolicy(executionPolicy))
+            return policy.MaxDynamicAutoStartPerMessage;
+
         return policy.MaxAutoStartPerMessage;
+    }
+
+    private static int ResolveMaxActiveExecutionsPerSession(
+        AgentAutoExecutionDispatchPolicyOptions policy,
+        string? executionPolicy)
+    {
+        if (string.Equals(executionPolicy, "sequential", StringComparison.OrdinalIgnoreCase))
+            return 1;
+
+        if (IsDynamicExecutionPolicy(executionPolicy))
+            return policy.MaxDynamicActiveExecutionsPerSession;
+
+        return policy.MaxActiveExecutionsPerSession;
+    }
+
+    private static string[] ResolveAllowedLevels(
+        AgentAutoExecutionDispatchPolicyOptions policy,
+        string? executionPolicy)
+        => IsDynamicExecutionPolicy(executionPolicy)
+            ? policy.DynamicAllowedLevels ?? []
+            : policy.AllowedLevels ?? [];
+
+    private static bool IsDynamicExecutionPolicy(string? executionPolicy)
+        => string.Equals(executionPolicy, "balanced", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(executionPolicy, "parallel", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(executionPolicy, "sequential", StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeExecutionPolicy(string? executionPolicy)
+    {
+        var normalized = executionPolicy?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToLowerInvariant();
     }
 
     private static ConcurrentDictionary<string, byte> GetOrCreateSessionExecutionSet(string projectId, string sessionId)
