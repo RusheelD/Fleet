@@ -265,6 +265,54 @@ public class AgentAutoExecutionDispatcherTests
     }
 
     [TestMethod]
+    public async Task DispatchAsync_DynamicPolicyPromotesMixedDescendantsToSharedParentFlow()
+    {
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-120");
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 120))
+            .ReturnsAsync(CreateWorkItem(120, levelId: 1, childWorkItemNumbers: [91, 93]));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 91))
+            .ReturnsAsync(CreateWorkItem(91, levelId: 2, parentWorkItemNumber: 120, childWorkItemNumbers: [92]));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 92))
+            .ReturnsAsync(CreateWorkItem(92, levelId: 3, parentWorkItemNumber: 91));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 93))
+            .ReturnsAsync(CreateWorkItem(93, levelId: 2, parentWorkItemNumber: 120));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync(
+        [
+            new WorkItemLevelDto(1, "Feature", "lightbulb", "#00B7C3", 0, true),
+            new WorkItemLevelDto(2, "Component", "code", "#498205", 1, true),
+            new WorkItemLevelDto(3, "Bug", "bug", "#D13438", 2, true),
+        ]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 3,
+            maxActiveExecutionsPerSession: 3);
+
+        var result = await dispatcher.DispatchAsync("p1", "s-common-parent", 7, [92, 93], "feature/chat", "balanced");
+
+        Assert.AreEqual(1, result.StartedExecutionIds.Count);
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 120 && item.Status == "started"));
+        Assert.AreEqual(2, result.WorkItems.Count(item => item.Status == "covered"));
+        Assert.IsTrue(result.WorkItems.Where(item => item.Status == "covered").All(item => item.Reason.Contains("#120", StringComparison.Ordinal)));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 92, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 93, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
     public async Task DispatchAsync_DynamicPolicyStartsChildCandidateWhenParentStartFails()
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();

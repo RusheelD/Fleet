@@ -2431,6 +2431,7 @@ public class ChatService(
                 Before creating or updating work items, inspect the existing work-item tree with `list_work_items` using a high enough limit to see the relevant hierarchy. Use that tree to place new items under the most specific correct existing parent instead of creating a new root by default.
                 Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request, but model coherent implementation flows as a parent item with child tasks rather than as multiple unrelated root executions.
                 Prefer one execution root per coherent flow. If you create or update child Tasks/Components/Bugs for a flow, make sure their parent Feature/Component/Bug is the item Fleet can execute; Fleet will handle needed sub-flows from that parent.
+                When all created or updated items belong under one executable parent, Fleet should dispatch that parent item rather than starting multiple descendant flows.
                 Prefer actionable leaf work items that can be executed independently only when they are truly independent. Keep parent/child relationships intact when the request belongs inside a larger feature breakdown.
                 New work items created in this mode are automatically assigned to Fleet AI with automatic agent selection.
                 Fleet will automatically start eligible work items after your tool calls complete. Target branch: {targetBranch}. Dispatch strategy: {executionPolicy}.

@@ -364,9 +364,89 @@ public sealed class AgentAutoExecutionDispatcher(
                 levelNameById));
         }
 
-        PromoteSiblingRoots(executionRoots, workItemsByNumber, allowedLevels, levelNameById);
+        if (TryResolveSharedDynamicExecutionRoot(
+                candidates,
+                workItemsByNumber,
+                allowedLevels,
+                levelNameById,
+                out var sharedExecutionRoot))
+        {
+            executionRoots.Clear();
+            executionRoots.Add(sharedExecutionRoot);
+        }
+        else
+        {
+            PromoteSiblingRoots(executionRoots, workItemsByNumber, allowedLevels, levelNameById);
+        }
+
         executionRoots.UnionWith(candidates);
         return executionRoots.ToArray();
+    }
+
+    private static bool TryResolveSharedDynamicExecutionRoot(
+        IReadOnlyCollection<int> candidates,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<string> allowedLevels,
+        IReadOnlyDictionary<int, string> levelNameById,
+        out int executionRoot)
+    {
+        executionRoot = 0;
+        if (candidates.Count <= 1)
+            return false;
+
+        var chains = new List<IReadOnlyList<WorkItemDto>>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            if (!workItemsByNumber.TryGetValue(candidate, out var workItem))
+                return false;
+
+            chains.Add(BuildAncestorChainFromSelfToRoot(workItem, workItemsByNumber));
+        }
+
+        var commonNumbers = chains[0]
+            .Select(workItem => workItem.WorkItemNumber)
+            .ToHashSet();
+        foreach (var chain in chains.Skip(1))
+        {
+            commonNumbers.IntersectWith(chain.Select(workItem => workItem.WorkItemNumber));
+            if (commonNumbers.Count == 0)
+                return false;
+        }
+
+        foreach (var workItem in chains[0])
+        {
+            if (commonNumbers.Contains(workItem.WorkItemNumber) &&
+                IsDispatchableWorkItem(workItem, allowedLevels, levelNameById))
+            {
+                executionRoot = workItem.WorkItemNumber;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<WorkItemDto> BuildAncestorChainFromSelfToRoot(
+        WorkItemDto workItem,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber)
+    {
+        var chain = new List<WorkItemDto>();
+        var visited = new HashSet<int>();
+        var current = workItem;
+
+        while (visited.Add(current.WorkItemNumber))
+        {
+            chain.Add(current);
+            if (current.ParentWorkItemNumber is not { } parentWorkItemNumber ||
+                !workItemsByNumber.TryGetValue(parentWorkItemNumber, out var parent))
+            {
+                break;
+            }
+
+            current = parent;
+        }
+
+        return chain;
     }
 
     private static int ResolveInitialDynamicExecutionRoot(
@@ -511,18 +591,21 @@ public sealed class AgentAutoExecutionDispatcher(
         if (!visited.Add(workItemNumber) ||
             !workItemsByNumber.TryGetValue(workItemNumber, out var workItem) ||
             workItem.ParentWorkItemNumber is not { } parentWorkItemNumber ||
-            !candidateNumberSet.Contains(parentWorkItemNumber))
+            !workItemsByNumber.ContainsKey(parentWorkItemNumber))
         {
             depthByNumber[workItemNumber] = 0;
             return 0;
         }
 
-        var resolvedDepth = 1 + ResolveCandidateAncestorDepth(
+        var parentDepth = ResolveCandidateAncestorDepth(
             parentWorkItemNumber,
             workItemsByNumber,
             candidateNumberSet,
             depthByNumber,
             visited);
+        var resolvedDepth = candidateNumberSet.Contains(parentWorkItemNumber)
+            ? parentDepth + 1
+            : parentDepth;
         depthByNumber[workItemNumber] = resolvedDepth;
         return resolvedDepth;
     }

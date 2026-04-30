@@ -824,6 +824,7 @@ public class ChatServiceTests
         StringAssert.Contains(dynamicRequest.SystemPrompt, "inspect the existing work-item tree");
         StringAssert.Contains(dynamicRequest.SystemPrompt, "most specific correct existing parent");
         StringAssert.Contains(dynamicRequest.SystemPrompt, "Prefer one execution root per coherent flow");
+        StringAssert.Contains(dynamicRequest.SystemPrompt, "dispatch that parent item rather than starting multiple descendant flows");
         _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
             ProjectId,
             SessionId,
