@@ -105,9 +105,7 @@ public class RepoSandbox : IRepoSandbox
         // Resume an existing feature branch from origin if requested.
         if (resumeFromBranch)
         {
-            result = await RunGitAsync(
-                ["ls-remote", "--heads", "origin", branchName],
-                cancellationToken: cancellationToken);
+            result = await WaitForRemoteBranchAsync(branchName, cancellationToken);
             if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
             {
                 throw new InvalidOperationException(
@@ -140,9 +138,7 @@ public class RepoSandbox : IRepoSandbox
         // Create and checkout a new feature branch from a caller-provided base branch.
         else if (!string.IsNullOrWhiteSpace(baseBranch))
         {
-            result = await RunGitAsync(
-                ["ls-remote", "--heads", "origin", baseBranch],
-                cancellationToken: cancellationToken);
+            result = await WaitForRemoteBranchAsync(baseBranch, cancellationToken);
             if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Stdout))
                 throw new InvalidOperationException(
                     $"Target/base branch '{baseBranch}' was not found on origin.");
@@ -1718,6 +1714,35 @@ public class RepoSandbox : IRepoSandbox
         => await RunGitAsync(
             BuildFetchRemoteBranchArgumentList(branchName, depth),
             cancellationToken: cancellationToken);
+
+    private async Task<CommandResult> WaitForRemoteBranchAsync(
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        CommandResult? lastResult = null;
+        var delays = new[]
+        {
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(2),
+        };
+
+        foreach (var delay in delays)
+        {
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, cancellationToken);
+
+            lastResult = await RunGitAsync(
+                ["ls-remote", "--heads", "origin", branchName],
+                cancellationToken: cancellationToken);
+            if (lastResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(lastResult.Stdout))
+                return lastResult;
+        }
+
+        return lastResult ?? new CommandResult(-1, string.Empty, "Remote branch lookup did not run.", false);
+    }
 
     private async Task<bool> EnsureCommonMergeBaseAsync(string sourceBranchName, CancellationToken cancellationToken)
     {

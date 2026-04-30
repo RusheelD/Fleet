@@ -789,7 +789,7 @@ public class ChatServiceTests
                 "feature/auth",
                 "parallel",
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, []));
+            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, 0, []));
 
         var toolCalls = new List<LLMToolCall>
         {
@@ -900,7 +900,7 @@ public class ChatServiceTests
                 "feature/session",
                 "sequential",
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, []));
+            .ReturnsAsync(new DynamicIterationDispatchResult(1, 1, 1, 0, 0, 0, []));
 
         var toolCalls = new List<LLMToolCall>
         {

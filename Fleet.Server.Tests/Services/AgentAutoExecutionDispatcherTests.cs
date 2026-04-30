@@ -137,6 +137,91 @@ public class AgentAutoExecutionDispatcherTests
     }
 
     [TestMethod]
+    public async Task DispatchAsync_DynamicPolicyCoversChildCandidatesWhenParentStarts()
+    {
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-40");
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 40)).ReturnsAsync(CreateWorkItem(40, levelId: 1));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 41)).ReturnsAsync(CreateWorkItem(41, levelId: 2, parentWorkItemNumber: 40));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 42)).ReturnsAsync(CreateWorkItem(42, levelId: 2, parentWorkItemNumber: 40));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync(
+        [
+            new WorkItemLevelDto(1, "Feature", "lightbulb", "#00B7C3", 0, true),
+            new WorkItemLevelDto(2, "Task", "task-list", "#8A8886", 1, true),
+        ]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 3,
+            maxActiveExecutionsPerSession: 3);
+
+        var result = await dispatcher.DispatchAsync("p1", "s-covered", 7, [41, 42, 40], "feature/chat", "balanced");
+
+        Assert.AreEqual(1, result.StartedExecutionIds.Count);
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
+        Assert.AreEqual(2, result.WorkItems.Count(item => item.Status == "covered"));
+        Assert.IsTrue(result.WorkItems.Where(item => item.Status == "covered").All(item => item.Reason.Contains("#40", StringComparison.Ordinal)));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 41, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 42, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task DispatchAsync_DynamicPolicyStartsChildCandidateWhenParentStartFails()
+    {
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("parent branch could not be prepared"));
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-51");
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 50)).ReturnsAsync(CreateWorkItem(50, levelId: 1));
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 51)).ReturnsAsync(CreateWorkItem(51, levelId: 2, parentWorkItemNumber: 50));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync(
+        [
+            new WorkItemLevelDto(1, "Feature", "lightbulb", "#00B7C3", 0, true),
+            new WorkItemLevelDto(2, "Task", "task-list", "#8A8886", 1, true),
+        ]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 3,
+            maxActiveExecutionsPerSession: 3);
+
+        var result = await dispatcher.DispatchAsync("p1", "s-parent-fails", 7, [51, 50], "feature/chat", "balanced");
+
+        Assert.AreEqual(1, result.StartedExecutionIds.Count);
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
+        Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "skipped"));
+        Assert.AreEqual(0, result.WorkItems.Count(item => item.Status == "covered"));
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
     public async Task DispatchAsync_SequentialDynamicPolicyStartsOnlyOneCandidate()
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
@@ -230,7 +315,7 @@ public class AgentAutoExecutionDispatcherTests
             Mock.Of<ILogger<AgentAutoExecutionDispatcher>>());
     }
 
-    private static WorkItemDto CreateWorkItem(int workItemNumber, int? levelId)
+    private static WorkItemDto CreateWorkItem(int workItemNumber, int? levelId, int? parentWorkItemNumber = null)
         => new(
             WorkItemNumber: workItemNumber,
             Title: $"Work item {workItemNumber}",
@@ -241,7 +326,7 @@ public class AgentAutoExecutionDispatcherTests
             Tags: [],
             IsAI: false,
             Description: string.Empty,
-            ParentWorkItemNumber: null,
+            ParentWorkItemNumber: parentWorkItemNumber,
             ChildWorkItemNumbers: [],
             LevelId: levelId);
 

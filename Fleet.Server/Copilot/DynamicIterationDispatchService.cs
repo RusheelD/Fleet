@@ -48,6 +48,7 @@ public class DynamicIterationDispatchService(
                 candidateIds.Count,
                 0,
                 0,
+                0,
                 candidateIds.Count,
                 0,
                 [branchPolicyError]);
@@ -80,6 +81,7 @@ public class DynamicIterationDispatchService(
 
             return new DynamicIterationDispatchResult(
                 candidateIds.Count,
+                0,
                 0,
                 0,
                 candidateIds.Count,

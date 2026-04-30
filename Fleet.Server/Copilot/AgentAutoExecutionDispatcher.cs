@@ -74,6 +74,14 @@ public sealed class AgentAutoExecutionDispatcher(
             .Distinct()
             .ToArray();
 
+        var workItemsByNumber = new Dictionary<int, WorkItemDto>();
+        foreach (var workItemNumber in uniqueCandidates)
+        {
+            var workItem = await workItemService.GetByWorkItemNumberAsync(projectId, workItemNumber);
+            if (workItem is not null)
+                workItemsByNumber[workItemNumber] = workItem;
+        }
+
         var activeExecutions = await agentService.GetExecutionsAsync(projectId);
         var activeExecutionSet = new HashSet<int>(
             activeExecutions
@@ -94,17 +102,30 @@ public sealed class AgentAutoExecutionDispatcher(
                 sessionActiveExecutionIds.TryRemove(executionId, out _);
         }
 
+        var orderedCandidates = OrderCandidatesParentsFirst(uniqueCandidates, workItemsByNumber);
+        var candidateNumberSet = uniqueCandidates.ToHashSet();
+        var activeOrStartedCandidateNumbers = activeExecutionSet
+            .Where(candidateNumberSet.Contains)
+            .ToHashSet();
         var results = new List<AgentAutoExecutionWorkItemResult>(uniqueCandidates.Length);
         var startedExecutionIds = new List<string>();
         var startedCount = 0;
 
-        foreach (var workItemNumber in uniqueCandidates)
+        foreach (var workItemNumber in orderedCandidates)
         {
-            var workItem = await workItemService.GetByWorkItemNumberAsync(projectId, workItemNumber);
-            if (workItem is null)
+            if (!workItemsByNumber.TryGetValue(workItemNumber, out var workItem))
             {
                 results.Add(new AgentAutoExecutionWorkItemResult(workItemNumber, "skipped", "Work item was not found."));
                 SkippedPolicyCounter.Add(1);
+                continue;
+            }
+
+            if (TryResolveActiveCandidateAncestor(workItem, workItemsByNumber, activeOrStartedCandidateNumbers, out var parentWorkItemNumber))
+            {
+                results.Add(new AgentAutoExecutionWorkItemResult(
+                    workItemNumber,
+                    "covered",
+                    $"Covered by parent work item #{parentWorkItemNumber}; it will run as part of that parent execution."));
                 continue;
             }
 
@@ -182,6 +203,7 @@ public sealed class AgentAutoExecutionDispatcher(
                 startedExecutionIds.Add(executionId);
                 sessionActiveExecutionIds.TryAdd(executionId, 0);
                 activeExecutionSet.Add(workItemNumber);
+                activeOrStartedCandidateNumbers.Add(workItemNumber);
                 StartedCounter.Add(1);
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
@@ -281,6 +303,74 @@ public sealed class AgentAutoExecutionDispatcher(
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToLowerInvariant();
     }
 
+    private static int[] OrderCandidatesParentsFirst(
+        IReadOnlyCollection<int> candidates,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber)
+    {
+        var candidateNumberSet = candidates.ToHashSet();
+        var depthByNumber = new Dictionary<int, int>();
+
+        return candidates
+            .OrderBy(number => ResolveCandidateAncestorDepth(number, workItemsByNumber, candidateNumberSet, depthByNumber, []))
+            .ThenBy(number => number)
+            .ToArray();
+    }
+
+    private static int ResolveCandidateAncestorDepth(
+        int workItemNumber,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<int> candidateNumberSet,
+        IDictionary<int, int> depthByNumber,
+        HashSet<int> visited)
+    {
+        if (depthByNumber.TryGetValue(workItemNumber, out var depth))
+            return depth;
+
+        if (!visited.Add(workItemNumber) ||
+            !workItemsByNumber.TryGetValue(workItemNumber, out var workItem) ||
+            workItem.ParentWorkItemNumber is not { } parentWorkItemNumber ||
+            !candidateNumberSet.Contains(parentWorkItemNumber))
+        {
+            depthByNumber[workItemNumber] = 0;
+            return 0;
+        }
+
+        var resolvedDepth = 1 + ResolveCandidateAncestorDepth(
+            parentWorkItemNumber,
+            workItemsByNumber,
+            candidateNumberSet,
+            depthByNumber,
+            visited);
+        depthByNumber[workItemNumber] = resolvedDepth;
+        return resolvedDepth;
+    }
+
+    private static bool TryResolveActiveCandidateAncestor(
+        WorkItemDto workItem,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<int> activeOrStartedCandidateNumbers,
+        out int parentWorkItemNumber)
+    {
+        var visited = new HashSet<int>();
+        var current = workItem;
+
+        while (current.ParentWorkItemNumber is { } candidateParentNumber &&
+               workItemsByNumber.TryGetValue(candidateParentNumber, out var parent) &&
+               visited.Add(candidateParentNumber))
+        {
+            if (activeOrStartedCandidateNumbers.Contains(candidateParentNumber))
+            {
+                parentWorkItemNumber = candidateParentNumber;
+                return true;
+            }
+
+            current = parent;
+        }
+
+        parentWorkItemNumber = 0;
+        return false;
+    }
+
     private static ConcurrentDictionary<string, byte> GetOrCreateSessionExecutionSet(string projectId, string sessionId)
         => ActiveExecutionIdsBySession.GetOrAdd(
             $"{projectId}::{sessionId}",
@@ -302,10 +392,11 @@ public sealed record AgentAutoExecutionDispatchResult(
 
         var started = WorkItems.Count(item => string.Equals(item.Status, "started", StringComparison.OrdinalIgnoreCase));
         var queued = WorkItems.Count(item => string.Equals(item.Status, "queued", StringComparison.OrdinalIgnoreCase));
+        var covered = WorkItems.Count(item => string.Equals(item.Status, "covered", StringComparison.OrdinalIgnoreCase));
         var skipped = WorkItems.Count(item => string.Equals(item.Status, "skipped", StringComparison.OrdinalIgnoreCase));
         var failed = WorkItems.Count(item => string.Equals(item.Status, "failed", StringComparison.OrdinalIgnoreCase));
 
-        return $"Auto-dispatch: {started} started, {queued} queued, {skipped} skipped, {failed} failed.";
+        return $"Auto-dispatch: {started} started, {queued} queued, {covered} covered, {skipped} skipped, {failed} failed.";
     }
 }
 
