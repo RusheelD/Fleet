@@ -71,7 +71,10 @@ export function buildChatTimeline(
     const timeline: ChatTimelineItem[] = []
     let pendingActivities: ChatSessionActivity[] = []
 
-    const flushPendingActivities = (assistantMessage?: ChatMessageData) => {
+    const flushPendingActivities = (
+        assistantMessage?: ChatMessageData,
+        optionsOverride?: { isTrailingGroup?: boolean },
+    ) => {
         if (pendingActivities.length === 0) {
             return
         }
@@ -79,6 +82,7 @@ export function buildChatTimeline(
         const firstActivity = pendingActivities[0]
         const lastActivity = pendingActivities[pendingActivities.length - 1]
         const hasAssistantResponse = Boolean(assistantMessage && assistantMessage.role === 'assistant')
+        const isTrailingGroup = optionsOverride?.isTrailingGroup ?? false
 
         timeline.push({
             type: 'thinking',
@@ -90,7 +94,7 @@ export function buildChatTimeline(
                 endedAtUtc: hasAssistantResponse
                     ? assistantMessage?.timestamp || lastActivity?.timestampUtc || currentTimestampUtc
                     : lastActivity?.timestampUtc || currentTimestampUtc,
-                state: hasAssistantResponse || !options.isBusy ? 'thought' : 'thinking',
+                state: hasAssistantResponse || !isTrailingGroup || !options.isBusy ? 'thought' : 'thinking',
                 hasAssistantResponse,
             },
         })
@@ -112,7 +116,7 @@ export function buildChatTimeline(
         })
     }
 
-    flushPendingActivities()
+    flushPendingActivities(undefined, { isTrailingGroup: true })
 
     const lastTimelineItem = timeline[timeline.length - 1]
     if (options.isBusy && (!lastTimelineItem || lastTimelineItem.type === 'message')) {
@@ -183,6 +187,11 @@ function buildThinkingGroupId(
 
 function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {
     if (a.sortTime !== null && b.sortTime !== null) {
+        const assistantAndActivityOrder = compareAssistantAndActivityNearSameTime(a, b)
+        if (assistantAndActivityOrder !== 0) {
+            return assistantAndActivityOrder
+        }
+
         if (a.sortTime !== b.sortTime) {
             return a.sortTime - b.sortTime
         }
@@ -193,6 +202,32 @@ function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {
     }
 
     return a.sourceOrder - b.sourceOrder
+}
+
+function compareAssistantAndActivityNearSameTime(a: TimelineEntry, b: TimelineEntry): number {
+    if (a.sortTime === null || b.sortTime === null) {
+        return 0
+    }
+
+    const timeDelta = Math.abs(a.sortTime - b.sortTime)
+    if (timeDelta > 1000) {
+        return 0
+    }
+
+    const aIsAssistant = a.type === 'message' && a.message.role === 'assistant'
+    const bIsAssistant = b.type === 'message' && b.message.role === 'assistant'
+    const aIsActivity = a.type === 'activity'
+    const bIsActivity = b.type === 'activity'
+
+    if (aIsActivity && bIsAssistant) {
+        return -1
+    }
+
+    if (aIsAssistant && bIsActivity) {
+        return 1
+    }
+
+    return 0
 }
 
 function getMessagePrecedence(message: ChatMessageData): number {

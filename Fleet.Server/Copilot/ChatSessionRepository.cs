@@ -104,7 +104,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
             OwnerId = ownerId,
             Title = title,
             LastMessage = "",
-            Timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            Timestamp = DateTime.UtcNow.ToString("O"),
             IsActive = true,
             ProjectId = scopeProjectId
         };
@@ -197,7 +197,7 @@ public class ChatSessionRepository(FleetDbContext context, IAuthService authServ
         if (session is null)
             throw new KeyNotFoundException("Chat session not found.");
 
-        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var now = DateTime.UtcNow.ToString("O");
         var entity = new ChatMessage
         {
             Id = Guid.NewGuid().ToString(),

@@ -11,7 +11,7 @@ import { ChatDrawerHeader, ChatSessionBar, ChatMessage, ChatThinkingGroup, ChatI
 import {
     useChatData, useChatMessages, useCreateChatSession,
     useAttachments, useUploadAttachment, useDeleteAttachment, useDeleteSession, useRenameSession, useCancelChatGeneration,
-    useUpdateSessionDynamicIteration,
+    useProjectBranches, useUpdateSessionDynamicIteration,
 } from '../../proxies/dataClient'
 import { cancelChatSessionRequests, sendChatMessage } from '../../proxies/chatProxy'
 import { getApiErrorMessage } from '../../proxies/proxy'
@@ -142,6 +142,10 @@ export function ChatDrawer({
     const [optimisticMessages, setOptimisticMessages] = useState<ChatMessageData[]>([])
     const [pendingMessageSessionIds, setPendingMessageSessionIds] = useState<string[]>([])
     const [optimisticGeneratingSessionIds, setOptimisticGeneratingSessionIds] = useState<string[]>([])
+    const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+    const [dynamicIterationEnabled, setDynamicIterationEnabled] = useState(false)
+    const [dynamicBranchName, setDynamicBranchName] = useState('')
+    const [dynamicStrategy, setDynamicStrategy] = useState<ChatDynamicStrategy>('balanced')
     const { user } = useAuth()
     const { preferences } = usePreferences()
     const { state: serverEventState } = useServerEventConnection(projectId)
@@ -167,13 +171,15 @@ export function ChatDrawer({
     const renameSessionMutation = useRenameSession(projectId)
     const updateDynamicIterationMutation = useUpdateSessionDynamicIteration(projectId)
     const cancelGenerationMutation = useCancelChatGeneration(projectId)
+    const {
+        data: projectBranches,
+        isLoading: projectBranchesLoading,
+        isError: projectBranchesIsError,
+        error: projectBranchesError,
+    } = useProjectBranches(projectId, Boolean(projectId && dynamicIterationEnabled))
     const { data: attachments } = useAttachments(projectId, activeSession)
     const uploadMutation = useUploadAttachment(projectId)
     const deleteMutation = useDeleteAttachment(projectId, activeSession)
-    const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
-    const [dynamicIterationEnabled, setDynamicIterationEnabled] = useState(false)
-    const [dynamicBranchName, setDynamicBranchName] = useState('')
-    const [dynamicStrategy, setDynamicStrategy] = useState<ChatDynamicStrategy>('balanced')
 
     const serverSessions = useMemo(() => chatData?.sessions ?? [], [chatData?.sessions])
     useEffect(() => {
@@ -569,8 +575,31 @@ export function ChatDrawer({
         [dynamicIterationEnabled, dynamicBranchName, dynamicStrategy],
     )
     const dynamicIterationActive = allowGenerateWorkItems && dynamicIterationEnabled
-    const messageActionsDisabled = activeSessionIsBusy || createSessionMutation.isPending || isCancelingActiveSession
-    const dynamicSettingsDisabled = messageActionsDisabled || updateDynamicIterationMutation.isPending
+    const normalizedDynamicBranchName = dynamicBranchName.trim()
+    const selectedDynamicBranch = projectBranches?.find((branch) =>
+        stringEqualsIgnoreCase(branch.name, normalizedDynamicBranchName),
+    )
+    const defaultDynamicBranch = projectBranches?.find((branch) => branch.isDefault)
+    const requiresExplicitDynamicTarget = Boolean(
+        dynamicIterationActive
+        && defaultDynamicBranch
+        && !defaultDynamicBranch.canUseForDynamicIteration
+        && normalizedDynamicBranchName.length === 0,
+    )
+    const dynamicBranchBlockedReason = selectedDynamicBranch && !selectedDynamicBranch.canUseForDynamicIteration
+        ? selectedDynamicBranch.dynamicIterationBlockedReason ?? 'This branch cannot be used for dynamic iteration.'
+        : null
+    const dynamicBranchSelectionMessage = dynamicBranchBlockedReason
+        ?? (requiresExplicitDynamicTarget ? 'Create or select an unprotected target branch.' : null)
+        ?? (projectBranchesIsError ? getApiErrorMessage(projectBranchesError, 'Unable to load repository branches.') : null)
+    const dynamicBranchSelectionInvalid = dynamicIterationActive
+        && (Boolean(dynamicBranchBlockedReason) || requiresExplicitDynamicTarget)
+    const baseMessageActionsDisabled = activeSessionIsBusy
+        || createSessionMutation.isPending
+        || isCancelingActiveSession
+    const messageActionsDisabled = baseMessageActionsDisabled
+        || dynamicBranchSelectionInvalid
+    const dynamicSettingsDisabled = baseMessageActionsDisabled || updateDynamicIterationMutation.isPending
     const activeDynamicPolicy = activeSessionData?.dynamicPolicy
         ?? parseDynamicPolicy(activeSessionData?.dynamicIterationPolicyJson)
     const policyBadges = useMemo(() => {
@@ -761,6 +790,10 @@ export function ChatDrawer({
                     dynamicIterationEnabled={dynamicIterationEnabled}
                     dynamicBranchName={dynamicBranchName}
                     dynamicStrategy={dynamicStrategy}
+                    branchOptions={projectBranches ?? []}
+                    branchesLoading={projectBranchesLoading}
+                    branchValidationMessage={dynamicBranchSelectionMessage}
+                    branchValidationState={dynamicBranchSelectionInvalid ? 'error' : projectBranchesIsError ? 'warning' : undefined}
                     strategyOptions={DYNAMIC_STRATEGIES}
                     policyBadges={policyBadges}
                     disabled={dynamicSettingsDisabled}
@@ -770,7 +803,7 @@ export function ChatDrawer({
                         persistDynamicIterationOptions(isEnabled, dynamicBranchName, dynamicStrategy)
                     }}
                     onBranchNameChange={setDynamicBranchName}
-                    onBranchNameCommit={() => persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, dynamicStrategy)}
+                    onBranchNameCommit={(branchName) => persistDynamicIterationOptions(dynamicIterationEnabled, branchName ?? dynamicBranchName, dynamicStrategy)}
                     onStrategyChange={(strategy) => {
                         setDynamicStrategy(strategy)
                         persistDynamicIterationOptions(dynamicIterationEnabled, dynamicBranchName, strategy)
@@ -856,6 +889,10 @@ function normalizeDynamicStrategy(value: unknown): ChatDynamicStrategy | null {
     return value === 'balanced' || value === 'parallel' || value === 'sequential'
         ? value
         : null
+}
+
+function stringEqualsIgnoreCase(left: string, right: string): boolean {
+    return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0
 }
 
 function getVisibleSessionStatus(

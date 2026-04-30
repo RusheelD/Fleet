@@ -176,4 +176,91 @@ describe('chat timeline', () => {
 
         expect(firstTimeline[1]?.id).toBe(secondTimeline[1]?.id)
     })
+
+    it('keeps same-second activity before the assistant message', () => {
+        const timeline = buildChatTimeline(
+            [
+                createMessage({
+                    id: 'user-1',
+                    role: 'user',
+                    timestamp: '2026-04-03T10:00:00Z',
+                }),
+                createMessage({
+                    id: 'assistant-1',
+                    role: 'assistant',
+                    timestamp: '2026-04-03T10:00:00Z',
+                }),
+            ],
+            [
+                createActivity({
+                    id: 'activity-1',
+                    timestampUtc: '2026-04-03T10:00:00.500Z',
+                    message: 'Dynamic iteration dispatch started',
+                }),
+            ],
+            {
+                isBusy: false,
+            },
+        )
+
+        expect(timeline.map((item) => item.type)).toEqual(['message', 'thinking', 'message'])
+        expect(timeline[1]?.type).toBe('thinking')
+        if (timeline[1]?.type !== 'thinking') {
+            throw new Error('expected thinking group')
+        }
+
+        expect(timeline[1].group.hasAssistantResponse).toBe(true)
+        expect(timeline[1].group.state).toBe('thought')
+    })
+
+    it('does not turn historical updates into a loading group when the next message is busy', () => {
+        const timeline = buildChatTimeline(
+            [
+                createMessage({
+                    id: 'user-1',
+                    role: 'user',
+                    timestamp: '2026-04-03T10:00:00.000Z',
+                }),
+                createMessage({
+                    id: 'assistant-1',
+                    role: 'assistant',
+                    timestamp: '2026-04-03T10:01:00.000Z',
+                }),
+                createMessage({
+                    id: 'user-2',
+                    role: 'user',
+                    timestamp: '2026-04-03T10:05:00.000Z',
+                }),
+            ],
+            [
+                createActivity({
+                    id: 'activity-1',
+                    timestampUtc: '2026-04-03T10:02:00.000Z',
+                    message: 'Dynamic iteration dispatch completed',
+                }),
+            ],
+            {
+                isBusy: true,
+                statusMessage: 'Queued dynamic iteration...',
+                currentTimestampUtc: '2026-04-03T10:05:05.000Z',
+            },
+        )
+
+        const historicalUpdate = timeline.find((item) =>
+            item.type === 'thinking'
+            && item.group.activities.some((activity) => activity.id === 'activity-1'),
+        )
+        expect(historicalUpdate?.type).toBe('thinking')
+        if (historicalUpdate?.type !== 'thinking') {
+            throw new Error('expected historical update group')
+        }
+
+        expect(historicalUpdate.group.state).toBe('thought')
+        const pendingUpdate = timeline[timeline.length - 1]
+        expect(pendingUpdate?.type).toBe('thinking')
+        if (pendingUpdate?.type !== 'thinking') {
+            throw new Error('expected pending loading group')
+        }
+        expect(pendingUpdate.group.state).toBe('thinking')
+    })
 })

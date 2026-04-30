@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { normalizeChatSessionActivities } from '../models/chat'
 import {
-  getProjects, getProjectDashboard, getProjectDashboardBySlug, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
+  getProjects, getProjectDashboard, getProjectDashboardBySlug, getProjectBranches, createProject, updateProject, deleteProject, checkSlug, exportProjectsFile, importProjectsFile,
 } from './projectsProxy'
 import type { CreateProjectRequest, UpdateProjectRequest } from './projectsProxy'
 import {
@@ -109,6 +109,20 @@ export function useProjectDashboard(projectId: string | undefined) {
 
 export function useProjectDashboardBySlug(slug: string | undefined) {
   return useDataQuery('project-dashboard-slug', () => getProjectDashboardBySlug(slug!), [slug])
+}
+
+export function useProjectBranches(projectId: string | undefined, enabled = true) {
+  return useDataQuery(
+    'project-branches',
+    () => getProjectBranches(projectId!),
+    [projectId],
+    [],
+    {
+      enableFetch: enabled,
+      staleTime: 1000 * 60,
+      refetchOnWindowFocus: true,
+    },
+  )
 }
 
 export function useCheckSlug(name: string) {

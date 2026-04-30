@@ -71,6 +71,33 @@ public class ProjectsControllerTests
     }
 
     [TestMethod]
+    public async Task GetBranches_Found_ReturnsOk()
+    {
+        _projectService
+            .Setup(s => s.GetRepositoryBranchesAsync("p1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new ProjectBranchDto("main", true, false, true),
+            ]);
+
+        var result = await _sut.GetBranches("p1", CancellationToken.None);
+
+        var ok = result as OkObjectResult;
+        Assert.IsNotNull(ok);
+    }
+
+    [TestMethod]
+    public async Task GetBranches_NotFound_Returns404()
+    {
+        _projectService
+            .Setup(s => s.GetRepositoryBranchesAsync("missing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<ProjectBranchDto>?)null);
+
+        var result = await _sut.GetBranches("missing", CancellationToken.None);
+
+        Assert.IsInstanceOfType<NotFoundResult>(result);
+    }
+
+    [TestMethod]
     public async Task GetDashboardBySlug_Found_ReturnsOk()
     {
         var dashboard = new ProjectDashboardDto("p1", "slug", "Title", "repo", [], [], []);

@@ -195,6 +195,37 @@ public class ProjectService(
         return await BuildDashboard(project);
     }
 
+    public async Task<IReadOnlyList<ProjectBranchDto>?> GetRepositoryBranchesAsync(
+        string projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerId = await GetCurrentOwnerIdAsync();
+        var project = await projectRepository.GetByIdAsync(projectId, ownerId);
+        if (project is null)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(project.Repo))
+            return [];
+
+        var userId = await authService.GetCurrentUserIdAsync();
+        var branches = await gitHubApiService.GetBranchesAsync(userId, project.Repo, cancellationToken);
+        var repoHasBranchProtection = branches.Any(branch => branch.IsProtected);
+
+        return [.. branches
+            .Select(branch =>
+            {
+                var blockedReason = ResolveDynamicIterationBranchBlockedReason(branch, repoHasBranchProtection);
+                return new ProjectBranchDto(
+                    branch.Name,
+                    branch.IsDefault,
+                    branch.IsProtected,
+                    blockedReason is null,
+                    blockedReason);
+            })
+            .OrderByDescending(branch => branch.IsDefault)
+            .ThenBy(branch => branch.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
     private async Task<ProjectDashboardDto> BuildDashboard(ProjectDto project)
     {
         var agents = await agentTaskRepository.GetDashboardAgentsByProjectIdAsync(project.Id);
@@ -264,6 +295,22 @@ public class ProjectService(
             [.. agents]
         );
     }
+
+    private static string? ResolveDynamicIterationBranchBlockedReason(
+        GitHubBranchInfo branch,
+        bool repoHasBranchProtection)
+    {
+        if (IsMainBranchName(branch.Name) && repoHasBranchProtection)
+            return "Dynamic iteration can target main only when the repository has no branch protection.";
+
+        if (branch.IsProtected)
+            return "Protected branches cannot be used as dynamic iteration targets.";
+
+        return null;
+    }
+
+    private static bool IsMainBranchName(string branchName)
+        => string.Equals(branchName, "main", StringComparison.OrdinalIgnoreCase);
 
     private async Task<IReadOnlyList<WorkItemDto>> ApplyPullRequestReferencesAsync(
         ProjectDto project,

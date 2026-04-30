@@ -14,6 +14,14 @@ export interface ProjectData {
   commitAuthorEmail?: string | null
 }
 
+export interface ProjectBranch {
+  name: string
+  isDefault: boolean
+  isProtected: boolean
+  canUseForDynamicIteration: boolean
+  dynamicIterationBlockedReason?: string | null
+}
+
 export interface SlugCheckResult {
   slug: string
   available: boolean

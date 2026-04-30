@@ -1,5 +1,5 @@
 import { get, post, put, del, fetchWithAuth, ApiError } from './proxy'
-import type { ProjectData, ProjectDashboard, SlugCheckResult } from '../models'
+import type { ProjectBranch, ProjectData, ProjectDashboard, SlugCheckResult } from '../models'
 
 export interface CreateProjectRequest {
   title: string
@@ -38,6 +38,10 @@ export function getProjectDashboard(projectId: string): Promise<ProjectDashboard
 
 export function getProjectDashboardBySlug(slug: string): Promise<ProjectDashboard> {
   return get<ProjectDashboard>(`/api/projects/by-slug/${slug}`)
+}
+
+export function getProjectBranches(projectId: string): Promise<ProjectBranch[]> {
+  return get<ProjectBranch[]>(`/api/projects/${projectId}/branches`)
 }
 
 export function createProject(data: CreateProjectRequest): Promise<ProjectData> {

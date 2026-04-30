@@ -36,6 +36,27 @@ public class ProjectsController(
         return Ok(dashboard);
     }
 
+    [HttpGet("{projectId}/branches")]
+    public async Task<IActionResult> GetBranches(string projectId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var branches = await projectService.GetRepositoryBranchesAsync(projectId, cancellationToken);
+            if (branches is null) return NotFound();
+            return Ok(branches);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Unable to load repository branches",
+                Detail = ex.Message,
+                Status = StatusCodes.Status409Conflict,
+                Instance = HttpContext?.Request?.Path.ToString() ?? $"/api/projects/{projectId}/branches",
+            });
+        }
+    }
+
     [HttpGet("by-slug/{slug}")]
     [OutputCache(Duration = 5)]
     public async Task<IActionResult> GetDashboardBySlug(string slug)

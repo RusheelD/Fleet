@@ -134,6 +134,41 @@ public class GitHubApiService(
         }
     }
 
+    public async Task<IReadOnlyList<GitHubBranchInfo>> GetBranchesAsync(
+        int userId,
+        string repoFullName,
+        CancellationToken cancellationToken = default)
+    {
+        var accessToken = await ResolveAccessTokenForRepoAsync(userId, repoFullName);
+        if (string.IsNullOrEmpty(accessToken))
+            throw new InvalidOperationException(
+                $"No linked GitHub account can access '{repoFullName}'. Link/re-link a GitHub account with repository access.");
+
+        var client = httpClientFactory.CreateClient("GitHub");
+
+        try
+        {
+            var defaultBranchNameTask = FetchDefaultBranchNameAsync(client, accessToken, repoFullName, cancellationToken);
+            var branchesTask = FetchBranchesAsync(client, accessToken, repoFullName, cancellationToken);
+            await Task.WhenAll(defaultBranchNameTask, branchesTask);
+
+            var defaultBranchName = await defaultBranchNameTask;
+            return [.. (await branchesTask)
+                .Where(branch => !string.IsNullOrWhiteSpace(branch.Name))
+                .Select(branch => new GitHubBranchInfo(
+                    branch.Name.Trim(),
+                    string.Equals(branch.Name, defaultBranchName, StringComparison.OrdinalIgnoreCase),
+                    branch.Protected))
+                .OrderByDescending(branch => branch.IsDefault)
+                .ThenBy(branch => branch.Name, StringComparer.OrdinalIgnoreCase)];
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.GitHubApiFailed(ex, repoFullName.SanitizeForLogging());
+            throw new InvalidOperationException("Unable to load repository branches from GitHub.", ex);
+        }
+    }
+
     // ── Pull Requests ─────────────────────────────────────────
 
     private async Task<(int Open, int Merged)> FetchPullRequestStatsAsync(
@@ -229,6 +264,57 @@ public class GitHubApiService(
         }
 
         return result;
+    }
+
+    private async Task<string?> FetchDefaultBranchNameAsync(
+        HttpClient client,
+        string token,
+        string repo,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{GitHubApiBase}/repos/{repo}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        var response = await client.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var payload = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+        return payload.RootElement.TryGetProperty("default_branch", out var defaultBranchProp)
+            ? defaultBranchProp.GetString()
+            : null;
+    }
+
+    private static async Task<List<GitHubBranchListItem>> FetchBranchesAsync(
+        HttpClient client,
+        string token,
+        string repo,
+        CancellationToken cancellationToken)
+    {
+        var branches = new List<GitHubBranchListItem>();
+
+        for (var page = 1; page <= 10; page++)
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{GitHubApiBase}/repos/{repo}/branches?per_page=100&page={page}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+            var response = await client.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var pageBranches = await response.Content.ReadFromJsonAsync<List<GitHubBranchListItem>>(cancellationToken)
+                ?? [];
+            branches.AddRange(pageBranches);
+
+            if (pageBranches.Count < 100)
+                break;
+        }
+
+        return branches;
     }
 
     private static GitHubActivityEvent? MapEvent(GitHubEvent evt)
@@ -466,5 +552,14 @@ public class GitHubApiService(
 
         [JsonPropertyName("title")]
         public string Title { get; set; } = string.Empty;
+    }
+
+    private sealed class GitHubBranchListItem
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("protected")]
+        public bool Protected { get; set; }
     }
 }

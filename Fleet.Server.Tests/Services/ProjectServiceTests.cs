@@ -191,6 +191,48 @@ public class ProjectServiceTests
         Assert.IsNull(result);
     }
 
+    [TestMethod]
+    public async Task GetRepositoryBranchesAsync_BlocksProtectedMainForDynamicIteration()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+        _gitHubApi
+            .Setup(g => g.GetBranchesAsync(UserId, "owner/repo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new GitHubBranchInfo("main", true, true),
+                new GitHubBranchInfo("feature/chat", false, false),
+            ]);
+
+        var result = await _sut.GetRepositoryBranchesAsync("p1", CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        var main = result.Single(branch => branch.Name == "main");
+        Assert.IsFalse(main.CanUseForDynamicIteration);
+        StringAssert.Contains(main.DynamicIterationBlockedReason, "no branch protection");
+        Assert.IsTrue(result.Single(branch => branch.Name == "feature/chat").CanUseForDynamicIteration);
+    }
+
+    [TestMethod]
+    public async Task GetRepositoryBranchesAsync_AllowsMainWhenRepositoryHasNoBranchProtection()
+    {
+        var project = new ProjectDto("p1", OwnerId, "Project 1", "project-1", "Desc", "owner/repo",
+            new WorkItemSummaryDto(0, 0, 0), new AgentSummaryDto(0, 0), "1 day ago");
+        _projectRepo.Setup(r => r.GetByIdAsync("p1", OwnerId)).ReturnsAsync(project);
+        _gitHubApi
+            .Setup(g => g.GetBranchesAsync(UserId, "owner/repo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new GitHubBranchInfo("main", true, false),
+            ]);
+
+        var result = await _sut.GetRepositoryBranchesAsync("p1", CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        var main = result.Single(branch => branch.Name == "main");
+        Assert.IsTrue(main.CanUseForDynamicIteration);
+        Assert.IsNull(main.DynamicIterationBlockedReason);
+    }
+
     // ── DeleteProjectAsync ───────────────────────────────────
 
     [TestMethod]

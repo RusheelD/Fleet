@@ -7,6 +7,9 @@ public interface IProjectService
     Task<IReadOnlyList<ProjectDto>> GetAllProjectsAsync();
     Task<ProjectDashboardDto?> GetDashboardAsync(string projectId);
     Task<ProjectDashboardDto?> GetDashboardBySlugAsync(string slug);
+    Task<IReadOnlyList<ProjectBranchDto>?> GetRepositoryBranchesAsync(
+        string projectId,
+        CancellationToken cancellationToken = default);
     Task<SlugCheckResult> CheckSlugAsync(string name);
     Task<ProjectDto> CreateProjectAsync(
         string title,
