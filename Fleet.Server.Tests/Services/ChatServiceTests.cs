@@ -822,6 +822,7 @@ public class ChatServiceTests
         Assert.IsNotNull(result.AssistantMessage);
         var dynamicRequest = capturedRequests.First(request => request.SystemPrompt.Contains("## Dynamic Iteration", StringComparison.Ordinal));
         StringAssert.Contains(dynamicRequest.SystemPrompt, "ACTIVE MODE: DYNAMIC_ITERATION");
+        StringAssert.Contains(dynamicRequest.SystemPrompt, "read-only project/repo tool surface");
         StringAssert.Contains(dynamicRequest.SystemPrompt, "inspect the existing work-item tree");
         StringAssert.Contains(dynamicRequest.SystemPrompt, "most specific correct existing parent");
         StringAssert.Contains(dynamicRequest.SystemPrompt, "root_justification");
@@ -1697,6 +1698,125 @@ public class ChatServiceTests
         CollectionAssert.Contains(toolNames, "bulk_update_work_items");
         Assert.IsFalse(toolNames.Contains("generate_mermaid_diagram"));
         Assert.IsFalse(toolNames.Contains("mcp__repo__search"));
+    }
+
+    [TestMethod]
+    public async Task SendMessageAsync_DynamicIteration_IncludesRepoReadToolsAndReadOnlyMcpTools()
+    {
+        var repoTreeTool = new TestChatTool(
+            name: "get_repo_tree",
+            description: "Get repo tree",
+            isWriteTool: false,
+            result: "src/");
+        var repoFileTool = new TestChatTool(
+            name: "read_repo_file",
+            description: "Read repo file",
+            isWriteTool: false,
+            result: "file contents");
+        var globalRepoListTool = new TestChatTool(
+            name: "list_github_repos",
+            description: "List connected GitHub repos",
+            isWriteTool: false,
+            result: "owner/repo");
+        var allowedWriteTool = new TestChatTool(
+            name: "bulk_update_work_items",
+            description: "Bulk update work items",
+            isWriteTool: true,
+            result: "Updated 1 work item.");
+        var globalWriteTool = new TestChatTool(
+            name: "create_project",
+            description: "Create project",
+            isWriteTool: true,
+            result: "Created project.");
+        var unrelatedWriteTool = new TestChatTool(
+            name: "generate_mermaid_diagram",
+            description: "Generate a Mermaid diagram",
+            isWriteTool: true,
+            result: "graph TD");
+        var toolRegistryWithTools = new ChatToolRegistry(
+            [repoTreeTool, repoFileTool, globalRepoListTool, allowedWriteTool, globalWriteTool, unrelatedWriteTool]);
+        var mcpSession = new StubMcpToolSession(
+            [
+                new LLMToolDefinition("mcp__repo__search", "Search repository", "{}"),
+            ],
+            ["mcp__repo__search"]);
+        var mcpFactory = new RecordingMcpToolSessionFactory(mcpSession);
+        var sut = new ChatService(
+            _chatRepo.Object,
+            _attachmentStorage.Object,
+            _llmClient.Object,
+            toolRegistryWithTools,
+            _authService.Object,
+            _llmOptions,
+            _logger.Object,
+            _usageLedgerService.Object,
+            _eventPublisher.Object,
+            mcpToolSessionFactory: mcpFactory,
+            dynamicIterationDispatchService: _dynamicIterationDispatchService.Object);
+
+        var userMsg = new ChatMessageDto("msg-1", "user", "Fix auth redirect", "now");
+        var assistantMsg = new ChatMessageDto("msg-2", "assistant", "Done", "now");
+
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "user", "Fix auth redirect"))
+            .ReturnsAsync(userMsg);
+        _chatRepo.Setup(r => r.AssignPendingAttachmentsToMessageAsync(ProjectId, SessionId, userMsg.Id))
+            .Returns(Task.CompletedTask);
+        _chatRepo.Setup(r => r.GetMessagesBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatMessageDto> { userMsg });
+        _chatRepo.Setup(r => r.GetAllAttachmentsBySessionIdAsync(ProjectId, SessionId, It.IsAny<string?>()))
+            .ReturnsAsync(new List<ChatAttachmentDto>());
+        _chatRepo.Setup(r => r.AddMessageAsync(ProjectId, SessionId, "assistant", "Done", It.IsAny<string?>()))
+            .ReturnsAsync(assistantMsg);
+        _chatRepo.Setup(r => r.GetSessionsByProjectIdAsync(ProjectId))
+            .ReturnsAsync(new[]
+            {
+                new ChatSessionDto(
+                    SessionId,
+                    "Chat",
+                    "",
+                    "now",
+                    true,
+                    IsDynamicIterationEnabled: false),
+            });
+
+        var toolCalls = new List<LLMToolCall> { new("call-1", "bulk_update_work_items", "{}") };
+        var responses = new Queue<LLMResponse>(new[]
+        {
+            new LLMResponse("Auth redirect", null),
+            new LLMResponse(null, toolCalls),
+            new LLMResponse("Done", null),
+        });
+        var capturedRequests = new List<LLMRequest>();
+
+        _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequests.Add(request))
+            .ReturnsAsync(() => responses.Dequeue());
+
+        var result = await sut.SendMessageAsync(
+            ProjectId,
+            SessionId,
+            "Fix auth redirect",
+            new ChatSendOptions(
+                GenerateWorkItems: true,
+                DynamicIteration: new DynamicIterationOptionsRequest(
+                    Enabled: true,
+                    ExecutionPolicy: "balanced",
+                    TargetBranch: "feature/auth")));
+
+        Assert.IsNull(result.Error);
+        Assert.AreEqual(1, allowedWriteTool.ExecuteCount);
+        Assert.AreEqual(1, mcpFactory.CreateForChatCallCount);
+        Assert.AreEqual(false, mcpFactory.LastIncludeWriteTools);
+
+        var generationRequest = capturedRequests.First(request => request.Tools is { Count: > 0 });
+        var toolNames = generationRequest.Tools!.Select(tool => tool.Name).ToArray();
+        CollectionAssert.Contains(toolNames, "get_repo_tree");
+        CollectionAssert.Contains(toolNames, "read_repo_file");
+        CollectionAssert.Contains(toolNames, "list_github_repos");
+        CollectionAssert.Contains(toolNames, "bulk_update_work_items");
+        CollectionAssert.Contains(toolNames, "mcp__repo__search");
+        Assert.IsFalse(toolNames.Contains("create_project"));
+        Assert.IsFalse(toolNames.Contains("generate_mermaid_diagram"));
     }
 
     [TestMethod]

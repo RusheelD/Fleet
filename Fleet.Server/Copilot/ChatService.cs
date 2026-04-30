@@ -454,7 +454,7 @@ public class ChatService(
             // 3. Get tool definitions — only include write tools when generation is requested.
             //    In generation mode, exclude single-item write tools (create/update/delete_work_item)
             //    so the LLM is forced to use bulk equivalents, reducing API round-trips and 429 errors.
-            var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems, requestCancellation);
+            var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems, dynamicIteration, requestCancellation);
             await using var mcpToolSession = tooling.Session;
             var toolDefs = tooling.Definitions;
 
@@ -964,7 +964,12 @@ public class ChatService(
                 conversationHistory: llmMessages,
                 generateWorkItems: true,
                 dynamicIteration: dynamicIteration);
-            var tooling = await CreateChatToolingAsync(projectId, userId, generateWorkItems: true, requestCancellation);
+            var tooling = await CreateChatToolingAsync(
+                projectId,
+                userId,
+                generateWorkItems: true,
+                dynamicIteration: dynamicIteration,
+                cancellationToken: requestCancellation);
             await using var mcpToolSession = tooling.Session;
             var toolDefs = tooling.Definitions;
 
@@ -1507,22 +1512,23 @@ public class ChatService(
         string projectId,
         int userId,
         bool generateWorkItems,
+        DynamicIterationRuntimeOptions dynamicIteration,
         CancellationToken cancellationToken)
     {
-        // Work-item generation should stay focused on Fleet's built-in planning/work-item tools.
-        // Excluding MCP tools here prevents unrelated system servers (for example Playwright)
-        // from expanding the request payload or introducing schema regressions during backlog creation.
-        IMcpToolSession mcpToolSession = generateWorkItems
-            ? EmptyMcpToolSession.Instance
-            : await _mcpToolSessionFactory.CreateForChatAsync(
+        // Ordinary work-item generation stays focused on Fleet's backlog tools.
+        // Dynamic iteration also needs read-only repo/project tools so it can inspect code before shaping the execution flow.
+        var includeReadOnlyMcpTools = !generateWorkItems || dynamicIteration.Enabled;
+        IMcpToolSession mcpToolSession = includeReadOnlyMcpTools
+            ? await _mcpToolSessionFactory.CreateForChatAsync(
                 userId,
                 includeWriteTools: false,
-                cancellationToken);
+                cancellationToken)
+            : EmptyMcpToolSession.Instance;
 
         var definitions = toolRegistry.ToLLMDefinitions(
             includeWriteTools: generateWorkItems,
             bulkOnly: generateWorkItems,
-            includeGlobalRepoTools: IsGlobalScope(projectId),
+            includeGlobalRepoTools: dynamicIteration.Enabled || IsGlobalScope(projectId),
             includeNormalChatWriteTools: !generateWorkItems && !IsGlobalScope(projectId),
             workItemGenerationOnly: generateWorkItems)
             .Concat(mcpToolSession.Definitions)
@@ -1531,7 +1537,8 @@ public class ChatService(
         if (generateWorkItems)
         {
             logger.LogDebug(
-                "Prepared work-item generation tool surface with {BuiltInToolCount} built-in tools and {McpToolCount} MCP tools.",
+                "Prepared {ToolMode} tool surface with {BuiltInToolCount} built-in tools and {McpToolCount} MCP tools.",
+                dynamicIteration.Enabled ? "dynamic iteration" : "work-item generation",
                 definitions.Count - mcpToolSession.Definitions.Count,
                 mcpToolSession.Definitions.Count);
         }
@@ -2443,6 +2450,7 @@ public class ChatService(
             builder.AppendLine($"""
                 ## Dynamic Iteration
                 ACTIVE MODE: DYNAMIC_ITERATION is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
+                You have access to the normal read-only project/repo tool surface in this mode. Inspect the repository and relevant files when code context could improve the execution plan.
                 Before creating or updating work items, inspect the existing work-item tree with `list_work_items` using a high enough limit to see the relevant hierarchy. Use that tree to place new items under the most specific correct existing parent instead of creating a new root by default.
                 New root-level work items are allowed only when no existing work item is an appropriate parent. If you create a root-level item while the project already has work items, include `root_justification` in the tool arguments explaining why no existing parent fits.
                 Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request, but model coherent implementation flows as a parent item with child tasks rather than as multiple unrelated root executions.

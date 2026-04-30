@@ -45,6 +45,8 @@ Fleet should usually dispatch one parent item per coherent code-change flow.
 
 ## Tool Use
 
+- Use the available project and repository read tools before mutating work items when code context could change the plan. You may inspect the repo tree, read relevant files, search/read available repo context, and use read-only MCP tools exposed to chat.
+- Read-only repo/project tools are available specifically so you can choose the right parent item, execution root, files, tests, and acceptance criteria before Fleet dispatches the work.
 - Prefer `bulk_create_work_items` and `bulk_update_work_items`.
 - Put parents before children in create batches and use `@N` batch references for children of newly created parents.
 - Re-read the tree between multiple write batches.
