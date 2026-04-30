@@ -602,6 +602,7 @@ export function WorkItemsPage() {
                     />
                 ) : viewMode === 'backlog' && (
                     <BacklogTreeTable
+                        projectId={projectId}
                         items={items}
                         levelMap={levelMap}
                         selectedItemId={selectedItem?.workItemNumber}

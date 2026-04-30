@@ -87,11 +87,12 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             Priority: args.Priority,
             Difficulty: args.Difficulty,
             State: args.State,
-            AssignedTo: "Unassigned",
+            AssignedTo: context.DefaultCreatedWorkItemAssignee,
             Tags: args.Tags,
-            IsAI: false,
+            IsAI: context.DefaultCreatedWorkItemIsAi,
             ParentWorkItemNumber: args.ParentId,
-            LevelId: levelId
+            LevelId: levelId,
+            AssignmentMode: context.DefaultCreatedWorkItemAssignmentMode
         );
 
         var created = await workItemService.CreateAsync(projectId, request);

@@ -139,7 +139,7 @@ export function ChatModeBar({
 
             {dynamicIterationEnabled && (
                 <div className={mergeClasses(styles.controlsGrid, shouldStackLayout && styles.controlsGridStacked)}>
-                    <Field label="Branch">
+                    <Field label="Target branch">
                         <Input
                             contentBefore={<BranchRegular />}
                             value={dynamicBranchName}

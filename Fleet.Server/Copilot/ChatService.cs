@@ -459,7 +459,7 @@ public class ChatService(
             }
 
             // 5. Run the tool-calling loop with safety limits
-            var toolContext = new ChatToolContext(projectId, userId.ToString(), messageAttachments);
+            var toolContext = new ChatToolContext(projectId, userId.ToString(), messageAttachments, dynamicIteration.Enabled);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
 
@@ -965,7 +965,7 @@ public class ChatService(
                 ownerId: ownerId);
             await GenerateSessionNameAsync(projectId, sessionId, llmMessages, config, requestCancellation, ownerId);
 
-            var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments);
+            var toolContext = new ChatToolContext(projectId, userId.ToString(), currentMessageAttachments, dynamicIteration.Enabled);
             var totalToolCalls = 0;
             var performedWorkItemMutation = false;
             var toolEvents = new List<ToolEventDto>();
@@ -2430,6 +2430,7 @@ public class ChatService(
                 Dynamic Iteration is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
                 Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request.
                 Prefer actionable leaf work items that can be executed independently. Keep parent/child relationships intact when the request needs a larger feature breakdown.
+                New work items created in this mode are automatically assigned to Fleet AI with automatic agent selection.
                 Fleet will automatically start eligible work items after your tool calls complete. Target branch: {targetBranch}. Dispatch strategy: {executionPolicy}.
                 After persisting the work items, summarize what was queued and call out anything that still needs user clarification.
                 """);

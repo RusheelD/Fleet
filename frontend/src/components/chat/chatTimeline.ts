@@ -116,8 +116,11 @@ export function buildChatTimeline(
 
     const lastTimelineItem = timeline[timeline.length - 1]
     if (options.isBusy && (!lastTimelineItem || lastTimelineItem.type === 'message')) {
+        const pendingGroupId = lastTimelineItem?.type === 'message'
+            ? `pending-thinking-${lastTimelineItem.id}`
+            : `pending-thinking-empty`
         const pendingActivity: ChatSessionActivity = {
-            id: `pending-activity-${currentTimestampUtc}`,
+            id: `pending-activity-${pendingGroupId}`,
             kind: 'status',
             message: options.statusMessage?.trim() || 'Fleet AI is thinking...',
             timestampUtc: currentTimestampUtc,
@@ -125,9 +128,9 @@ export function buildChatTimeline(
 
         timeline.push({
             type: 'thinking',
-            id: `pending-thinking-${currentTimestampUtc}`,
+            id: pendingGroupId,
             group: {
-                id: `pending-thinking-${currentTimestampUtc}`,
+                id: pendingGroupId,
                 activities: [pendingActivity],
                 startedAtUtc: currentTimestampUtc,
                 endedAtUtc: currentTimestampUtc,
@@ -175,8 +178,7 @@ function buildThinkingGroupId(
     assistantMessage?: ChatMessageData,
 ): string {
     const firstActivityId = activities[0]?.id ?? 'activity-start'
-    const lastActivityId = activities[activities.length - 1]?.id ?? 'activity-end'
-    return `thinking-${firstActivityId}-${lastActivityId}-${assistantMessage?.id ?? 'pending'}`
+    return `thinking-${firstActivityId}-${assistantMessage?.id ?? 'pending'}`
 }
 
 function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {

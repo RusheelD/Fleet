@@ -61,14 +61,8 @@ public class AgentExecutionDispatcher(
         if (!string.IsNullOrWhiteSpace(normalizedRequestedTargetBranch))
             return normalizedRequestedTargetBranch;
 
-        var projectBranchPattern = await db.Projects
-            .AsNoTracking()
-            .Where(project => project.Id == projectId)
-            .Select(project => project.BranchPattern)
-            .FirstOrDefaultAsync(cancellationToken);
-
         if (string.IsNullOrWhiteSpace(chatSessionId))
-            return NormalizeBranch(projectBranchPattern);
+            return null;
 
         var sessionConfig = await db.ChatSessions
             .AsNoTracking()
@@ -82,7 +76,7 @@ public class AgentExecutionDispatcher(
             .FirstOrDefaultAsync(cancellationToken);
 
         if (sessionConfig is null)
-            return NormalizeBranch(projectBranchPattern);
+            return null;
 
         var branchStrategy = ChatSessionBranchStrategy.Normalize(sessionConfig.BranchStrategy);
         var normalizedPinnedBranch = NormalizeBranch(sessionConfig.SessionPinnedBranch);
@@ -93,7 +87,7 @@ public class AgentExecutionDispatcher(
         if (isSubFlowWorkItem && sessionConfig.InheritParentBranchForSubFlows)
             return null;
 
-        return NormalizeBranch(projectBranchPattern);
+        return null;
     }
 
     private async Task AppendResolvedBranchActivityAsync(

@@ -101,11 +101,12 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     Priority: UpdateWorkItemTool.GetInt(item, "priority") ?? 3,
                     Difficulty: UpdateWorkItemTool.GetInt(item, "difficulty") ?? 3,
                     State: UpdateWorkItemTool.GetString(item, "state") ?? "New",
-                    AssignedTo: "Unassigned",
+                    AssignedTo: context.DefaultCreatedWorkItemAssignee,
                     Tags: UpdateWorkItemTool.GetStringArray(item, "tags") ?? [],
-                    IsAI: false,
+                    IsAI: context.DefaultCreatedWorkItemIsAi,
                     ParentWorkItemNumber: parentId,
-                    LevelId: levelId
+                    LevelId: levelId,
+                    AssignmentMode: context.DefaultCreatedWorkItemAssignmentMode
                 );
 
                 var created = await workItemService.CreateAsync(projectId, request);

@@ -26,6 +26,14 @@ import {
 import { appTokens } from '../../styles/appTokens'
 import { InfoBadge } from '../../components/shared/InfoBadge'
 import { useResizableWorkItemColumns } from './useResizableWorkItemColumns'
+import {
+    areWorkItemExpansionStatesEqual,
+    getWorkItemExpansionStorageKey,
+    parseWorkItemExpansionState,
+    reconcileWorkItemExpansionState,
+    serializeWorkItemExpansionState,
+    type WorkItemExpansionState,
+} from './workItemExpansionState'
 
 /* ── Drop zone enum ────────────────────────────────────────── */
 type DropZone = 'above' | 'on' | 'below' | null
@@ -348,6 +356,7 @@ const useStyles = makeStyles({
 })
 
 interface BacklogTreeTableProps {
+    projectId?: string
     items: WorkItem[]
     levelMap?: Map<number, WorkItemLevel>
     selectedItemId?: number | null
@@ -363,6 +372,7 @@ interface BacklogTreeTableProps {
 }
 
 export function BacklogTreeTable({
+    projectId,
     items,
     levelMap,
     selectedItemId,
@@ -457,45 +467,85 @@ export function BacklogTreeTable({
     }, [areAllDescendantsResolved, isResolvedLikeState, itemById])
 
     /* ── Track expanded state ──────────────────────────────── */
-    const [expanded, setExpanded] = useState<Set<number>>(() => {
-        const initial = new Set<number>()
-        for (const root of roots) {
-            if (childrenMap.has(root.workItemNumber) && !shouldAutoCollapseNode(root.workItemNumber)) {
-                initial.add(root.workItemNumber)
+    const expansionStorageKey = getWorkItemExpansionStorageKey(projectId)
+    const parentIds = useMemo(() => new Set(childrenMap.keys()), [childrenMap])
+    const autoCollapsedParentIds = useMemo(() => {
+        const ids = new Set<number>()
+        for (const parentId of parentIds) {
+            if (shouldAutoCollapseNode(parentId)) {
+                ids.add(parentId)
             }
         }
-        return initial
-    })
 
-    // Auto-expand active parents when new children arrive, but auto-collapse
-    // resolved branches whose descendants are all resolved/closed.
-    useEffect(() => {
-        setExpanded((prev) => {
-            const next = new Set(prev)
-            let changed = false
-            for (const parentId of childrenMap.keys()) {
-                if (shouldAutoCollapseNode(parentId)) {
-                    if (next.delete(parentId)) {
-                        changed = true
-                    }
-                    continue
-                }
-
-                if (!next.has(parentId)) {
-                    next.add(parentId)
-                    changed = true
-                }
+        return ids
+    }, [parentIds, shouldAutoCollapseNode])
+    const defaultExpandedParentIds = useMemo(() => {
+        const ids = new Set<number>()
+        for (const parentId of parentIds) {
+            if (!autoCollapsedParentIds.has(parentId)) {
+                ids.add(parentId)
             }
-            return changed ? next : prev
+        }
+
+        return ids
+    }, [autoCollapsedParentIds, parentIds])
+    const loadExpansionState = useCallback((): WorkItemExpansionState => {
+        const stored = typeof window === 'undefined'
+            ? { expanded: new Set<number>(), collapsed: new Set<number>() }
+            : parseWorkItemExpansionState(window.localStorage.getItem(expansionStorageKey))
+
+        return reconcileWorkItemExpansionState({
+            currentExpanded: stored.expanded,
+            currentCollapsed: stored.collapsed,
+            parentIds,
+            defaultExpandedParentIds,
+            autoCollapsedParentIds,
         })
-    }, [childrenMap, shouldAutoCollapseNode])
+    }, [autoCollapsedParentIds, defaultExpandedParentIds, expansionStorageKey, parentIds])
+    const [expansionState, setExpansionState] = useState<WorkItemExpansionState>(() => loadExpansionState())
+    const expanded = expansionState.expanded
+
+    // Auto-expand active parents when new children arrive, but keep manual
+    // collapses and auto-collapse resolved branches whose descendants are done.
+    useEffect(() => {
+        setExpansionState(loadExpansionState())
+    }, [loadExpansionState])
+
+    useEffect(() => {
+        setExpansionState((current) => {
+            const next = reconcileWorkItemExpansionState({
+                currentExpanded: current.expanded,
+                currentCollapsed: current.collapsed,
+                parentIds,
+                defaultExpandedParentIds,
+                autoCollapsedParentIds,
+            })
+
+            return areWorkItemExpansionStatesEqual(current, next) ? current : next
+        })
+    }, [autoCollapsedParentIds, defaultExpandedParentIds, parentIds])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        window.localStorage.setItem(expansionStorageKey, serializeWorkItemExpansionState(expansionState))
+    }, [expansionState, expansionStorageKey])
 
     const toggleExpanded = useCallback((id: number) => {
-        setExpanded((prev) => {
-            const next = new Set(prev)
-            if (next.has(id)) next.delete(id)
-            else next.add(id)
-            return next
+        setExpansionState((current) => {
+            const expandedItems = new Set(current.expanded)
+            const collapsedItems = new Set(current.collapsed)
+            if (expandedItems.has(id)) {
+                expandedItems.delete(id)
+                collapsedItems.add(id)
+            } else {
+                expandedItems.add(id)
+                collapsedItems.delete(id)
+            }
+
+            return { expanded: expandedItems, collapsed: collapsedItems }
         })
     }, [])
 
@@ -611,7 +661,13 @@ export function BacklogTreeTable({
             // Make child of target
             onReparent(draggedId, targetId)
             // Auto-expand the target so user sees the dropped item
-            setExpanded((prev) => new Set(prev).add(targetId))
+            setExpansionState((current) => {
+                const expandedItems = new Set(current.expanded)
+                const collapsedItems = new Set(current.collapsed)
+                expandedItems.add(targetId)
+                collapsedItems.delete(targetId)
+                return { expanded: expandedItems, collapsed: collapsedItems }
+            })
         } else {
             // 'above' or 'below' — make sibling (same parent as the target)
             const targetParent = findParentId(targetId)

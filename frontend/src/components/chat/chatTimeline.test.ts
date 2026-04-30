@@ -107,4 +107,73 @@ describe('chat timeline', () => {
         expect(timeline[4].group.state).toBe('thinking')
         expect(timeline[4].group.activities[0]?.message).toBe('Queued work-item generation...')
     })
+
+    it('keeps thinking group ids stable as more tool activity arrives', () => {
+        const firstTimeline = buildChatTimeline(
+            [
+                createMessage({
+                    id: 'user-1',
+                    role: 'user',
+                    timestamp: '2026-04-03T10:00:00.000Z',
+                }),
+            ],
+            [
+                createActivity({
+                    id: 'activity-1',
+                    timestampUtc: '2026-04-03T10:01:00.000Z',
+                }),
+            ],
+            {
+                isBusy: true,
+            },
+        )
+        const secondTimeline = buildChatTimeline(
+            [
+                createMessage({
+                    id: 'user-1',
+                    role: 'user',
+                    timestamp: '2026-04-03T10:00:00.000Z',
+                }),
+            ],
+            [
+                createActivity({
+                    id: 'activity-1',
+                    timestampUtc: '2026-04-03T10:01:00.000Z',
+                }),
+                createActivity({
+                    id: 'activity-2',
+                    timestampUtc: '2026-04-03T10:02:00.000Z',
+                }),
+            ],
+            {
+                isBusy: true,
+            },
+        )
+
+        const firstThinking = firstTimeline.find((item) => item.type === 'thinking')
+        const secondThinking = secondTimeline.find((item) => item.type === 'thinking')
+
+        expect(firstThinking?.id).toBe(secondThinking?.id)
+    })
+
+    it('keeps the pending thinking id stable across rerenders', () => {
+        const messages = [
+            createMessage({
+                id: 'user-1',
+                role: 'user' as const,
+                timestamp: '2026-04-03T10:00:00.000Z',
+            }),
+        ]
+
+        const firstTimeline = buildChatTimeline(messages, [], {
+            isBusy: true,
+            currentTimestampUtc: '2026-04-03T10:00:05.000Z',
+        })
+        const secondTimeline = buildChatTimeline(messages, [], {
+            isBusy: true,
+            currentTimestampUtc: '2026-04-03T10:00:06.000Z',
+        })
+
+        expect(firstTimeline[1]?.id).toBe(secondTimeline[1]?.id)
+    })
 })
