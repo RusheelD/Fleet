@@ -53,6 +53,10 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                                 "type": ["integer", "string"],
                                 "description": "Parent work-item number (integer), or a batch index ref like '@2' to use the item created at index 2 in this call. Omit for root-level items."
                             },
+                            "root_justification": {
+                                "type": "string",
+                                "description": "Dynamic Iteration only: required when creating a root-level item in a project that already has work items. Explain why no existing parent is appropriate."
+                            },
                             "tags": {
                                 "type": "array",
                                 "items": { "type": "string" },
@@ -92,6 +96,18 @@ public class BulkCreateWorkItemsTool(IWorkItemService workItemService, IWorkItem
                     levelId = levels.FirstOrDefault(l => l.Name.Equals(levelName, StringComparison.OrdinalIgnoreCase))?.Id;
 
                 var parentId = UpdateWorkItemTool.ResolveParentId(item, createdNumbers);
+                var placementError = await DynamicIterationWorkItemPlacementGuard.ValidateCreatePlacementAsync(
+                    workItemService,
+                    projectId,
+                    context,
+                    parentId,
+                    UpdateWorkItemTool.GetString(item, DynamicIterationWorkItemPlacementGuard.RootJustificationPropertyName));
+                if (placementError is not null)
+                {
+                    createdNumbers.Add(0);
+                    results.Add(new { Error = placementError, Title = title });
+                    continue;
+                }
 
                 var request = new Models.CreateWorkItemRequest(
                     Title: title,

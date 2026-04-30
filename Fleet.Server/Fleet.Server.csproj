@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <Content Include="Copilot\chat_prompt.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Copilot\dynamic_iteration_chat_prompt.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

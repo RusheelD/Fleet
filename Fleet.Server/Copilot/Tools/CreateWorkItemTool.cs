@@ -52,6 +52,10 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                     "type": "integer",
                     "description": "Work-item number of the parent to nest this under (the project-scoped number shown in the UI). Omit for root-level items."
                 },
+                "root_justification": {
+                    "type": "string",
+                    "description": "Dynamic Iteration only: required when creating a root-level item in a project that already has work items. Explain why no existing parent is appropriate."
+                },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -68,6 +72,14 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
             return ChatToolContext.ProjectScopeRequiredMessage;
 
         var args = ParseArgs(argumentsJson);
+        var placementError = await DynamicIterationWorkItemPlacementGuard.ValidateCreatePlacementAsync(
+            workItemService,
+            projectId,
+            context,
+            args.ParentId,
+            args.RootJustification);
+        if (placementError is not null)
+            return placementError;
 
         // Resolve level name to ID
         int? levelId = null;
@@ -158,13 +170,26 @@ public class CreateWorkItemTool(IWorkItemService workItemService, IWorkItemLevel
                     .ToArray();
             }
 
-            return new CreateWorkItemArgs(title, description, priority, difficulty, state, level, parentId, tags);
+            var rootJustification = UpdateWorkItemTool.GetString(
+                root,
+                DynamicIterationWorkItemPlacementGuard.RootJustificationPropertyName);
+
+            return new CreateWorkItemArgs(title, description, priority, difficulty, state, level, parentId, tags, rootJustification);
         }
         catch
         {
-            return new CreateWorkItemArgs("Untitled", null, 3, 3, "New", null, null, []);
+            return new CreateWorkItemArgs("Untitled", null, 3, 3, "New", null, null, [], null);
         }
     }
 
-    private record CreateWorkItemArgs(string Title, string? Description, int Priority, int Difficulty, string State, string? Level, int? ParentId, string[] Tags);
+    private record CreateWorkItemArgs(
+        string Title,
+        string? Description,
+        int Priority,
+        int Difficulty,
+        string State,
+        string? Level,
+        int? ParentId,
+        string[] Tags,
+        string? RootJustification);
 }

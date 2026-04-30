@@ -36,6 +36,7 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
                             "state": { "type": "string", "enum": ["New", "Active", "Planning (AI)", "In Progress", "In Progress (AI)", "In-PR", "In-PR (AI)", "Resolved", "Resolved (AI)", "Closed"] },
                             "level": { "type": "string", "enum": ["Domain", "Module", "Feature", "Component", "Bug", "Task"] },
                             "parent_id": { "type": ["integer", "string"], "description": "Parent work-item number (integer), or batch index ref like '@2'. Set to 0 to clear." },
+                            "root_justification": { "type": "string", "description": "Dynamic Iteration only: required when create fallback creates a root-level item in a project that already has work items. Explain why no existing parent is appropriate." },
                             "tags": { "type": "array", "items": { "type": "string" } }
                         },
                         "required": ["id", "title"]
@@ -109,6 +110,19 @@ public class TryBulkUpdateWorkItemsTool(IWorkItemService workItemService, IWorkI
 
                 // Not found or id <= 0 → create
                 var title = UpdateWorkItemTool.GetString(item, "title") ?? "Untitled";
+                var placementError = await DynamicIterationWorkItemPlacementGuard.ValidateCreatePlacementAsync(
+                    workItemService,
+                    projectId,
+                    context,
+                    parentId,
+                    UpdateWorkItemTool.GetString(item, DynamicIterationWorkItemPlacementGuard.RootJustificationPropertyName));
+                if (placementError is not null)
+                {
+                    createdNumbers.Add(0);
+                    results.Add(new { Id = id, Error = placementError });
+                    continue;
+                }
+
                 var createReq = new Models.CreateWorkItemRequest(
                     Title: title,
                     Description: UpdateWorkItemTool.GetString(item, "description") ?? "",

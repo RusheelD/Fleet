@@ -49,6 +49,10 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
                     "type": "integer",
                     "description": "Parent work-item number. Set to 0 to clear."
                 },
+                "root_justification": {
+                    "type": "string",
+                    "description": "Dynamic Iteration only: required when create fallback creates a root-level item in a project that already has work items. Explain why no existing parent is appropriate."
+                },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -113,6 +117,16 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
 
         // Item not found — create instead
         var title = UpdateWorkItemTool.GetString(args, "title") ?? "Untitled";
+        var createParentId = UpdateWorkItemTool.GetInt(args, "parent_id");
+        var placementError = await DynamicIterationWorkItemPlacementGuard.ValidateCreatePlacementAsync(
+            workItemService,
+            projectId,
+            context,
+            createParentId,
+            UpdateWorkItemTool.GetString(args, DynamicIterationWorkItemPlacementGuard.RootJustificationPropertyName));
+        if (placementError is not null)
+            return placementError;
+
         var createReq = new Models.CreateWorkItemRequest(
             Title: title,
             Description: UpdateWorkItemTool.GetString(args, "description") ?? "",
@@ -122,7 +136,7 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
             AssignedTo: context.DefaultCreatedWorkItemAssignee,
             Tags: UpdateWorkItemTool.GetStringArray(args, "tags") ?? [],
             IsAI: context.DefaultCreatedWorkItemIsAi,
-            ParentWorkItemNumber: UpdateWorkItemTool.GetInt(args, "parent_id"),
+            ParentWorkItemNumber: createParentId,
             LevelId: levelId,
             AssignmentMode: context.DefaultCreatedWorkItemAssignmentMode
         );

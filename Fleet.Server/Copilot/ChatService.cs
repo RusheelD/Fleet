@@ -72,7 +72,21 @@ public class ChatService(
         return "You are Fleet AI, an expert software project assistant. Help users plan features and create work items.";
     });
 
+    private static readonly Lazy<string> DynamicIterationSystemPromptLazy = new(() =>
+    {
+        var promptPath = Path.Combine(AppContext.BaseDirectory, "Copilot", "dynamic_iteration_chat_prompt.txt");
+        if (File.Exists(promptPath))
+            return File.ReadAllText(promptPath);
+
+        var devPath = Path.Combine(Directory.GetCurrentDirectory(), "Copilot", "dynamic_iteration_chat_prompt.txt");
+        if (File.Exists(devPath))
+            return File.ReadAllText(devPath);
+
+        return "You are Fleet AI running in ACTIVE MODE: DYNAMIC_ITERATION. Create or update Fleet work items for the user's requested code iteration, place new items under the most specific existing parent, and dispatch one coherent parent flow whenever possible.";
+    });
+
     private static string SystemPrompt => SystemPromptLazy.Value;
+    private static string DynamicIterationSystemPrompt => DynamicIterationSystemPromptLazy.Value;
 
     /// <summary>Max total chars of attachment content to inject into the prompt.</summary>
     private const int MaxAttachmentContextLength = 50_000;
@@ -1471,12 +1485,12 @@ public class ChatService(
 
     private static string BuildGenerationTriggerMessage(DynamicIterationRuntimeOptions dynamicIteration)
         => dynamicIteration.Enabled
-            ? "Create or update Fleet work items for the user's requested code iteration so Fleet can dispatch eligible work items."
+            ? "ACTIVE MODE: DYNAMIC_ITERATION. Create or update Fleet work items for the user's requested code iteration, place new items under the correct existing parent whenever one fits, and let Fleet dispatch the eligible parent flow."
             : "Generate work-items based on provided context";
 
     private static string BuildMissingWorkItemMutationInstruction(DynamicIterationRuntimeOptions dynamicIteration)
         => dynamicIteration.Enabled
-            ? "You have not actually created or updated any Fleet work items for this iteration yet. Before responding, inspect the current work-item tree if needed, then call a work-item mutation tool, preferably bulk_create_work_items or bulk_update_work_items. Place new items under the correct existing parent and use a parent flow item for execution when the change has child work."
+            ? "You have not actually created or updated any Fleet work items for this iteration yet. Before responding, inspect the current work-item tree if needed, then call a work-item mutation tool, preferably bulk_create_work_items or bulk_update_work_items. Place new items under the correct existing parent and use a parent flow item for execution when the change has child work. Only create a root-level item if no existing parent fits; include root_justification when doing that in a non-empty tree."
             : "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
 
     private static string BuildNoWorkItemMutationMessage(DynamicIterationRuntimeOptions dynamicIteration)
@@ -2394,12 +2408,13 @@ public class ChatService(
             Keep all analysis and actions constrained to this active project.
             """;
 
-        var builder = new StringBuilder(SystemPrompt);
+        var basePrompt = dynamicIteration.Enabled ? DynamicIterationSystemPrompt : SystemPrompt;
+        var builder = new StringBuilder(basePrompt);
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine(scopePrompt);
 
-        if (generateWorkItems)
+        if (generateWorkItems && !dynamicIteration.Enabled)
         {
             builder.AppendLine();
             builder.AppendLine();
@@ -2427,8 +2442,9 @@ public class ChatService(
             builder.AppendLine();
             builder.AppendLine($"""
                 ## Dynamic Iteration
-                Dynamic Iteration is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
+                ACTIVE MODE: DYNAMIC_ITERATION is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
                 Before creating or updating work items, inspect the existing work-item tree with `list_work_items` using a high enough limit to see the relevant hierarchy. Use that tree to place new items under the most specific correct existing parent instead of creating a new root by default.
+                New root-level work items are allowed only when no existing work item is an appropriate parent. If you create a root-level item while the project already has work items, include `root_justification` in the tool arguments explaining why no existing parent fits.
                 Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request, but model coherent implementation flows as a parent item with child tasks rather than as multiple unrelated root executions.
                 Prefer one execution root per coherent flow. If you create or update child Tasks/Components/Bugs for a flow, make sure their parent Feature/Component/Bug is the item Fleet can execute; Fleet will handle needed sub-flows from that parent.
                 When all created or updated items belong under one executable parent, Fleet should dispatch that parent item rather than starting multiple descendant flows.

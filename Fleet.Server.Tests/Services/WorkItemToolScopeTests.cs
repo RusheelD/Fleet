@@ -40,6 +40,7 @@ public class WorkItemToolScopeTests
     {
         var capturedRequest = default(CreateWorkItemRequest);
         var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
         workItemService
             .Setup(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()))
             .Callback<string, CreateWorkItemRequest>((_, request) => capturedRequest = request)
@@ -80,6 +81,7 @@ public class WorkItemToolScopeTests
         var capturedRequests = new List<CreateWorkItemRequest>();
         var nextWorkItemNumber = 10;
         var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
         workItemService
             .Setup(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()))
             .Callback<string, CreateWorkItemRequest>((_, request) => capturedRequests.Add(request))
@@ -119,6 +121,7 @@ public class WorkItemToolScopeTests
     {
         var capturedRequest = default(CreateWorkItemRequest);
         var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
         workItemService.Setup(service => service.UpdateAsync("p1", 999, It.IsAny<UpdateWorkItemRequest>()))
             .ReturnsAsync((WorkItemDto?)null);
         workItemService
@@ -145,6 +148,7 @@ public class WorkItemToolScopeTests
         var capturedRequests = new List<CreateWorkItemRequest>();
         var nextWorkItemNumber = 30;
         var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
         workItemService
             .Setup(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()))
             .Callback<string, CreateWorkItemRequest>((_, request) => capturedRequests.Add(request))
@@ -161,6 +165,70 @@ public class WorkItemToolScopeTests
         Assert.IsTrue(capturedRequests.All(request => request.IsAI));
         Assert.IsTrue(capturedRequests.All(request => request.AssignedTo == "Fleet AI"));
         Assert.IsTrue(capturedRequests.All(request => request.AssignmentMode == "auto"));
+    }
+
+    [TestMethod]
+    public async Task BulkCreateWorkItemsTool_DynamicIterationRootWithoutJustificationWhenTreeExists_ReturnsPlacementError()
+    {
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1"))
+            .ReturnsAsync([CreateExistingWorkItem(1, "Existing feature")]);
+        var workItemLevelService = new Mock<IWorkItemLevelService>();
+        workItemLevelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
+        var sut = new BulkCreateWorkItemsTool(workItemService.Object, workItemLevelService.Object);
+
+        var result = await sut.ExecuteAsync(
+            """{"items":[{"title":"Accidental root","level":"Feature"}]}""",
+            new ChatToolContext("p1", "42", DynamicIterationEnabled: true));
+
+        StringAssert.Contains(result, "parent_id");
+        StringAssert.Contains(result, "root_justification");
+        workItemService.Verify(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task BulkCreateWorkItemsTool_DynamicIterationRootWithJustificationWhenTreeExists_AllowsCreation()
+    {
+        var capturedRequests = new List<CreateWorkItemRequest>();
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByProjectIdAsync("p1"))
+            .ReturnsAsync([CreateExistingWorkItem(1, "Existing feature")]);
+        workItemService
+            .Setup(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()))
+            .Callback<string, CreateWorkItemRequest>((_, request) => capturedRequests.Add(request))
+            .ReturnsAsync((string _, CreateWorkItemRequest request) => CreateCreatedWorkItem(40, request));
+        var workItemLevelService = new Mock<IWorkItemLevelService>();
+        workItemLevelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
+        var sut = new BulkCreateWorkItemsTool(workItemService.Object, workItemLevelService.Object);
+
+        await sut.ExecuteAsync(
+            """{"items":[{"title":"Independent root","level":"Feature","root_justification":"No existing feature covers this independent change."}]}""",
+            new ChatToolContext("p1", "42", DynamicIterationEnabled: true));
+
+        Assert.AreEqual(1, capturedRequests.Count);
+        Assert.IsNull(capturedRequests[0].ParentWorkItemNumber);
+    }
+
+    [TestMethod]
+    public async Task BulkCreateWorkItemsTool_DynamicIterationChildUnderExistingParentWhenTreeExists_AllowsCreation()
+    {
+        var capturedRequests = new List<CreateWorkItemRequest>();
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService
+            .Setup(service => service.CreateAsync("p1", It.IsAny<CreateWorkItemRequest>()))
+            .Callback<string, CreateWorkItemRequest>((_, request) => capturedRequests.Add(request))
+            .ReturnsAsync((string _, CreateWorkItemRequest request) => CreateCreatedWorkItem(41, request));
+        var workItemLevelService = new Mock<IWorkItemLevelService>();
+        workItemLevelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([]);
+        var sut = new BulkCreateWorkItemsTool(workItemService.Object, workItemLevelService.Object);
+
+        await sut.ExecuteAsync(
+            """{"items":[{"title":"Nested task","level":"Task","parent_id":1}]}""",
+            new ChatToolContext("p1", "42", DynamicIterationEnabled: true));
+
+        Assert.AreEqual(1, capturedRequests.Count);
+        Assert.AreEqual(1, capturedRequests[0].ParentWorkItemNumber);
+        workItemService.Verify(service => service.GetByProjectIdAsync("p1"), Times.Never);
     }
 
     private static WorkItemDto CreateCreatedWorkItem(int workItemNumber, CreateWorkItemRequest request)
@@ -181,4 +249,19 @@ public class WorkItemToolScopeTests
             AssignedAgentCount: request.AssignedAgentCount,
             AcceptanceCriteria: request.AcceptanceCriteria ?? string.Empty,
             LinkedPullRequestUrl: null);
+
+    private static WorkItemDto CreateExistingWorkItem(int workItemNumber, string title)
+        => new(
+            WorkItemNumber: workItemNumber,
+            Title: title,
+            State: "New",
+            Priority: 2,
+            Difficulty: 2,
+            AssignedTo: "Fleet AI",
+            Tags: [],
+            IsAI: true,
+            Description: string.Empty,
+            ParentWorkItemNumber: null,
+            ChildWorkItemNumbers: [],
+            LevelId: null);
 }
