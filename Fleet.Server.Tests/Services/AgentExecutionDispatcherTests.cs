@@ -86,6 +86,29 @@ public class AgentExecutionDispatcherTests
             Times.Once);
     }
 
+    [TestMethod]
+    public async Task DispatchWorkItemAsync_IgnoresBranchPatternWhenProvidedAsRequestedTarget()
+    {
+        await using var db = CreateDbContext();
+
+        var orchestrationService = new Mock<IAgentOrchestrationService>();
+        orchestrationService
+            .Setup(service => service.StartExecutionAsync("p1", 162, 7, (string?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-162");
+
+        var sut = new AgentExecutionDispatcher(
+            db,
+            orchestrationService.Object,
+            Mock.Of<IChatSessionRepository>());
+
+        var executionId = await sut.DispatchWorkItemAsync("p1", 162, 7, requestedTargetBranch: "fleet/{workItemNumber}-{slug}");
+
+        Assert.AreEqual("exec-162", executionId);
+        orchestrationService.Verify(
+            service => service.StartExecutionAsync("p1", 162, 7, (string?)null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static FleetDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<FleetDbContext>()

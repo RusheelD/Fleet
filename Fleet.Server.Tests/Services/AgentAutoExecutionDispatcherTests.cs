@@ -88,6 +88,40 @@ public class AgentAutoExecutionDispatcherTests
         executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 12, 7, null, "s2", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [TestMethod]
+    public async Task DispatchAsync_ReportsSanitizedUnexpectedStartFailure()
+    {
+        var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
+        executionDispatcher
+            .Setup(service => service.DispatchWorkItemAsync("p1", 11, 7, "feature/chat", "s3", null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Git clone failed for https://token123@github.com/owner/repo.git"));
+
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(service => service.GetExecutionsAsync("p1")).ReturnsAsync(Array.Empty<AgentExecutionDto>());
+
+        var workItemService = new Mock<IWorkItemService>();
+        workItemService.Setup(service => service.GetByWorkItemNumberAsync("p1", 11)).ReturnsAsync(CreateWorkItem(11, levelId: 1));
+
+        var levelService = new Mock<IWorkItemLevelService>();
+        levelService.Setup(service => service.GetByProjectIdAsync("p1")).ReturnsAsync([new WorkItemLevelDto(1, "Bug", "bug", "#f00", 0, true)]);
+
+        var dispatcher = CreateDispatcher(
+            executionDispatcher,
+            agentService,
+            workItemService,
+            levelService,
+            maxAutoStartPerMessage: 5,
+            maxActiveExecutionsPerSession: 5);
+
+        var result = await dispatcher.DispatchAsync("p1", "s3", 7, [11], "feature/chat");
+
+        Assert.AreEqual(1, result.WorkItems.Count);
+        Assert.AreEqual("failed", result.WorkItems[0].Status);
+        StringAssert.Contains(result.WorkItems[0].Reason, "Git clone failed");
+        StringAssert.Contains(result.WorkItems[0].Reason, "https://***@github.com/owner/repo.git");
+        Assert.IsFalse(result.WorkItems[0].Reason.Contains("token123", StringComparison.Ordinal));
+    }
+
     private static AgentAutoExecutionDispatcher CreateDispatcher(
         Mock<IAgentExecutionDispatcher> executionDispatcher,
         Mock<IAgentService> agentService,

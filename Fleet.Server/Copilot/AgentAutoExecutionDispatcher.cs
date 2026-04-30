@@ -5,6 +5,7 @@ using Fleet.Server.WorkItems;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Text.RegularExpressions;
 
 namespace Fleet.Server.Copilot;
 
@@ -211,12 +212,28 @@ public sealed class AgentAutoExecutionDispatcher(
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
                     "failed",
-                    "Failed to start execution automatically due to an internal error."));
+                    BuildStartFailureMessage(ex)));
             }
         }
 
         return new AgentAutoExecutionDispatchResult(startedExecutionIds, results);
     }
+
+    private static string BuildStartFailureMessage(Exception exception)
+    {
+        var message = RedactSensitiveFailureMessage(exception.Message.SanitizeForLogging());
+        return string.IsNullOrWhiteSpace(message)
+            ? "Failed to start execution automatically due to an internal error."
+            : $"Failed to start execution automatically: {message}";
+    }
+
+    private static string RedactSensitiveFailureMessage(string message)
+        => Regex.Replace(
+            message,
+            @"https://[^@\s]+@",
+            "https://***@",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
 
     private static int ResolveMaxAutoStartPerMessage(
         AgentAutoExecutionDispatchPolicyOptions policy,

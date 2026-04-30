@@ -7197,13 +7197,32 @@ public class AgentOrchestrationService(
 
             if (!branchExists)
             {
-                throw new InvalidOperationException(
-                    $"Target branch '{normalizedRequestedBranch}' was not found in {repoFullName}.");
+                var defaultBranch = await ResolveDefaultBranchNameAsync(
+                    client,
+                    accessToken,
+                    repoFullName,
+                    cancellationToken);
+                await CreateBranchFromExistingBranchAsync(
+                    client,
+                    accessToken,
+                    repoFullName,
+                    normalizedRequestedBranch,
+                    defaultBranch,
+                    cancellationToken);
             }
 
             return normalizedRequestedBranch;
         }
 
+        return await ResolveDefaultBranchNameAsync(client, accessToken, repoFullName, cancellationToken);
+    }
+
+    private static async Task<string> ResolveDefaultBranchNameAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        CancellationToken cancellationToken)
+    {
         var repoJson = await GitHubGetAsync(
             client,
             accessToken,
@@ -7215,6 +7234,101 @@ public class AgentOrchestrationService(
             : null;
 
         return string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch;
+    }
+
+    private static async Task CreateBranchFromExistingBranchAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string branchName,
+        string sourceBranchName,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(branchName, sourceBranchName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Target branch '{branchName}' was not found in {repoFullName}.");
+
+        var sourceSha = await ResolveBranchHeadShaAsync(
+            client,
+            accessToken,
+            repoFullName,
+            sourceBranchName,
+            cancellationToken);
+        var createPayload = JsonSerializer.Serialize(new
+        {
+            @ref = $"refs/heads/{branchName}",
+            sha = sourceSha,
+        });
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"https://api.github.com/repos/{repoFullName}/git/refs")
+        {
+            Content = new StringContent(createPayload, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.StatusCode == HttpStatusCode.UnprocessableEntity &&
+            await BranchExistsAsync(client, accessToken, repoFullName, branchName, cancellationToken))
+        {
+            return;
+        }
+
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new InvalidOperationException(
+                $"GitHub would not allow Fleet to create target branch '{branchName}' in {repoFullName}. Re-link GitHub with repository write access.");
+        }
+
+        throw new InvalidOperationException(
+            $"Failed to create target branch '{branchName}' from '{sourceBranchName}' in {repoFullName}: {TryExtractGitHubApiErrorMessage(responseBody) ?? responseBody}");
+    }
+
+    private static async Task<string> ResolveBranchHeadShaAsync(
+        HttpClient client,
+        string accessToken,
+        string repoFullName,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        var encodedBranch = Uri.EscapeDataString(branchName);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://api.github.com/repos/{repoFullName}/git/ref/heads/{encodedBranch}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.UserAgent.ParseAdd("Fleet/1.0");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException(
+                $"Source branch '{branchName}' was not found in {repoFullName}, so Fleet could not create the requested target branch.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to read source branch '{branchName}' in {repoFullName}: {TryExtractGitHubApiErrorMessage(responseBody) ?? responseBody}");
+        }
+
+        var payload = JsonSerializer.Deserialize<JsonElement>(responseBody);
+        if (payload.TryGetProperty("object", out var objectProp) &&
+            objectProp.TryGetProperty("sha", out var shaProp))
+        {
+            var sha = shaProp.GetString();
+            if (!string.IsNullOrWhiteSpace(sha))
+                return sha;
+        }
+
+        throw new InvalidOperationException(
+            $"GitHub did not return a commit SHA for source branch '{branchName}' in {repoFullName}.");
     }
 
     private async Task<string> ResolveUniqueBranchNameAsync(

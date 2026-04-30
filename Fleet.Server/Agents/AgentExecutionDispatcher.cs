@@ -115,6 +115,13 @@ public class AgentExecutionDispatcher(
     private static string? NormalizeBranch(string? branch)
     {
         var normalizedBranch = branch?.Trim();
-        return string.IsNullOrWhiteSpace(normalizedBranch) ? null : normalizedBranch;
+        if (string.IsNullOrWhiteSpace(normalizedBranch))
+            return null;
+
+        return ContainsBranchTemplateToken(normalizedBranch) ? null : normalizedBranch;
     }
+
+    private static bool ContainsBranchTemplateToken(string branch)
+        => branch.Contains("{workItemNumber}", StringComparison.OrdinalIgnoreCase) ||
+           branch.Contains("{slug}", StringComparison.OrdinalIgnoreCase);
 }
