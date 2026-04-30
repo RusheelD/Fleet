@@ -119,11 +119,12 @@ public class TryUpdateWorkItemTool(IWorkItemService workItemService, IWorkItemLe
             Priority: UpdateWorkItemTool.GetInt(args, "priority") ?? 3,
             Difficulty: UpdateWorkItemTool.GetInt(args, "difficulty") ?? 3,
             State: UpdateWorkItemTool.GetString(args, "state") ?? "New",
-            AssignedTo: "Unassigned",
+            AssignedTo: context.DefaultCreatedWorkItemAssignee,
             Tags: UpdateWorkItemTool.GetStringArray(args, "tags") ?? [],
-            IsAI: false,
+            IsAI: context.DefaultCreatedWorkItemIsAi,
             ParentWorkItemNumber: UpdateWorkItemTool.GetInt(args, "parent_id"),
-            LevelId: levelId
+            LevelId: levelId,
+            AssignmentMode: context.DefaultCreatedWorkItemAssignmentMode
         );
 
         var created = await workItemService.CreateAsync(projectId, createReq);

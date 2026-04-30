@@ -75,20 +75,27 @@ public class ListWorkItemsToolTests
 
         using var document = JsonDocument.Parse(result);
         var first = document.RootElement[0];
-        var parent = first.GetProperty("Parent");
         var children = first.GetProperty("Children");
 
+        Assert.AreEqual(1, first.GetProperty("Id").GetInt32());
         Assert.AreEqual(2, first.GetProperty("LevelId").GetInt32());
         Assert.AreEqual("Feature", first.GetProperty("LevelName").GetString());
         Assert.AreEqual("Feature", first.GetProperty("Type").GetString());
-        Assert.AreEqual(1, parent.GetProperty("Id").GetInt32());
-        Assert.AreEqual("Parent item", parent.GetProperty("Title").GetString());
-        Assert.AreEqual(0, children.GetArrayLength());
+        Assert.AreEqual(0, first.GetProperty("Depth").GetInt32());
+        Assert.AreEqual("#1 Parent item", first.GetProperty("TreePath").GetString());
+        Assert.AreEqual(1, first.GetProperty("Root").GetProperty("Id").GetInt32());
+        Assert.AreEqual(1, children.GetArrayLength());
+        Assert.AreEqual(2, children[0].GetProperty("Id").GetInt32());
+        Assert.AreEqual("Child item", children[0].GetProperty("Title").GetString());
 
         var second = document.RootElement[1];
-        var secondChildren = second.GetProperty("Children");
-        Assert.AreEqual(1, secondChildren.GetArrayLength());
-        Assert.AreEqual(2, secondChildren[0].GetProperty("Id").GetInt32());
-        Assert.AreEqual("Child item", secondChildren[0].GetProperty("Title").GetString());
+        var parent = second.GetProperty("Parent");
+        Assert.AreEqual(2, second.GetProperty("Id").GetInt32());
+        Assert.AreEqual(1, second.GetProperty("Depth").GetInt32());
+        Assert.AreEqual("#1 Parent item > #2 Child item", second.GetProperty("TreePath").GetString());
+        Assert.AreEqual(1, second.GetProperty("Root").GetProperty("Id").GetInt32());
+        Assert.AreEqual(1, parent.GetProperty("Id").GetInt32());
+        Assert.AreEqual("Parent item", parent.GetProperty("Title").GetString());
+        Assert.AreEqual(0, second.GetProperty("Children").GetArrayLength());
     }
 }

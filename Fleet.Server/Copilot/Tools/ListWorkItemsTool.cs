@@ -68,7 +68,8 @@ public class ListWorkItemsTool(
         }
 
         var materialized = records
-            .OrderByDescending(record => record.Item.WorkItemNumber)
+            .OrderBy(record => record.Project.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(record => record.TreeSortKey, StringComparer.Ordinal)
             .Take(args.Limit)
             .Select(record => new
             {
@@ -86,6 +87,9 @@ public class ListWorkItemsTool(
                 LevelId = record.Item.LevelId,
                 LevelName = record.LevelName,
                 Type = record.LevelName,
+                Depth = record.Depth,
+                Root = record.Root,
+                TreePath = record.TreePath,
                 Parent = record.Parent,
                 Children = record.Children,
             })
@@ -150,9 +154,41 @@ public class ListWorkItemsTool(
             ? BuildReference(parentNumber)
             : null;
 
+        public int Depth => AncestorChain.Count - 1;
+
+        public object Root => BuildReference(AncestorChain[0].WorkItemNumber);
+
+        public string TreePath => string.Join(" > ", AncestorChain.Select(item => $"#{item.WorkItemNumber} {item.Title}"));
+
+        public string TreeSortKey => string.Join("/", AncestorChain.Select(item => item.WorkItemNumber.ToString("D10")));
+
         public IReadOnlyList<object> Children => Item.ChildWorkItemNumbers
             .Select(BuildReference)
             .ToList();
+
+        private IReadOnlyList<WorkItemDto> AncestorChain
+        {
+            get
+            {
+                var chain = new List<WorkItemDto>();
+                var visited = new HashSet<int>();
+                var current = Item;
+                while (visited.Add(current.WorkItemNumber))
+                {
+                    chain.Add(current);
+                    if (current.ParentWorkItemNumber is not { } parentNumber ||
+                        !ItemsByNumber.TryGetValue(parentNumber, out var parent))
+                    {
+                        break;
+                    }
+
+                    current = parent;
+                }
+
+                chain.Reverse();
+                return chain;
+            }
+        }
 
         private object BuildReference(int workItemNumber)
         {

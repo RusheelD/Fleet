@@ -79,7 +79,10 @@ public sealed class AgentAutoExecutionDispatcher(
         {
             var workItem = await workItemService.GetByWorkItemNumberAsync(projectId, workItemNumber);
             if (workItem is not null)
+            {
                 workItemsByNumber[workItemNumber] = workItem;
+                await LoadCandidateAncestorsAsync(projectId, workItem, workItemsByNumber);
+            }
         }
 
         var activeExecutions = await agentService.GetExecutionsAsync(projectId);
@@ -102,10 +105,16 @@ public sealed class AgentAutoExecutionDispatcher(
                 sessionActiveExecutionIds.TryRemove(executionId, out _);
         }
 
-        var orderedCandidates = OrderCandidatesParentsFirst(uniqueCandidates, workItemsByNumber);
-        var candidateNumberSet = uniqueCandidates.ToHashSet();
+        var plannedCandidates = ResolveExecutionPlanCandidates(
+            uniqueCandidates,
+            workItemsByNumber,
+            normalizedAllowedLevels,
+            levelNameById,
+            normalizedExecutionPolicy);
+        var orderedCandidates = OrderCandidatesParentsFirst(plannedCandidates, workItemsByNumber);
+        var plannedCandidateSet = plannedCandidates.ToHashSet();
         var activeOrStartedCandidateNumbers = activeExecutionSet
-            .Where(candidateNumberSet.Contains)
+            .Where(plannedCandidateSet.Contains)
             .ToHashSet();
         var results = new List<AgentAutoExecutionWorkItemResult>(uniqueCandidates.Length);
         var startedExecutionIds = new List<string>();
@@ -157,6 +166,7 @@ public sealed class AgentAutoExecutionDispatcher(
 
             if (activeExecutionSet.Contains(workItemNumber))
             {
+                activeOrStartedCandidateNumbers.Add(workItemNumber);
                 results.Add(new AgentAutoExecutionWorkItemResult(
                     workItemNumber,
                     "skipped",
@@ -243,6 +253,29 @@ public sealed class AgentAutoExecutionDispatcher(
         return new AgentAutoExecutionDispatchResult(startedExecutionIds, results);
     }
 
+    private async Task LoadCandidateAncestorsAsync(
+        string projectId,
+        WorkItemDto workItem,
+        IDictionary<int, WorkItemDto> workItemsByNumber)
+    {
+        var visited = new HashSet<int>();
+        var current = workItem;
+
+        while (current.ParentWorkItemNumber is { } parentWorkItemNumber && visited.Add(parentWorkItemNumber))
+        {
+            if (!workItemsByNumber.TryGetValue(parentWorkItemNumber, out var parent))
+            {
+                parent = await workItemService.GetByWorkItemNumberAsync(projectId, parentWorkItemNumber);
+                if (parent is null)
+                    return;
+
+                workItemsByNumber[parentWorkItemNumber] = parent;
+            }
+
+            current = parent;
+        }
+    }
+
     private static string BuildStartFailureMessage(Exception exception)
     {
         var message = RedactSensitiveFailureMessage(exception.Message.SanitizeForLogging());
@@ -302,6 +335,155 @@ public sealed class AgentAutoExecutionDispatcher(
         var normalized = executionPolicy?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToLowerInvariant();
     }
+
+    private static int[] ResolveExecutionPlanCandidates(
+        IReadOnlyCollection<int> candidates,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<string> allowedLevels,
+        IReadOnlyDictionary<int, string> levelNameById,
+        string? executionPolicy)
+    {
+        if (!IsDynamicExecutionPolicy(executionPolicy))
+            return candidates.ToArray();
+
+        var candidateSet = candidates.ToHashSet();
+        var executionRoots = new HashSet<int>();
+        foreach (var candidate in candidates)
+        {
+            if (!workItemsByNumber.TryGetValue(candidate, out var workItem))
+            {
+                executionRoots.Add(candidate);
+                continue;
+            }
+
+            executionRoots.Add(ResolveInitialDynamicExecutionRoot(
+                workItem,
+                candidateSet,
+                workItemsByNumber,
+                allowedLevels,
+                levelNameById));
+        }
+
+        PromoteSiblingRoots(executionRoots, workItemsByNumber, allowedLevels, levelNameById);
+        executionRoots.UnionWith(candidates);
+        return executionRoots.ToArray();
+    }
+
+    private static int ResolveInitialDynamicExecutionRoot(
+        WorkItemDto workItem,
+        ISet<int> candidateSet,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<string> allowedLevels,
+        IReadOnlyDictionary<int, string> levelNameById)
+    {
+        var topmostCandidateAncestor = ResolveTopmostCandidateAncestor(workItem, candidateSet, workItemsByNumber);
+        if (topmostCandidateAncestor != workItem.WorkItemNumber)
+            return topmostCandidateAncestor;
+
+        if (!IsTaskLevel(workItem, levelNameById))
+            return workItem.WorkItemNumber;
+
+        var visited = new HashSet<int>();
+        var current = workItem;
+        while (current.ParentWorkItemNumber is { } parentWorkItemNumber &&
+               workItemsByNumber.TryGetValue(parentWorkItemNumber, out var parent) &&
+               visited.Add(parentWorkItemNumber))
+        {
+            if (!IsTaskLevel(parent, levelNameById) &&
+                IsDispatchableWorkItem(parent, allowedLevels, levelNameById))
+            {
+                return parent.WorkItemNumber;
+            }
+
+            current = parent;
+        }
+
+        return workItem.WorkItemNumber;
+    }
+
+    private static int ResolveTopmostCandidateAncestor(
+        WorkItemDto workItem,
+        ISet<int> candidateSet,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber)
+    {
+        var selected = workItem.WorkItemNumber;
+        var visited = new HashSet<int>();
+        var current = workItem;
+
+        while (current.ParentWorkItemNumber is { } parentWorkItemNumber &&
+               workItemsByNumber.TryGetValue(parentWorkItemNumber, out var parent) &&
+               visited.Add(parentWorkItemNumber))
+        {
+            if (candidateSet.Contains(parentWorkItemNumber))
+                selected = parentWorkItemNumber;
+
+            current = parent;
+        }
+
+        return selected;
+    }
+
+    private static void PromoteSiblingRoots(
+        ISet<int> executionRoots,
+        IReadOnlyDictionary<int, WorkItemDto> workItemsByNumber,
+        ISet<string> allowedLevels,
+        IReadOnlyDictionary<int, string> levelNameById)
+    {
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            var promotionGroups = executionRoots
+                .Select(rootNumber => workItemsByNumber.TryGetValue(rootNumber, out var workItem) ? workItem : null)
+                .Where(workItem => workItem?.ParentWorkItemNumber is not null)
+                .GroupBy(workItem => workItem!.ParentWorkItemNumber!.Value)
+                .Where(group => group.Count() > 1)
+                .ToArray();
+
+            foreach (var group in promotionGroups)
+            {
+                if (!workItemsByNumber.TryGetValue(group.Key, out var parent) ||
+                    !IsDispatchableWorkItem(parent, allowedLevels, levelNameById))
+                {
+                    continue;
+                }
+
+                foreach (var child in group)
+                {
+                    if (child is not null)
+                        executionRoots.Remove(child.WorkItemNumber);
+                }
+
+                executionRoots.Add(parent.WorkItemNumber);
+                changed = true;
+            }
+        }
+    }
+
+    private static bool IsDispatchableWorkItem(
+        WorkItemDto workItem,
+        ISet<string> allowedLevels,
+        IReadOnlyDictionary<int, string> levelNameById)
+    {
+        if (!DispatchableStates.Contains(workItem.State))
+            return false;
+
+        if (allowedLevels.Count == 0)
+            return true;
+
+        var levelName = workItem.LevelId.HasValue && levelNameById.TryGetValue(workItem.LevelId.Value, out var resolvedLevel)
+            ? resolvedLevel
+            : null;
+
+        return !string.IsNullOrWhiteSpace(levelName) && allowedLevels.Contains(levelName);
+    }
+
+    private static bool IsTaskLevel(
+        WorkItemDto workItem,
+        IReadOnlyDictionary<int, string> levelNameById)
+        => workItem.LevelId.HasValue &&
+           levelNameById.TryGetValue(workItem.LevelId.Value, out var levelName) &&
+           string.Equals(levelName, "Task", StringComparison.OrdinalIgnoreCase);
 
     private static int[] OrderCandidatesParentsFirst(
         IReadOnlyCollection<int> candidates,

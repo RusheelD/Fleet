@@ -22,10 +22,11 @@ public sealed record DynamicIterationDispatchResult(
         var failed = dispatchResult.WorkItems.Count(item => string.Equals(item.Status, "failed", StringComparison.OrdinalIgnoreCase));
         var skipped = dispatchResult.WorkItems.Count(item => string.Equals(item.Status, "skipped", StringComparison.OrdinalIgnoreCase)) +
                       Math.Max(0, candidateCount - dispatchResult.WorkItems.Count);
-        var accepted = dispatchResult.WorkItems.Count(item =>
+        var acceptedOutcomes = dispatchResult.WorkItems.Count(item =>
             string.Equals(item.Status, "started", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(item.Status, "queued", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(item.Status, "covered", StringComparison.OrdinalIgnoreCase));
+        var accepted = Math.Min(candidateCount, acceptedOutcomes);
         var notes = dispatchResult.WorkItems
             .Where(item => !string.IsNullOrWhiteSpace(item.Reason))
             .Select(item => $"#{item.WorkItemNumber}: {item.Reason}")

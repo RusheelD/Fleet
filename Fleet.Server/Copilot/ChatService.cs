@@ -1476,7 +1476,7 @@ public class ChatService(
 
     private static string BuildMissingWorkItemMutationInstruction(DynamicIterationRuntimeOptions dynamicIteration)
         => dynamicIteration.Enabled
-            ? "You have not actually created or updated any Fleet work items for this iteration yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items."
+            ? "You have not actually created or updated any Fleet work items for this iteration yet. Before responding, inspect the current work-item tree if needed, then call a work-item mutation tool, preferably bulk_create_work_items or bulk_update_work_items. Place new items under the correct existing parent and use a parent flow item for execution when the change has child work."
             : "You have not actually created or updated any work items yet. Before responding, you must call a work-item mutation tool now, preferably bulk_create_work_items or bulk_update_work_items.";
 
     private static string BuildNoWorkItemMutationMessage(DynamicIterationRuntimeOptions dynamicIteration)
@@ -2428,8 +2428,10 @@ public class ChatService(
             builder.AppendLine($"""
                 ## Dynamic Iteration
                 Dynamic Iteration is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
-                Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request.
-                Prefer actionable leaf work items that can be executed independently. Keep parent/child relationships intact when the request needs a larger feature breakdown.
+                Before creating or updating work items, inspect the existing work-item tree with `list_work_items` using a high enough limit to see the relevant hierarchy. Use that tree to place new items under the most specific correct existing parent instead of creating a new root by default.
+                Create or update the smallest useful set of Fleet work items for each concrete bug, task, feature, or component implied by the request, but model coherent implementation flows as a parent item with child tasks rather than as multiple unrelated root executions.
+                Prefer one execution root per coherent flow. If you create or update child Tasks/Components/Bugs for a flow, make sure their parent Feature/Component/Bug is the item Fleet can execute; Fleet will handle needed sub-flows from that parent.
+                Prefer actionable leaf work items that can be executed independently only when they are truly independent. Keep parent/child relationships intact when the request belongs inside a larger feature breakdown.
                 New work items created in this mode are automatically assigned to Fleet AI with automatic agent selection.
                 Fleet will automatically start eligible work items after your tool calls complete. Target branch: {targetBranch}. Dispatch strategy: {executionPolicy}.
                 After persisting the work items, summarize what was queued and call out anything that still needs user clarification.

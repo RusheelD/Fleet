@@ -802,8 +802,10 @@ public class ChatServiceTests
             new LLMResponse(null, toolCalls),
             new LLMResponse("Created work items", null),
         });
+        var capturedRequests = new List<LLMRequest>();
 
         _llmClient.Setup(l => l.CompleteAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LLMRequest, CancellationToken>((request, _) => capturedRequests.Add(request))
             .ReturnsAsync(() => responses.Dequeue());
 
         var result = await sut.SendMessageAsync(
@@ -818,6 +820,10 @@ public class ChatServiceTests
                     TargetBranch: "feature/auth")));
 
         Assert.IsNotNull(result.AssistantMessage);
+        var dynamicRequest = capturedRequests.First(request => request.SystemPrompt.Contains("## Dynamic Iteration", StringComparison.Ordinal));
+        StringAssert.Contains(dynamicRequest.SystemPrompt, "inspect the existing work-item tree");
+        StringAssert.Contains(dynamicRequest.SystemPrompt, "most specific correct existing parent");
+        StringAssert.Contains(dynamicRequest.SystemPrompt, "Prefer one execution root per coherent flow");
         _dynamicIterationDispatchService.Verify(s => s.DispatchFromToolEventsAsync(
             ProjectId,
             SessionId,
