@@ -104,6 +104,21 @@ public class FleetMigrationTests
         }
     }
 
+    [TestMethod]
+    public void AgentExecutionModel_IncludesDeliveryMode()
+    {
+        var options = new DbContextOptionsBuilder<FleetDbContext>()
+            .UseNpgsql("Host=localhost;Database=fleet_test;Username=fleet;Password=fleet")
+            .Options;
+        using var context = new FleetDbContext(options);
+
+        var entityType = context.Model.FindEntityType(typeof(AgentExecution));
+        Assert.IsNotNull(entityType);
+        Assert.IsNotNull(
+            entityType.FindProperty(nameof(AgentExecution.DeliveryMode)),
+            "AgentExecutions is missing EF model property 'DeliveryMode'. Dynamic iteration depends on this to avoid opening PRs after recovery/retry.");
+    }
+
     private static string GetMigrationsDirectory()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

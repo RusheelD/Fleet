@@ -411,7 +411,12 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
             ? `Self-corrected x${reviewLoopCount}`
             : null
     const runModeLabel = execution.executionMode === 'orchestration' ? 'Flow' : 'Direct'
-    const outputLabel = execution.pullRequestUrl
+    const isTargetBranchDelivery = execution.deliveryMode === 'target_branch'
+    const outputLabel = isTargetBranchDelivery
+        ? execution.status === 'completed'
+            ? 'Branch updated'
+            : 'Target branch'
+        : execution.pullRequestUrl
         ? execution.status === 'completed'
             ? 'PR ready'
             : 'PR active'
@@ -596,28 +601,34 @@ export function ExecutionCard({ execution, workItems, onPause, onCancel, onResum
 
             {execution.status === 'completed' && (
                 <div className={mergeClasses(styles.completedActions, isCompact && styles.completedActionsCompact, isMobile && styles.completedActionsMobile)}>
-                    <Button
-                        appearance="outline"
-                        size="small"
-                        icon={<BranchRegular />}
-                        disabled={!execution.pullRequestUrl}
-                        onClick={() => openPullRequest(execution.pullRequestUrl)}
-                        className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
-                    >
-                        View PR
-                    </Button>
+                    {!isTargetBranchDelivery && (
+                        <Button
+                            appearance="outline"
+                            size="small"
+                            icon={<BranchRegular />}
+                            disabled={!execution.pullRequestUrl}
+                            onClick={() => openPullRequest(execution.pullRequestUrl)}
+                            className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
+                        >
+                            View PR
+                        </Button>
+                    )}
                     <Button
                         appearance="outline"
                         size="small"
                         icon={<CodeRegular />}
                         onClick={() => {
+                            if (isTargetBranchDelivery) {
+                                notify(`Changes were pushed to ${execution.branchName ?? 'the target branch'}`, 'success')
+                                return
+                            }
                             if (!openPullRequestDiff(execution.pullRequestUrl)) {
                                 notify('No pull request diff is available for this execution', 'error')
                             }
                         }}
                         className={mergeClasses(isMobile && styles.completedActionButtonMobile)}
                     >
-                        View Changes
+                        {isTargetBranchDelivery ? 'Branch Updated' : 'View Changes'}
                     </Button>
                     <Button
                         appearance="outline"

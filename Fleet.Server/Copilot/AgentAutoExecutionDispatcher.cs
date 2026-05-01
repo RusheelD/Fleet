@@ -201,13 +201,21 @@ public sealed class AgentAutoExecutionDispatcher(
 
             try
             {
-                var executionId = await executionDispatcher.DispatchWorkItemAsync(
-                    projectId,
-                    workItemNumber,
-                    userId,
-                    targetBranch,
-                    sessionId,
-                    cancellationToken: cancellationToken);
+                var executionId = IsDynamicExecutionPolicy(normalizedExecutionPolicy)
+                    ? await executionDispatcher.DispatchWorkItemToTargetBranchAsync(
+                        projectId,
+                        workItemNumber,
+                        userId,
+                        targetBranch,
+                        sessionId,
+                        cancellationToken: cancellationToken)
+                    : await executionDispatcher.DispatchWorkItemAsync(
+                        projectId,
+                        workItemNumber,
+                        userId,
+                        targetBranch,
+                        sessionId,
+                        cancellationToken: cancellationToken);
 
                 startedCount++;
                 startedExecutionIds.Add(executionId);

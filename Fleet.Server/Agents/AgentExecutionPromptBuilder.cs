@@ -68,7 +68,9 @@ internal static class AgentExecutionPromptBuilder
         bool draftPullRequestReady,
         string? trustedPhaseBrief = null,
         string? agentLabel = null,
-        string? openSpecContext = null)
+        string? openSpecContext = null,
+        bool targetBranchDelivery = false,
+        bool internalBranchDelivery = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine(workItemContext);
@@ -141,6 +143,10 @@ internal static class AgentExecutionPromptBuilder
 
         if (role == AgentRole.Manager)
             sb.AppendLine("**IMPORTANT - Manager is orchestration-only. Do not call `commit_and_push`.**");
+        else if (targetBranchDelivery)
+            sb.AppendLine("**IMPORTANT - This dynamic iteration run writes directly to the selected target branch. Use `commit_and_push` frequently to save progress; Fleet will not open a PR for this run.**");
+        else if (internalBranchDelivery)
+            sb.AppendLine("**IMPORTANT - This internal sub-flow writes to a Fleet branch that the parent flow will merge. Use `commit_and_push` frequently to save progress; Fleet will not open a PR for this child run.**");
         else if (draftPullRequestReady)
             sb.AppendLine("**IMPORTANT - A draft PR is already open. Use `commit_and_push` frequently to save progress.**");
         else

@@ -21,6 +21,7 @@ internal sealed record ExecutionPipelineLaunchRequest(
     AgentRole[][] Pipeline,
     int MaxConcurrentAgentsPerTask,
     string PullRequestTargetBranch,
+    string DeliveryMode,
     int ExistingPullRequestNumber,
     bool BillableExecution,
     string? ParentExecutionId,

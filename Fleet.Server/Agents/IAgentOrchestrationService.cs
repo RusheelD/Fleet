@@ -31,6 +31,18 @@ public interface IAgentOrchestrationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Starts a new execution with an explicit delivery mode.
+    /// Target-branch delivery writes the completed result directly to <paramref name="targetBranch"/> without opening a PR.
+    /// </summary>
+    Task<string> StartExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? targetBranch,
+        string? deliveryMode,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Starts an internal child execution that belongs to a parent flow. This does not consume an additional run.
     /// </summary>
     Task<string> StartSubFlowExecutionAsync(
@@ -39,6 +51,18 @@ public interface IAgentOrchestrationService
         int userId,
         string parentExecutionId,
         string? targetBranch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts an internal child execution with an explicit delivery mode.
+    /// </summary>
+    Task<string> StartSubFlowExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string parentExecutionId,
+        string? targetBranch,
+        string? deliveryMode,
         CancellationToken cancellationToken = default);
 
     /// <summary>

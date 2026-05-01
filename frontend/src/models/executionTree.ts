@@ -146,6 +146,7 @@ export function mergeExecutionSnapshot(existing: AgentExecution, incoming: Agent
     ...incoming,
     branchName: incoming.branchName ?? existing.branchName,
     pullRequestUrl: incoming.pullRequestUrl ?? existing.pullRequestUrl,
+    deliveryMode: incoming.deliveryMode ?? existing.deliveryMode,
     currentPhase: incoming.currentPhase ?? existing.currentPhase,
     reviewLoopCount: incoming.reviewLoopCount && incoming.reviewLoopCount > 0
       ? incoming.reviewLoopCount

@@ -16,5 +16,6 @@ public record AgentExecutionDto(
     int ReviewLoopCount = 0,
     string? LastReviewRecommendation = null,
     string? ParentExecutionId = null,
-    AgentExecutionDto[]? SubFlows = null
+    AgentExecutionDto[]? SubFlows = null,
+    string DeliveryMode = Fleet.Server.Agents.AgentExecutionDeliveryModes.PullRequest
 );

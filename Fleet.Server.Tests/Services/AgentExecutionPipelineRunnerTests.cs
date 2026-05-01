@@ -49,6 +49,7 @@ public class AgentExecutionPipelineRunnerTests
             Pipeline: [[AgentRole.Manager], [AgentRole.Planner]],
             MaxConcurrentAgentsPerTask: 2,
             PullRequestTargetBranch: "main",
+            DeliveryMode: AgentExecutionDeliveryModes.PullRequest,
             ExistingPullRequestNumber: 0,
             BillableExecution: true,
             ParentExecutionId: "parent-1",

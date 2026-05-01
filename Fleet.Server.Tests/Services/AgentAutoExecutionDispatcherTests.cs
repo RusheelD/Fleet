@@ -98,7 +98,7 @@ public class AgentAutoExecutionDispatcherTests
         foreach (var workItemNumber in new[] { 21, 22, 23, 24 })
         {
             executionDispatcher
-                .Setup(service => service.DispatchWorkItemAsync("p1", workItemNumber, 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()))
+                .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", workItemNumber, 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()))
                 .ReturnsAsync($"exec-{workItemNumber}");
         }
 
@@ -133,7 +133,7 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(4, result.StartedExecutionIds.Count);
         Assert.AreEqual(4, result.WorkItems.Count(item => item.Status == "started"));
         Assert.AreEqual(0, result.WorkItems.Count(item => item.Status == "skipped"));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", It.IsAny<int>(), 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()), Times.Exactly(4));
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", It.IsAny<int>(), 7, "feature/chat", sessionId, null, It.IsAny<CancellationToken>()), Times.Exactly(4));
     }
 
     [TestMethod]
@@ -141,7 +141,7 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-40");
 
         var agentService = new Mock<IAgentService>();
@@ -173,9 +173,9 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
         Assert.AreEqual(2, result.WorkItems.Count(item => item.Status == "covered"));
         Assert.IsTrue(result.WorkItems.Where(item => item.Status == "covered").All(item => item.Reason.Contains("#40", StringComparison.Ordinal)));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 41, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 42, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 40, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 41, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 42, 7, "feature/chat", "s-covered", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -183,7 +183,7 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 70, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 70, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-70");
 
         var agentService = new Mock<IAgentService>();
@@ -215,8 +215,8 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.StartedExecutionIds.Count);
         Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 70 && item.Status == "started"));
         Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 71 && item.Status == "covered"));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 70, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 71, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 70, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 71, 7, "feature/chat", "s-task-parent", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -224,7 +224,7 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 80, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 80, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-80");
 
         var agentService = new Mock<IAgentService>();
@@ -259,9 +259,9 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 80 && item.Status == "started"));
         Assert.AreEqual(2, result.WorkItems.Count(item => item.Status == "covered"));
         Assert.IsTrue(result.WorkItems.Where(item => item.Status == "covered").All(item => item.Reason.Contains("#80", StringComparison.Ordinal)));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 80, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 81, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Never);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 82, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 80, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 81, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 82, 7, "feature/chat", "s-sibling-parent", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -269,7 +269,7 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-120");
 
         var agentService = new Mock<IAgentService>();
@@ -307,9 +307,9 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.WorkItems.Count(item => item.WorkItemNumber == 120 && item.Status == "started"));
         Assert.AreEqual(2, result.WorkItems.Count(item => item.Status == "covered"));
         Assert.IsTrue(result.WorkItems.Where(item => item.Status == "covered").All(item => item.Reason.Contains("#120", StringComparison.Ordinal)));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 92, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 93, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 120, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 92, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 93, 7, "feature/chat", "s-common-parent", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]
@@ -317,10 +317,10 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("parent branch could not be prepared"));
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-51");
 
         var agentService = new Mock<IAgentService>();
@@ -351,8 +351,8 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "skipped"));
         Assert.AreEqual(0, result.WorkItems.Count(item => item.Status == "covered"));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 50, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 51, 7, "feature/chat", "s-parent-fails", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [TestMethod]
@@ -360,7 +360,7 @@ public class AgentAutoExecutionDispatcherTests
     {
         var executionDispatcher = new Mock<IAgentExecutionDispatcher>();
         executionDispatcher
-            .Setup(service => service.DispatchWorkItemAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()))
+            .Setup(service => service.DispatchWorkItemToTargetBranchAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("exec-31");
 
         var agentService = new Mock<IAgentService>();
@@ -386,8 +386,8 @@ public class AgentAutoExecutionDispatcherTests
         Assert.AreEqual(1, result.StartedExecutionIds.Count);
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "started"));
         Assert.AreEqual(1, result.WorkItems.Count(item => item.Status == "skipped"));
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Once);
-        executionDispatcher.Verify(service => service.DispatchWorkItemAsync("p1", 32, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Never);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 31, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Once);
+        executionDispatcher.Verify(service => service.DispatchWorkItemToTargetBranchAsync("p1", 32, 7, "feature/chat", "s-sequential", null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]

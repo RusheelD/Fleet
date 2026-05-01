@@ -10,4 +10,13 @@ public interface IAgentExecutionDispatcher
         string? chatSessionId = null,
         string? parentExecutionId = null,
         CancellationToken cancellationToken = default);
+
+    Task<string> DispatchWorkItemToTargetBranchAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? requestedTargetBranch = null,
+        string? chatSessionId = null,
+        string? parentExecutionId = null,
+        CancellationToken cancellationToken = default);
 }

@@ -2450,6 +2450,7 @@ public class ChatService(
             builder.AppendLine($"""
                 ## Dynamic Iteration
                 ACTIVE MODE: DYNAMIC_ITERATION is enabled for this turn. Treat the user's message as an instruction to change the codebase through Fleet work items, similar to an agentic coding chat.
+                Dynamic iteration output is committed code on the selected target branch. Fleet does not open a pull request into that branch for dynamic iteration runs.
                 You have access to the normal read-only project/repo tool surface in this mode. Inspect the repository and relevant files when code context could improve the execution plan.
                 Before creating or updating work items, inspect the existing work-item tree with `list_work_items` using a high enough limit to see the relevant hierarchy. Use that tree to place new items under the most specific correct existing parent instead of creating a new root by default.
                 New root-level work items are allowed only when no existing work item is an appropriate parent. If you create a root-level item while the project already has work items, include `root_justification` in the tool arguments explaining why no existing parent fits.

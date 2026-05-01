@@ -646,6 +646,7 @@ export function useRetryExecution(projectId: string | undefined) {
         workItemId: sourceExecution?.workItemId ?? 0,
         workItemTitle: sourceExecution?.workItemTitle ?? 'Retrying execution',
         executionMode: sourceExecution?.executionMode ?? 'standard',
+        deliveryMode: sourceExecution?.deliveryMode ?? 'pull_request',
         status: 'queued',
         agents: optimisticAgents,
         startedAt: nowIso,

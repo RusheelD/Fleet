@@ -3,6 +3,7 @@ export interface AgentExecution {
   workItemId: number
   workItemTitle: string
   executionMode: 'standard' | 'orchestration'
+  deliveryMode?: 'pull_request' | 'target_branch'
   status: 'running' | 'completed' | 'failed' | 'queued' | 'cancelled' | 'paused'
   agents: AgentInfo[]
   startedAt: string

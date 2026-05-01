@@ -8,6 +8,7 @@ public class AgentExecution
     public int WorkItemId { get; set; }
     public string WorkItemTitle { get; set; } = string.Empty;
     public string ExecutionMode { get; set; } = AgentExecutionModes.Standard;
+    public string DeliveryMode { get; set; } = AgentExecutionDeliveryModes.PullRequest;
     public string Status { get; set; } = string.Empty;
     public string StartedAt { get; set; } = string.Empty;
     public string Duration { get; set; } = string.Empty;

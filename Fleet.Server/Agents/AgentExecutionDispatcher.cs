@@ -19,7 +19,45 @@ public class AgentExecutionDispatcher(
         string? chatSessionId = null,
         string? parentExecutionId = null,
         CancellationToken cancellationToken = default)
+        => await DispatchWorkItemInternalAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            requestedTargetBranch,
+            chatSessionId,
+            parentExecutionId,
+            AgentExecutionDeliveryModes.PullRequest,
+            cancellationToken);
+
+    public async Task<string> DispatchWorkItemToTargetBranchAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? requestedTargetBranch = null,
+        string? chatSessionId = null,
+        string? parentExecutionId = null,
+        CancellationToken cancellationToken = default)
+        => await DispatchWorkItemInternalAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            requestedTargetBranch,
+            chatSessionId,
+            parentExecutionId,
+            AgentExecutionDeliveryModes.TargetBranch,
+            cancellationToken);
+
+    private async Task<string> DispatchWorkItemInternalAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? requestedTargetBranch,
+        string? chatSessionId,
+        string? parentExecutionId,
+        string deliveryMode,
+        CancellationToken cancellationToken)
     {
+        var normalizedDeliveryMode = AgentExecutionDeliveryModes.Normalize(deliveryMode);
         var resolvedTargetBranch = await ResolveTargetBranchAsync(
             projectId,
             requestedTargetBranch,
@@ -27,27 +65,45 @@ public class AgentExecutionDispatcher(
             parentExecutionId,
             cancellationToken);
 
-        var executionId = string.IsNullOrWhiteSpace(parentExecutionId)
-            ? await orchestrationService.StartExecutionAsync(
-                projectId,
-                workItemNumber,
-                userId,
-                resolvedTargetBranch,
-                cancellationToken)
-            : await orchestrationService.StartSubFlowExecutionAsync(
-                projectId,
-                workItemNumber,
-                userId,
-                parentExecutionId,
-                resolvedTargetBranch,
-                cancellationToken);
+        var executionId = AgentExecutionDeliveryModes.IsTargetBranch(normalizedDeliveryMode)
+            ? string.IsNullOrWhiteSpace(parentExecutionId)
+                ? await orchestrationService.StartExecutionAsync(
+                    projectId,
+                    workItemNumber,
+                    userId,
+                    resolvedTargetBranch,
+                    normalizedDeliveryMode,
+                    cancellationToken)
+                : await orchestrationService.StartSubFlowExecutionAsync(
+                    projectId,
+                    workItemNumber,
+                    userId,
+                    parentExecutionId,
+                    resolvedTargetBranch,
+                    normalizedDeliveryMode,
+                    cancellationToken)
+            : string.IsNullOrWhiteSpace(parentExecutionId)
+                ? await orchestrationService.StartExecutionAsync(
+                    projectId,
+                    workItemNumber,
+                    userId,
+                    resolvedTargetBranch,
+                    cancellationToken)
+                : await orchestrationService.StartSubFlowExecutionAsync(
+                    projectId,
+                    workItemNumber,
+                    userId,
+                    parentExecutionId,
+                    resolvedTargetBranch,
+                    cancellationToken);
 
         await AppendResolvedBranchActivityAsync(
             projectId,
             chatSessionId,
             userId.ToString(),
             workItemNumber,
-            resolvedTargetBranch);
+            resolvedTargetBranch,
+            normalizedDeliveryMode);
 
         return executionId;
     }
@@ -97,7 +153,8 @@ public class AgentExecutionDispatcher(
         string? chatSessionId,
         string ownerId,
         int workItemNumber,
-        string? resolvedTargetBranch)
+        string? resolvedTargetBranch,
+        string deliveryMode)
     {
         if (string.IsNullOrWhiteSpace(chatSessionId))
             return;
@@ -107,13 +164,16 @@ public class AgentExecutionDispatcher(
             var branchLabel = string.IsNullOrWhiteSpace(resolvedTargetBranch)
                 ? "inherit parent/default branch"
                 : resolvedTargetBranch;
+            var branchPurpose = AgentExecutionDeliveryModes.IsTargetBranch(deliveryMode)
+                ? "output branch"
+                : "target branch";
             await chatSessionRepository.AppendSessionActivityAsync(
                 projectId,
                 chatSessionId,
                 new ChatSessionActivityDto(
                     Id: Guid.NewGuid().ToString("N"),
                     Kind: "status",
-                    Message: $"Queued work item #{workItemNumber} with target branch '{branchLabel}'.",
+                    Message: $"Queued work item #{workItemNumber} with {branchPurpose} '{branchLabel}'.",
                     TimestampUtc: DateTime.UtcNow.ToString("O")),
                 ownerId);
         }

@@ -130,6 +130,7 @@ public class AgentOrchestrationService(
             request.Pipeline,
             request.MaxConcurrentAgentsPerTask,
             request.PullRequestTargetBranch,
+            request.DeliveryMode,
             BuildRetryExecutionPlan(request),
             request.ExistingPullRequestNumber,
             request.BillableExecution,
@@ -167,6 +168,7 @@ public class AgentOrchestrationService(
         AgentRole[][] pipeline,
         int maxConcurrentAgentsPerTask,
         string pullRequestTargetBranch,
+        string deliveryMode,
         RetryExecutionPlan? retryPlan,
         int existingPullRequestNumber,
         bool billableExecution,
@@ -185,6 +187,7 @@ public class AgentOrchestrationService(
             pipeline,
             maxConcurrentAgentsPerTask,
             pullRequestTargetBranch,
+            deliveryMode,
             existingPullRequestNumber,
             billableExecution,
             parentExecutionId,
@@ -463,7 +466,8 @@ public class AgentOrchestrationService(
             execution.PullRequestUrl,
             execution.CurrentPhase,
             ParentExecutionId: execution.ParentExecutionId,
-            SubFlows: []);
+            SubFlows: [],
+            DeliveryMode: AgentExecutionDeliveryModes.Normalize(execution.DeliveryMode));
 
     public Task<string> StartExecutionAsync(
         string projectId,
@@ -475,6 +479,7 @@ public class AgentOrchestrationService(
             workItemNumber,
             userId,
             targetBranch: null,
+            deliveryMode: AgentExecutionDeliveryModes.PullRequest,
             retryPlan: null,
             parentExecutionId: null,
             skipQuotaCharge: false,
@@ -487,11 +492,27 @@ public class AgentOrchestrationService(
         int userId,
         string? targetBranch,
         CancellationToken cancellationToken = default)
+        => StartExecutionAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            targetBranch,
+            deliveryMode: AgentExecutionDeliveryModes.PullRequest,
+            cancellationToken);
+
+    public Task<string> StartExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string? targetBranch,
+        string? deliveryMode,
+        CancellationToken cancellationToken = default)
         => StartExecutionInternalAsync(
             projectId,
             workItemNumber,
             userId,
             targetBranch,
+            deliveryMode,
             retryPlan: null,
             parentExecutionId: null,
             skipQuotaCharge: false,
@@ -505,11 +526,29 @@ public class AgentOrchestrationService(
         string parentExecutionId,
         string? targetBranch,
         CancellationToken cancellationToken = default)
+        => StartSubFlowExecutionAsync(
+            projectId,
+            workItemNumber,
+            userId,
+            parentExecutionId,
+            targetBranch,
+            deliveryMode: AgentExecutionDeliveryModes.PullRequest,
+            cancellationToken);
+
+    public Task<string> StartSubFlowExecutionAsync(
+        string projectId,
+        int workItemNumber,
+        int userId,
+        string parentExecutionId,
+        string? targetBranch,
+        string? deliveryMode,
+        CancellationToken cancellationToken = default)
         => StartExecutionInternalAsync(
             projectId,
             workItemNumber,
             userId,
             targetBranch,
+            deliveryMode,
             retryPlan: null,
             parentExecutionId,
             skipQuotaCharge: true,
@@ -521,6 +560,7 @@ public class AgentOrchestrationService(
         int workItemNumber,
         int userId,
         string? targetBranch,
+        string? deliveryMode,
         RetryExecutionPlan? retryPlan,
         string? parentExecutionId,
         bool skipQuotaCharge,
@@ -590,6 +630,8 @@ public class AgentOrchestrationService(
                 cancellationToken);
 
             var repoFullName = project.Repo;
+            var normalizedDeliveryMode = AgentExecutionDeliveryModes.Normalize(deliveryMode);
+            var isTargetBranchDelivery = AgentExecutionDeliveryModes.IsTargetBranch(normalizedDeliveryMode);
             var effectiveTargetBranch = await ResolveExecutionTargetBranchAsync(
                 projectId,
                 targetBranch,
@@ -629,11 +671,17 @@ public class AgentOrchestrationService(
                 workItem.AssignmentMode ?? "auto");
 
             // 7. Resolve collision-safe branch and PR title values.
-            var plannedPrTitle = retryPlan?.ReusePullRequestTitle ?? BuildPullRequestTitle(workItem);
+            var plannedPrTitle = isTargetBranchDelivery
+                ? null
+                : retryPlan?.ReusePullRequestTitle ?? BuildPullRequestTitle(workItem);
             string branchName;
             string? reusePullRequestUrl = null;
             var reusePullRequestNumber = 0;
-            if (retryPlan?.ReuseExistingBranch == true)
+            if (isTargetBranchDelivery)
+            {
+                branchName = pullRequestTargetBranch;
+            }
+            else if (retryPlan?.ReuseExistingBranch == true)
             {
                 branchName = retryPlan.ReuseBranchName!;
                 if (retryPlan.ReuseExistingBranchAndPullRequest)
@@ -681,13 +729,14 @@ public class AgentOrchestrationService(
                 WorkItemId = workItemNumber,
                 WorkItemTitle = workItem.Title,
                 ExecutionMode = executionMode,
+                DeliveryMode = normalizedDeliveryMode,
                 Status = "running",
                 StartedAt = DateTime.UtcNow.ToString("o"),
                 StartedAtUtc = DateTime.UtcNow,
                 Progress = seededProgress,
                 BranchName = branchName,
                 PullRequestTitle = plannedPrTitle,
-                PullRequestUrl = reusePullRequestUrl,
+                PullRequestUrl = isTargetBranchDelivery ? null : reusePullRequestUrl,
                 CurrentPhase = carriedRoleCount > 0 ? "Resuming prior progress" : "Initializing",
                 ParentExecutionId = parentExecutionId,
                 UserId = userId.ToString(),
@@ -813,6 +862,7 @@ public class AgentOrchestrationService(
                 pipeline,
                 ResolveMaxConcurrentAgentsPerTask(tierPolicy.MaxConcurrentAgentsPerTask, workItem.AssignmentMode, workItem.AssignedAgentCount),
                 pullRequestTargetBranch,
+                normalizedDeliveryMode,
                 retryPlan,
                 reusePullRequestNumber,
                 !skipQuotaCharge,
@@ -1272,6 +1322,7 @@ public class AgentOrchestrationService(
                     workItem.AssignmentMode,
                     workItem.AssignedAgentCount),
                 pullRequestTargetBranch,
+                AgentExecutionDeliveryModes.Normalize(persistedExecution.DeliveryMode),
                 retryPlan,
                 retryPlan.ReusePullRequestNumber ?? 0,
                 string.IsNullOrWhiteSpace(persistedExecution.ParentExecutionId),
@@ -1520,6 +1571,7 @@ public class AgentOrchestrationService(
         }
         var shouldReuseExistingPullRequest =
             !string.IsNullOrWhiteSpace(reuseBranchName) &&
+            !AgentExecutionDeliveryModes.IsTargetBranch(priorExecution.DeliveryMode) &&
             !string.Equals(priorExecution.Status, "completed", StringComparison.OrdinalIgnoreCase);
 
         var retryPlan = new RetryExecutionPlan(
@@ -1544,7 +1596,10 @@ public class AgentOrchestrationService(
             projectId,
             priorExecution.WorkItemId,
             userId,
-            targetBranch: null,
+            targetBranch: AgentExecutionDeliveryModes.IsTargetBranch(priorExecution.DeliveryMode)
+                ? priorExecution.BranchName
+                : null,
+            deliveryMode: AgentExecutionDeliveryModes.Normalize(priorExecution.DeliveryMode),
             retryPlan,
             parentExecutionId: retryStartOptions.ParentExecutionId,
             skipQuotaCharge: retryStartOptions.SkipQuotaCharge,
@@ -1748,6 +1803,7 @@ public class AgentOrchestrationService(
         int userId, string selectedModelKey, AgentRole[][] pipeline,
         int maxConcurrentAgentsPerTask,
         string pullRequestTargetBranch,
+        string deliveryMode,
         RetryExecutionPlan? retryPlan,
         int existingPullRequestNumber,
         bool billableExecution,
@@ -1768,7 +1824,9 @@ public class AgentOrchestrationService(
         var scopedUsageLedgerService = scope.ServiceProvider.GetRequiredService<IUsageLedgerService>();
         var scopedEventPublisher = scope.ServiceProvider.GetRequiredService<IServerEventPublisher>();
         await using var dbQueue = new ExecutionDbRequestQueue(serviceScopeFactory);
-        var shouldCreatePullRequest = ShouldCreatePullRequestForExecution(parentExecutionId);
+        var normalizedDeliveryMode = AgentExecutionDeliveryModes.Normalize(deliveryMode);
+        var isTargetBranchDelivery = AgentExecutionDeliveryModes.IsTargetBranch(normalizedDeliveryMode);
+        var shouldCreatePullRequest = ShouldCreatePullRequestForExecution(parentExecutionId, normalizedDeliveryMode);
         var executionDepth = await ResolveExecutionDepthAsync(scopedDb, parentExecutionId, externalCancellation);
 
         IRepoSandbox? sandbox = null;
@@ -1799,6 +1857,32 @@ public class AgentOrchestrationService(
                 userId,
                 ServerEventTopics.ProjectsUpdated,
                 new { projectId });
+
+        async Task MarkTargetBranchDeliveryWorkItemsResolvedAsync(IEnumerable<Models.WorkItemDto> items)
+        {
+            foreach (var itemToUpdate in items
+                         .GroupBy(item => item.WorkItemNumber)
+                         .Select(group => group.First()))
+            {
+                await scopedWorkItemRepo.UpdateAsync(
+                    projectId,
+                    itemToUpdate.WorkItemNumber,
+                    new UpdateWorkItemRequest(
+                        Title: null,
+                        Description: null,
+                        Priority: null,
+                        Difficulty: null,
+                        State: ResolveTargetBranchDeliveryState(itemToUpdate.IsAI),
+                        AssignedTo: null,
+                        Tags: null,
+                        IsAI: null,
+                        ParentWorkItemNumber: null,
+                        LevelId: null,
+                        LinkedPullRequestUrl: string.Empty,
+                        LastObservedPullRequestState: string.Empty,
+                        LastObservedPullRequestUrl: string.Empty));
+            }
+        }
 
         async Task<AgentExecutionDto?> LoadExecutionSnapshotAsync()
         {
@@ -2491,7 +2575,9 @@ public class AgentOrchestrationService(
                 orderedChildren.Length,
                 shouldCreatePullRequest
                     ? "Publishing merged parent batch"
-                    : "Publishing merged sub-flow batch");
+                    : isTargetBranchDelivery
+                        ? "Publishing target branch update"
+                        : "Publishing merged sub-flow batch");
 
             await sandbox.PushBranchAsync(accessToken, externalCancellation);
 
@@ -2513,7 +2599,9 @@ public class AgentOrchestrationService(
             await CollectDirectChildrenAsync(projectId, parentWorkItem.ChildWorkItemNumbers, refreshedDirectChildren);
             if (!shouldCreatePullRequest)
             {
-                var parentState = ResolveParentFlowState(refreshedDirectChildren);
+                var parentState = isTargetBranchDelivery
+                    ? ResolveTargetBranchDeliveryState(parentWorkItem.IsAI)
+                    : ResolveParentFlowState(refreshedDirectChildren);
 
                 await WithDbLockAsync(queuedDb => FinalizeExecutionAsync(queuedDb, executionId, "completed"));
                 await PublishAgentsUpdatedAsync();
@@ -2522,20 +2610,27 @@ public class AgentOrchestrationService(
                     persistToRemote: true,
                     externalCancellation);
 
-                await scopedWorkItemRepo.UpdateAsync(
-                    projectId,
-                    parentWorkItem.WorkItemNumber,
-                    new UpdateWorkItemRequest(
-                        Title: null,
-                        Description: null,
-                        Priority: null,
-                        Difficulty: null,
-                        State: parentState,
-                        AssignedTo: null,
-                        Tags: null,
-                        IsAI: null,
-                        ParentWorkItemNumber: null,
-                        LevelId: null));
+                if (isTargetBranchDelivery)
+                {
+                    await MarkTargetBranchDeliveryWorkItemsResolvedAsync(childWorkItems.Append(parentWorkItem));
+                }
+                else
+                {
+                    await scopedWorkItemRepo.UpdateAsync(
+                        projectId,
+                        parentWorkItem.WorkItemNumber,
+                        new UpdateWorkItemRequest(
+                            Title: null,
+                            Description: null,
+                            Priority: null,
+                            Difficulty: null,
+                            State: parentState,
+                            AssignedTo: null,
+                            Tags: null,
+                            IsAI: null,
+                            ParentWorkItemNumber: null,
+                            LevelId: null));
+                }
 
                 await PublishWorkItemsUpdatedAsync();
                 await PublishProjectsUpdatedAsync();
@@ -2546,7 +2641,9 @@ public class AgentOrchestrationService(
                         projectId,
                         "System",
                         "success",
-                        $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s) and merging them into branch '{sandbox.BranchName}'.",
+                        isTargetBranchDelivery
+                            ? $"Dynamic iteration execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s) and pushing the result to target branch '{sandbox.BranchName}'."
+                            : $"Execution {executionId} completed after orchestrating {orderedChildren.Length} sub-flow(s) and merging them into branch '{sandbox.BranchName}'.",
                         executionId: executionId));
                 await PublishLogsUpdatedAsync();
                 await scopedNotificationService.PublishAsync(
@@ -2554,7 +2651,9 @@ public class AgentOrchestrationService(
                     projectId,
                     "execution_completed",
                     $"Execution completed for #{parentWorkItem.WorkItemNumber}",
-                    $"{orderedChildren.Length} sub-flow(s) completed.",
+                    isTargetBranchDelivery
+                        ? $"Changes pushed to {sandbox.BranchName}."
+                        : $"{orderedChildren.Length} sub-flow(s) completed.",
                     executionId);
                 return (true, string.Empty);
             }
@@ -3377,7 +3476,9 @@ public class AgentOrchestrationService(
                     draftPullRequestReady,
                     trustedPhaseBrief,
                     agentLabel,
-                    openSpecPromptContext);
+                    openSpecPromptContext,
+                    isTargetBranchDelivery,
+                    !shouldCreatePullRequest && !isTargetBranchDelivery);
                 if (!string.IsNullOrWhiteSpace(steeringBlock))
                     baseUserMessage += steeringBlock;
 
@@ -3863,20 +3964,39 @@ public class AgentOrchestrationService(
                     "completed",
                     persistToRemote: true,
                     externalCancellation);
+                if (isTargetBranchDelivery)
+                {
+                    await MarkTargetBranchDeliveryWorkItemsResolvedAsync(childWorkItems.Append(workItem));
+                    await PublishWorkItemsUpdatedAsync();
+                }
                 await WithDbLockAsync(async queuedDb =>
                     await WriteLogEntryAsync(
                         queuedDb,
                         projectId,
                         "System",
                         "success",
-                        $"Execution {executionId} completed successfully on branch '{sandbox.BranchName}' and is ready to merge into its parent batch.",
+                        isTargetBranchDelivery
+                            ? $"Dynamic iteration execution {executionId} completed successfully and pushed changes to target branch '{sandbox.BranchName}'."
+                            : $"Execution {executionId} completed successfully on branch '{sandbox.BranchName}' and is ready to merge into its parent batch.",
                         executionId: executionId));
                 await PublishLogsUpdatedAsync();
+                if (isTargetBranchDelivery)
+                {
+                    await scopedNotificationService.PublishAsync(
+                        userId,
+                        projectId,
+                        "execution_completed",
+                        $"Execution completed for #{workItem.WorkItemNumber}",
+                        $"Changes pushed to {sandbox.BranchName}.",
+                        executionId);
+                }
                 await PublishProjectsUpdatedAsync();
                 await TryPropagateSuccessfulRetryToParentAsync();
 
                 logger.LogInformation(
-                    "Execution {ExecutionId}: sub-flow pipeline completed successfully without opening a pull request",
+                    isTargetBranchDelivery
+                        ? "Execution {ExecutionId}: dynamic iteration pipeline completed successfully on target branch without opening a pull request"
+                        : "Execution {ExecutionId}: sub-flow pipeline completed successfully without opening a pull request",
                     executionId);
                 return;
             }
@@ -5324,6 +5444,9 @@ public class AgentOrchestrationService(
         return allInPrOrResolved ? "In-PR (AI)" : "In Progress (AI)";
     }
 
+    private static string ResolveTargetBranchDeliveryState(bool isAi)
+        => isAi ? "Resolved (AI)" : "Resolved";
+
     private static bool IsInPrOrBeyond(string? state)
         => !string.IsNullOrWhiteSpace(state) && InPrOrBeyondStates.Contains(state);
 
@@ -5557,7 +5680,9 @@ public class AgentOrchestrationService(
         bool draftPullRequestReady,
         string? trustedPhaseBrief = null,
         string? agentLabel = null,
-        string? openSpecContext = null)
+        string? openSpecContext = null,
+        bool targetBranchDelivery = false,
+        bool internalBranchDelivery = false)
         => AgentExecutionPromptBuilder.BuildPhaseMessage(
             role,
             workItemContext,
@@ -5565,7 +5690,9 @@ public class AgentOrchestrationService(
             draftPullRequestReady,
             trustedPhaseBrief,
             agentLabel,
-            openSpecContext);
+            openSpecContext,
+            targetBranchDelivery,
+            internalBranchDelivery);
 
     internal static IReadOnlyDictionary<AgentRole, string> BuildRetryCarryForwardOutputs(
         IReadOnlyList<AgentPhaseResult> priorPhaseResults)
@@ -7727,8 +7854,11 @@ public class AgentOrchestrationService(
     private static string BuildPullRequestCopyTitle(string baseTitle, int copyIndex)
         => copyIndex <= 1 ? $"{baseTitle} (copy)" : $"{baseTitle} (copy {copyIndex})";
 
-    internal static bool ShouldCreatePullRequestForExecution(string? parentExecutionId)
-        => string.IsNullOrWhiteSpace(parentExecutionId);
+    internal static bool ShouldCreatePullRequestForExecution(
+        string? parentExecutionId,
+        string? deliveryMode = AgentExecutionDeliveryModes.PullRequest)
+        => string.IsNullOrWhiteSpace(parentExecutionId) &&
+           !AgentExecutionDeliveryModes.IsTargetBranch(deliveryMode);
 
     private static int? TryParsePullRequestNumber(string? pullRequestUrl)
     {

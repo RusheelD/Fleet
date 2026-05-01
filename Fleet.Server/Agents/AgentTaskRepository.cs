@@ -68,7 +68,8 @@ public class AgentTaskRepository(FleetDbContext context) : IAgentTaskRepository
                 reviewSummary?.AutomaticLoopCount ?? 0,
                 reviewSummary?.LastRecommendation,
                 entity.ParentExecutionId,
-                subFlows);
+                subFlows,
+                AgentExecutionDeliveryModes.Normalize(entity.DeliveryMode));
         }
 
         return entities

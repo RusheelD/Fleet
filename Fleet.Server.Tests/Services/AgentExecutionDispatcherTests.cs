@@ -89,6 +89,56 @@ public class AgentExecutionDispatcherTests
     }
 
     [TestMethod]
+    public async Task DispatchWorkItemToTargetBranchAsync_UsesTargetBranchDeliveryMode()
+    {
+        await using var db = CreateDbContext();
+
+        var orchestrationService = new Mock<IAgentOrchestrationService>();
+        orchestrationService
+            .Setup(service => service.StartExecutionAsync(
+                "p1",
+                161,
+                7,
+                "release/v1",
+                AgentExecutionDeliveryModes.TargetBranch,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("exec-161");
+
+        var chatSessionRepository = new Mock<IChatSessionRepository>();
+        ChatSessionActivityDto? capturedActivity = null;
+        chatSessionRepository
+            .Setup(repository => repository.AppendSessionActivityAsync(
+                "p1",
+                "s1",
+                It.IsAny<ChatSessionActivityDto>(),
+                "7"))
+            .Callback<string, string, ChatSessionActivityDto, string>((_, _, activity, _) => capturedActivity = activity)
+            .Returns(Task.CompletedTask);
+
+        var sut = CreateDispatcher(db, orchestrationService.Object, chatSessionRepository.Object);
+
+        var executionId = await sut.DispatchWorkItemToTargetBranchAsync(
+            "p1",
+            161,
+            7,
+            requestedTargetBranch: " release/v1 ",
+            chatSessionId: "s1");
+
+        Assert.AreEqual("exec-161", executionId);
+        orchestrationService.Verify(
+            service => service.StartExecutionAsync(
+                "p1",
+                161,
+                7,
+                "release/v1",
+                AgentExecutionDeliveryModes.TargetBranch,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        Assert.IsNotNull(capturedActivity);
+        StringAssert.Contains(capturedActivity.Message, "output branch 'release/v1'");
+    }
+
+    [TestMethod]
     public async Task DispatchWorkItemAsync_IgnoresBranchPatternWhenProvidedAsRequestedTarget()
     {
         await using var db = CreateDbContext();

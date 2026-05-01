@@ -117,6 +117,9 @@ public class FleetDbContext(DbContextOptions<FleetDbContext> options) : DbContex
             builder.Property(e => e.ExecutionMode)
                 .HasDefaultValue(AgentExecutionModes.Standard);
 
+            builder.Property(e => e.DeliveryMode)
+                .HasDefaultValue(AgentExecutionDeliveryModes.PullRequest);
+
             builder.HasOne(e => e.ParentExecution)
                 .WithMany(e => e.ChildExecutions)
                 .HasForeignKey(e => e.ParentExecutionId)
